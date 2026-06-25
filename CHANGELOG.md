@@ -9,8 +9,12 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ## [Não lançado]
 
-### Próxima fiada
-- Fiada 12: converter Word para PDF (LibreOffice headless)
+### Próximas fiadas
+- Larguras de coluna conferidas com GGV03-004.docx ajustado manualmente ✅
+- PDF via LibreOffice headless
+- Salvar PFM na pasta OneDrive correta (GGV03/04 Aquisição)
+- Registrar "A PAGAR" no SQLite ao gerar PFM
+- Itens com qty × unit price vindos do Claude (atualmente calculado como total/qtde)
 
 ---
 
