@@ -10,7 +10,44 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próxima fiada
-- Fiada 11: converter Word para PDF (LibreOffice headless)
+- Fiada 12: converter Word para PDF (LibreOffice headless)
+
+---
+
+## [0.1.0] — 2026-06-25
+
+### Fiadas 11 + 12 — Layout PFM + Itens Estruturados + Data de Entrega
+
+**Layout PFM (fiada 11)**
+- Novo `gerar_pfm()` com python-docx tabelas: 5 tabelas (cabeçalho, fornecedor, empreendimento, materiais, prazo|dados)
+- Cabeçalho: DeltaD Engenharia à esq + Nº PFM e data por extenso à dir
+- FORNECEDOR: tabela label|valor — razão social, CNPJ, I.E., logradouro, bairro, e-mail, WhatsApp, PIX
+- MATERIAIS: 6 colunas (ID, DESCRIÇÃO, UND, QTDE, R$ UNIT, R$ TOTAL) + linha TOTAL DO PEDIDO
+- Parte inferior: PRAZO E CONDIÇÕES (esq) | DADOS PARA FATURA + DADOS PARA ENTREGA (dir)
+- DADOS PARA FATURA: DeltaD/Verschoor hardcoded (CNPJ, endereço, e-mail)
+- Validação de cidade: filtra dados inválidos do import (> 30 chars, '/', dígitos)
+- `_campo()` estendido: reconhece "não informado", "n/a", "—" como A PREENCHER
+- `_data_extenso()`: "Carambeí, 25 de junho de 2026."
+- Constante DELTAD com dados fixos da empresa
+
+**Itens estruturados (fiada 12)**
+- ITEM_RE parseia `N. Descrição (QTDE UND) — R$ TOTAL` com regex lazy (lida com parênteses no nome)
+- `_parse_brl()` / `_fmt_brl()`: conversão de valores BR
+- `_itens()` retorna dicts `{desc, und, qtde, unit, total, _total_v}` quando parseia com sucesso
+- R$ UNIT calculado automaticamente: total / qtde
+- Total do pedido calculado a partir dos itens; fallback para extração Claude se não parsear
+- Fix trigger `_itens()`: `re.match` em vez de `re.search` (evitava falso positivo em "Materiais" no nome do fornecedor)
+
+**Data de entrega (fiada 12)**
+- Novo passo no fluxo: após condição de pagamento, bot pergunta data de entrega
+- Entrada texto livre (ex: "07/08/2026", "7 dias úteis", "A combinar")
+- Coluna `data_entrega` adicionada à tabela documentos (ALTER TABLE seguro)
+- Aparece no documento após PIX, antes de DADOS PARA ENTREGA
+- PRAZO Claude mantido separado se diferente da data acordada
+
+**PROMPT atualizado**
+- Itens: formato explícito `N. Descrição (QTDE UND) — R$ TOTAL`
+- Campos separados: "Prazo de entrega" ≠ "Validade da proposta"
 
 ---
 
