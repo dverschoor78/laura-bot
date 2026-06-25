@@ -10,7 +10,17 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próxima fiada
-- Enviar arquivo para Claude e mostrar o que foi extraído
+- Pedir confirmação antes de gravar (botões ✅ / ❌)
+
+---
+
+## [0.0.5] — 2026-06-25
+
+### Fiada 5 — Claude lê o documento
+- Após salvar, envia o arquivo para Claude (haiku-4-5)
+- Extrai: tipo, fornecedor, CNPJ, itens, valor total, condição de pagamento, observações
+- Exibe resultado no Telegram antes de qualquer gravação
+- Funciona com foto (JPEG) e PDF
 
 ---
 
