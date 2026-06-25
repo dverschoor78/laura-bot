@@ -10,7 +10,23 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próxima fiada
-- Coletar dados obrigatórios para PFM quando orçamento é confirmado
+- Fiada 8: gerar documento Word do PFM com docxtpl (numeração GGV03-XXX)
+
+---
+
+## [0.0.7] — 2026-06-25
+
+### Fiada 7 — Coleta de dados do PFM
+- Ao confirmar orçamento, bot entra em fluxo de coleta de dados para PFM
+- Condição de pagamento via botões: 💰 PIX à vista | 💰 PIX 50%+50% | ✏️ Outro (digitado)
+- Endereço de entrega via botões: 🏗 Obra (GGV) | 🏠 Casa | 🏢 Escritório | 🌳 Chácara | ✏️ Outro
+- Endereços conhecidos hardcoded: GGV01/02/03 (Rua Índia), Casa, Escritório, Chácara
+- Opção "Outro" em qualquer campo ativa entrada de texto livre pelo usuário
+- Novo handler `receber_texto` processa respostas textuais em contexto (aguardando)
+- Estado temporário salvo em `ctx.user_data` (doc_id, ggv, aguardando, condicao_pgto)
+- Colunas `condicao_pgto` e `endereco_entrega` adicionadas ao banco com ALTER TABLE seguro
+- Status do documento muda para `pronto_pfm` ao completar a coleta
+- Exibe resumo final: GGV, pagamento e endereço confirmados
 
 ---
 
