@@ -10,7 +10,20 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próxima fiada
-- Pedir confirmação antes de gravar (botões ✅ / ❌)
+- Coletar dados obrigatórios para PFM quando orçamento é confirmado
+
+---
+
+## [0.0.6] — 2026-06-25
+
+### Fiada 6 — Classificação + GGV + Confirmação
+- Claude classifica o documento: orçamento, comprovante PIX, extrato MP ou não relacionado
+- Claude identifica o GGV pelo conteúdo (matrícula, endereço, número do pedido)
+- Botões: ✅ Confirmar | 🔄 Tipo | 🏗 GGV | ❌ Cancelar
+- Reclassificação manual de tipo e GGV via botões inline
+- Bloqueio: não permite confirmar sem GGV definido (alerta popup)
+- Rejeição de formatos não suportados (Excel, Word) com mensagem clara
+- tipo e ggv salvos no banco SQLite
 
 ---
 
