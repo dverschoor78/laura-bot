@@ -1,4 +1,5 @@
 import os
+import re
 import hashlib
 import sqlite3
 import base64
@@ -170,30 +171,35 @@ def atualizar(doc_id, **campos):
     with sqlite3.connect(DB_PATH) as con:
         con.execute(f"UPDATE documentos SET {sets} WHERE id=?", (*campos.values(), doc_id))
 
-def buscar_fornecedor(nome_claude):
-    """Fuzzy: primeiro token do nome contra nome e razao_social no BD."""
-    if not nome_claude or nome_claude == "A PREENCHER":
-        return None
-    tokens = nome_claude.strip().upper().split()
-    if not tokens:
-        return None
-    primeiro = tokens[0]
+_FORN_COLS = ["nome", "razao_social", "cnpj", "cpf", "chave_pix", "email",
+              "whatsapp", "logradouro", "numero", "bairro", "cidade", "uf", "cep"]
+
+def buscar_fornecedor(nome_claude, cnpj_claude=None):
+    """Busca no BD: 1º por CNPJ exato, 2º por prefixo do nome."""
     with sqlite3.connect(DB_PATH) as con:
-        row = con.execute(
-            """SELECT nome, razao_social, cnpj, cpf, chave_pix, email, whatsapp,
-                      logradouro, numero, bairro, cidade, uf, cep
-               FROM fornecedores
-               WHERE UPPER(nome) LIKE ? OR UPPER(razao_social) LIKE ?
-               LIMIT 1""",
-            (f"%{primeiro}%", f"%{primeiro}%")
-        ).fetchone()
-    if not row:
-        return None
-    return dict(zip(
-        ["nome", "razao_social", "cnpj", "cpf", "chave_pix", "email", "whatsapp",
-         "logradouro", "numero", "bairro", "cidade", "uf", "cep"],
-        row
-    ))
+        sel = f"SELECT {', '.join(_FORN_COLS)} FROM fornecedores"
+
+        # 1. CNPJ — mais confiável
+        if cnpj_claude and cnpj_claude != "A PREENCHER":
+            cnpj_digits = re.sub(r"\D", "", cnpj_claude)
+            row = con.execute(
+                f"{sel} WHERE REPLACE(REPLACE(REPLACE(cnpj,'.','' ),'/',''),'-','') = ? LIMIT 1",
+                (cnpj_digits,)
+            ).fetchone()
+            if row:
+                return dict(zip(_FORN_COLS, row))
+
+        # 2. Prefixo do primeiro token do nome (evita falsos positivos de substring)
+        if nome_claude and nome_claude != "A PREENCHER":
+            primeiro = nome_claude.strip().upper().split()[0]
+            row = con.execute(
+                f"{sel} WHERE UPPER(nome) LIKE ? OR UPPER(razao_social) LIKE ? LIMIT 1",
+                (f"{primeiro}%", f"{primeiro}%")
+            ).fetchone()
+            if row:
+                return dict(zip(_FORN_COLS, row))
+
+    return None
 
 # ── PFM ───────────────────────────────────────────────────────────────────
 
@@ -254,8 +260,9 @@ def gerar_pfm(doc_id):
         ).fetchone()
     ggv, dados, condicao, endereco = row
 
-    nome_claude = _campo(dados, "Fornecedor")
-    forn_db     = buscar_fornecedor(nome_claude)
+    nome_claude  = _campo(dados, "Fornecedor")
+    cnpj_claude  = _campo(dados, "CNPJ/CPF")
+    forn_db      = buscar_fornecedor(nome_claude, cnpj_claude)
 
     if forn_db:
         fornecedor   = forn_db.get("razao_social") or forn_db.get("nome") or nome_claude
