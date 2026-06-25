@@ -1,4 +1,5 @@
 import os
+import hashlib
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
@@ -10,6 +11,8 @@ TOKEN    = os.environ["TELEGRAM_BOT_TOKEN"]
 DONO_ID  = int(os.environ["TELEGRAM_USER_ID"])
 UPLOADS  = Path("data/uploads")
 UPLOADS.mkdir(parents=True, exist_ok=True)
+
+hashes_vistos = set()  # memória simples enquanto o bot estiver rodando
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != DONO_ID:
@@ -30,8 +33,16 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Recebi. Ainda não sei o que fazer com isso.")
         return
 
-    await tg_file.download_to_drive(UPLOADS / nome)
-    await update.message.reply_text(f"Arquivo salvo: {nome}")
+    conteudo = await tg_file.download_as_bytearray()
+    hash_arquivo = hashlib.sha256(conteudo).hexdigest()
+
+    if hash_arquivo in hashes_vistos:
+        await update.message.reply_text(f"⚠️ Este arquivo já foi recebido antes. Ignorando.")
+        return
+
+    hashes_vistos.add(hash_arquivo)
+    (UPLOADS / nome).write_bytes(conteudo)
+    await update.message.reply_text(f"✅ Arquivo salvo: {nome}\nHash: {hash_arquivo[:16]}...")
 
 app = Application.builder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))

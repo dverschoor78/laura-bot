@@ -10,7 +10,17 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próxima fiada
-- Calcular hash SHA256 do arquivo (detectar duplicatas)
+- Registrar arquivos no SQLite (duplicatas persistem entre reinicializações)
+
+---
+
+## [0.0.3] — 2026-06-25
+
+### Fiada 3 — hash SHA256
+- Calcula impressão digital do arquivo antes de salvar
+- Detecta duplicatas em memória durante a sessão
+- Arquivo duplicado: avisa e ignora em vez de salvar duas vezes
+- Exibe os primeiros 16 caracteres do hash na confirmação
 
 ---
 
