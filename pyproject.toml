@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "laura-bot"
+version = "0.1.0"
+description = "Bot Telegram para gestão de compras e pagamentos GGV"
+readme = "README.md"
+requires-python = ">=3.12"
+
+dependencies = [
+    # Bot Telegram — framework principal
+    "python-telegram-bot==22.*",
+
+    # Claude API — extração inteligente de documentos
+    "anthropic>=0.111.0",
+
+    # Validação de dados extraídos
+    "pydantic>=2.0",
+
+    # Variáveis de ambiente
+    "python-dotenv>=1.0",
+
+    # Logs simples e poderosos
+    "loguru>=0.7",
+
+    # Geração de documentos Word a partir de templates
+    "docxtpl>=0.16",
+
+    # Manipulação de Excel (.xlsx)
+    "openpyxl>=3.1",
+
+    # Extração de texto de PDFs com texto embutido
+    "pdfplumber>=0.10",
+
+    # Manipulação de imagens (pré-processamento)
+    "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
