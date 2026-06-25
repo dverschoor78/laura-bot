@@ -407,7 +407,7 @@ def gerar_pfm(doc_id):
     # ── CABEÇALHO ────────────────────────────────────────────────────────────
     tbl_h = doc.add_table(rows=1, cols=2)
     tbl_h.style = "Table Grid"
-    _set_col_widths(tbl_h, [13.19, 4.75])
+    _set_col_widths(tbl_h, [11, 6])
     for c in tbl_h.rows[0].cells:
         _cell_bg(c, "D9E2F3")
 
@@ -429,7 +429,7 @@ def gerar_pfm(doc_id):
     doc.add_paragraph()
     tbl_f = doc.add_table(rows=0, cols=2)
     tbl_f.style = "Table Grid"
-    _set_col_widths(tbl_f, [3.44, 14.50])
+    _set_col_widths(tbl_f, [5, 12])
     _secao_row(tbl_f, "FORNECEDOR", 2)
     _kv_row(tbl_f, "RAZÃO SOCIAL / NOME", fornecedor)
     _kv_row(tbl_f, "CNPJ/CPF", cnpj)
@@ -452,7 +452,7 @@ def gerar_pfm(doc_id):
     doc.add_paragraph()
     tbl_e = doc.add_table(rows=0, cols=2)
     tbl_e.style = "Table Grid"
-    _set_col_widths(tbl_e, [3.44, 14.50])
+    _set_col_widths(tbl_e, [5, 12])
     _secao_row(tbl_e, "EMPREENDIMENTO", 2)
     _kv_row(tbl_e, ggv, GGV_DESC.get(ggv, ggv))
 
@@ -460,7 +460,7 @@ def gerar_pfm(doc_id):
     doc.add_paragraph()
     tbl_m = doc.add_table(rows=0, cols=6)
     tbl_m.style = "Table Grid"
-    _set_col_widths(tbl_m, [1.19, 10.00, 1.50, 1.50, 1.50, 2.31])
+    _set_col_widths(tbl_m, [1.2, 7.3, 1.5, 1.5, 2.75, 2.75])
     _secao_row(tbl_m, "MATERIAIS", 6)
 
     # Cabeçalho de colunas
@@ -511,7 +511,7 @@ def gerar_pfm(doc_id):
     doc.add_paragraph()
     tbl_b = doc.add_table(rows=1, cols=2)
     tbl_b.style = "Table Grid"
-    _set_col_widths(tbl_b, [8.50, 9.47])
+    _set_col_widths(tbl_b, [8.5, 8.5])
 
     # — Esquerda: Prazo e Condições —
     c_prazo = tbl_b.rows[0].cells[0]
