@@ -94,9 +94,12 @@ Se [extrato_mp]:
 Se [nao_relacionado]:
 - Descreva brevemente o que é o documento.
 
-Formate sua resposta assim:
-TIPO:[orcamento|comprovante_pix|extrato_mp|nao_relacionado]
-GGV:[GGV00|GGV01|GGV02|GGV03|nao_identificado]
+Responda EXATAMENTE neste formato (sem colchetes, sem barra, escolha um valor de cada):
+TIPO:orcamento
+GGV:GGV03
+
+Valores aceitos para TIPO: orcamento, comprovante_pix, extrato_mp, nao_relacionado
+Valores aceitos para GGV: GGV00, GGV01, GGV02, GGV03, nao_identificado
 
 [dados extraídos]
 """
@@ -126,6 +129,29 @@ def init_db():
                 con.execute(f"ALTER TABLE documentos ADD COLUMN {col}")
             except Exception:
                 pass
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS fornecedores (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome         TEXT NOT NULL,
+                razao_social TEXT,
+                cnpj         TEXT,
+                cpf          TEXT,
+                chave_pix    TEXT,
+                email        TEXT,
+                whatsapp     TEXT,
+                contato      TEXT,
+                logradouro   TEXT,
+                numero       TEXT,
+                bairro       TEXT,
+                cidade       TEXT,
+                uf           TEXT,
+                cep          TEXT,
+                origem       TEXT,
+                criado_em    TEXT DEFAULT (datetime('now','localtime')),
+                UNIQUE(cnpj),
+                UNIQUE(cpf)
+            )
+        """)
 
 def ja_existe(hash_arquivo):
     with sqlite3.connect(DB_PATH) as con:
@@ -143,6 +169,31 @@ def atualizar(doc_id, **campos):
     sets = ", ".join(f"{k}=?" for k in campos)
     with sqlite3.connect(DB_PATH) as con:
         con.execute(f"UPDATE documentos SET {sets} WHERE id=?", (*campos.values(), doc_id))
+
+def buscar_fornecedor(nome_claude):
+    """Fuzzy: primeiro token do nome contra nome e razao_social no BD."""
+    if not nome_claude or nome_claude == "A PREENCHER":
+        return None
+    tokens = nome_claude.strip().upper().split()
+    if not tokens:
+        return None
+    primeiro = tokens[0]
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute(
+            """SELECT nome, razao_social, cnpj, cpf, chave_pix, email, whatsapp,
+                      logradouro, numero, bairro, cidade, uf, cep
+               FROM fornecedores
+               WHERE UPPER(nome) LIKE ? OR UPPER(razao_social) LIKE ?
+               LIMIT 1""",
+            (f"%{primeiro}%", f"%{primeiro}%")
+        ).fetchone()
+    if not row:
+        return None
+    return dict(zip(
+        ["nome", "razao_social", "cnpj", "cpf", "chave_pix", "email", "whatsapp",
+         "logradouro", "numero", "bairro", "cidade", "uf", "cep"],
+        row
+    ))
 
 # ── PFM ───────────────────────────────────────────────────────────────────
 
@@ -203,9 +254,24 @@ def gerar_pfm(doc_id):
         ).fetchone()
     ggv, dados, condicao, endereco = row
 
-    fornecedor = _campo(dados, "Fornecedor")
-    cnpj       = _campo(dados, "CNPJ/CPF")
-    pix        = _campo(dados, "Chave PIX")
+    nome_claude = _campo(dados, "Fornecedor")
+    forn_db     = buscar_fornecedor(nome_claude)
+
+    if forn_db:
+        fornecedor   = forn_db.get("razao_social") or forn_db.get("nome") or nome_claude
+        cnpj         = forn_db.get("cnpj") or forn_db.get("cpf") or _campo(dados, "CNPJ/CPF")
+        pix          = forn_db.get("chave_pix") or _campo(dados, "Chave PIX")
+        forn_end     = ", ".join(filter(None, [
+            forn_db.get("logradouro"), forn_db.get("numero"),
+            forn_db.get("bairro"), forn_db.get("cidade"),
+            forn_db.get("uf"), forn_db.get("cep"),
+        ]))
+    else:
+        fornecedor   = nome_claude
+        cnpj         = _campo(dados, "CNPJ/CPF")
+        pix          = _campo(dados, "Chave PIX")
+        forn_end     = ""
+
     valor      = _campo(dados, "Valor total")
     prazo      = _campo(dados, "Data/prazo de entrega")
     itens      = _itens(dados)
@@ -242,6 +308,8 @@ def gerar_pfm(doc_id):
     _secao(doc, "FORNECEDOR")
     doc.add_paragraph(f"Empresa / Responsável:  {fornecedor}")
     doc.add_paragraph(f"CNPJ / CPF:  {cnpj}")
+    if forn_end:
+        doc.add_paragraph(f"Endereço:  {forn_end}")
     doc.add_paragraph(f"Chave PIX:  {pix}")
 
     doc.add_paragraph()
@@ -304,9 +372,9 @@ def parse_resposta(texto):
     corpo = []
     for linha in texto.strip().splitlines():
         if linha.startswith("TIPO:"):
-            tipo = linha.split(":", 1)[1].strip()
+            tipo = linha.split(":", 1)[1].strip().strip("[]").split("|")[0].strip()
         elif linha.startswith("GGV:"):
-            ggv = linha.split(":", 1)[1].strip()
+            ggv = linha.split(":", 1)[1].strip().strip("[]").split("|")[0].strip()
         else:
             corpo.append(linha)
     return tipo, ggv, "\n".join(corpo).strip()

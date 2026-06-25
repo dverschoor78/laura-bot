@@ -10,7 +10,31 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próxima fiada
-- Fiada 9: converter Word para PDF (LibreOffice headless)
+- Fiada 11: converter Word para PDF (LibreOffice headless)
+
+---
+
+## [0.0.9] — 2026-06-25
+
+### Fiada 9 (import) + Bug fix + Fiada 10 (BD fornecedores no bot)
+
+**Bug corrigido — tipo com colchetes (regressão v0.0.8)**
+- Claude retornava `TIPO:[orcamento]` (com colchetes literais)
+- `parse_resposta` preservava os colchetes → `if tipo == "orcamento"` falhava
+- Bot caía no else e imprimia "Confirmado" sem entrar no fluxo de PFM
+- Corrigido: `.strip("[]").split("|")[0]` em tipo e ggv no parser
+- PROMPT reformatado para evitar ambiguidade dos colchetes
+
+**Fiada 9 — import_fornecedores.py**
+- Script avulso que varreu 69 PFMs do GGV01
+- Extraiu 28 fornecedores únicos via lxml XML (campos em text boxes)
+- Tabela `fornecedores` criada em `data/laura.db`
+
+**Fiada 10 — BD fornecedores integrado ao bot**
+- `init_db()` cria tabela `fornecedores` (deploy limpo não precisa mais do script)
+- `buscar_fornecedor(nome)`: fuzzy search por primeiro token, case-insensitive
+- `gerar_pfm()` usa dados do BD (razão social, CNPJ, PIX, endereço) quando encontra o fornecedor
+- Fallback para dados extraídos pelo Claude se fornecedor não estiver no BD
 
 ---
 
