@@ -8,6 +8,9 @@ from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from docx import Document
+from docx.shared import Pt, Cm
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 load_dotenv()
 TOKEN       = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -26,6 +29,13 @@ TIPOS = {
     "nao_relacionado":  ("🗑", "Não é da obra"),
 }
 GGVS = ["GGV00", "GGV01", "GGV02", "GGV03"]
+
+GGV_DESC = {
+    "GGV01": "GGV01 — Matrícula 39.333, Quadra 05 Lote 02, JD das Nações, Carambeí-PR",
+    "GGV02": "GGV02 — Matrícula 39.337, Quadra 05 Lote 06, JD das Nações, Carambeí-PR",
+    "GGV03": "GGV03 — Matrícula 39.339, Quadra 05 Lote 08, JD das Nações, Carambeí-PR",
+    "GGV00": "GGV00 — Despesas Gerais",
+}
 
 CONDICOES = {
     "pix_avista":  "PIX à vista",
@@ -97,22 +107,23 @@ def init_db():
     with sqlite3.connect(DB_PATH) as con:
         con.execute("""
             CREATE TABLE IF NOT EXISTS documentos (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                nome            TEXT,
-                caminho         TEXT,
-                hash            TEXT UNIQUE,
-                tipo            TEXT DEFAULT 'desconhecido',
-                ggv             TEXT DEFAULT 'nao_identificado',
-                dados_claude    TEXT,
-                condicao_pgto   TEXT,
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome             TEXT,
+                caminho          TEXT,
+                hash             TEXT UNIQUE,
+                tipo             TEXT DEFAULT 'desconhecido',
+                ggv              TEXT DEFAULT 'nao_identificado',
+                dados_claude     TEXT,
+                condicao_pgto    TEXT,
                 endereco_entrega TEXT,
-                status          TEXT DEFAULT 'recebido',
-                criado_em       TEXT DEFAULT (datetime('now','localtime'))
+                pfm_numero       INTEGER,
+                status           TEXT DEFAULT 'recebido',
+                criado_em        TEXT DEFAULT (datetime('now','localtime'))
             )
         """)
-        for col in ["tipo", "ggv", "dados_claude", "condicao_pgto", "endereco_entrega"]:
+        for col in ["tipo", "ggv", "dados_claude", "condicao_pgto", "endereco_entrega", "pfm_numero INTEGER"]:
             try:
-                con.execute(f"ALTER TABLE documentos ADD COLUMN {col} TEXT")
+                con.execute(f"ALTER TABLE documentos ADD COLUMN {col}")
             except Exception:
                 pass
 
@@ -133,7 +144,160 @@ def atualizar(doc_id, **campos):
     with sqlite3.connect(DB_PATH) as con:
         con.execute(f"UPDATE documentos SET {sets} WHERE id=?", (*campos.values(), doc_id))
 
-# ── Helpers de UI ──────────────────────────────────────────────────────────
+# ── PFM ───────────────────────────────────────────────────────────────────
+
+def _campo(dados, nome):
+    nao_encontrado = {"não identificado", "nao identificado",
+                      "não especificado", "nao especificado", ""}
+    for linha in dados.splitlines():
+        stripped = linha.strip().lstrip("- ")
+        if stripped.lower().startswith(nome.lower() + ":"):
+            val = stripped.split(":", 1)[1].strip()
+            if val.lower() not in nao_encontrado:
+                return val
+    return "A PREENCHER"
+
+def _itens(dados):
+    resultado, capturando = [], False
+    for linha in dados.splitlines():
+        if "Itens principais" in linha:
+            capturando = True
+            continue
+        if capturando:
+            stripped = linha.strip()
+            if not stripped or stripped.lower().startswith("valor total"):
+                break
+            resultado.append(stripped)
+    return resultado
+
+def _obs(dados):
+    resultado, capturando = [], False
+    for linha in dados.splitlines():
+        stripped = linha.strip()
+        if stripped.lower().startswith("observaç"):
+            capturando = True
+            continue
+        if capturando and stripped:
+            resultado.append(stripped.lstrip("- "))
+    return "\n".join(resultado)
+
+def _secao(doc, titulo):
+    p = doc.add_paragraph()
+    r = p.add_run(titulo)
+    r.bold = True
+    r.font.size = Pt(11)
+
+def proximo_pfm_numero(ggv):
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT MAX(pfm_numero) FROM documentos WHERE ggv=? AND pfm_numero IS NOT NULL",
+            (ggv,)
+        ).fetchone()
+    return (row[0] or 0) + 1
+
+def gerar_pfm(doc_id):
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT ggv, dados_claude, condicao_pgto, endereco_entrega FROM documentos WHERE id=?",
+            (doc_id,)
+        ).fetchone()
+    ggv, dados, condicao, endereco = row
+
+    fornecedor = _campo(dados, "Fornecedor")
+    cnpj       = _campo(dados, "CNPJ/CPF")
+    pix        = _campo(dados, "Chave PIX")
+    valor      = _campo(dados, "Valor total")
+    prazo      = _campo(dados, "Data/prazo de entrega")
+    itens      = _itens(dados)
+    obs        = _obs(dados)
+
+    pfm_num    = proximo_pfm_numero(ggv)
+    pfm_codigo = f"{ggv}-{pfm_num:03d}"
+    atualizar(doc_id, pfm_numero=pfm_num, status="pfm_gerado")
+
+    doc = Document()
+    for section in doc.sections:
+        section.top_margin    = Cm(2)
+        section.bottom_margin = Cm(2)
+        section.left_margin   = Cm(2.5)
+        section.right_margin  = Cm(2.5)
+
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run("DELTAD ENGENHARIA\nPEDIDO DE FORNECIMENTO DE MATERIAL")
+    r.bold = True
+    r.font.size = Pt(14)
+
+    doc.add_paragraph()
+
+    p = doc.add_paragraph()
+    p.add_run("Nº  ")
+    r = p.add_run(pfm_codigo)
+    r.bold = True
+    r.font.size = Pt(13)
+    p.add_run(f"          Data: {datetime.now().strftime('%d/%m/%Y')}")
+
+    doc.add_paragraph()
+
+    _secao(doc, "FORNECEDOR")
+    doc.add_paragraph(f"Empresa / Responsável:  {fornecedor}")
+    doc.add_paragraph(f"CNPJ / CPF:  {cnpj}")
+    doc.add_paragraph(f"Chave PIX:  {pix}")
+
+    doc.add_paragraph()
+
+    _secao(doc, "EMPREENDIMENTO")
+    doc.add_paragraph(GGV_DESC.get(ggv, ggv))
+
+    doc.add_paragraph()
+
+    _secao(doc, "ITENS")
+    if itens:
+        for item in itens:
+            doc.add_paragraph(item)
+    else:
+        doc.add_paragraph(dados)
+
+    doc.add_paragraph()
+
+    p = doc.add_paragraph()
+    r = p.add_run(f"VALOR TOTAL:  {valor}")
+    r.bold = True
+    r.font.size = Pt(12)
+
+    doc.add_paragraph()
+
+    _secao(doc, "CONDIÇÃO DE PAGAMENTO")
+    doc.add_paragraph(condicao or "A PREENCHER")
+
+    doc.add_paragraph()
+
+    _secao(doc, "PRAZO / DATA DE ENTREGA")
+    doc.add_paragraph(prazo)
+
+    doc.add_paragraph()
+
+    _secao(doc, "ENDEREÇO DE ENTREGA")
+    doc.add_paragraph(endereco or "A PREENCHER")
+
+    if obs:
+        doc.add_paragraph()
+        _secao(doc, "OBSERVAÇÕES")
+        doc.add_paragraph(obs)
+
+    doc.add_paragraph()
+    doc.add_paragraph()
+
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.add_run("_" * 40 + "\nDennis Verschoor\nDeltaD Engenharia\nCarambeí-PR")
+
+    Path("data/pfms").mkdir(parents=True, exist_ok=True)
+    caminho = Path("data/pfms") / f"{pfm_codigo}.docx"
+    doc.save(caminho)
+    return caminho, pfm_codigo
+
+# ── UI helpers ─────────────────────────────────────────────────────────────
 
 def parse_resposta(texto):
     tipo, ggv = "nao_relacionado", "nao_identificado"
@@ -147,38 +311,43 @@ def parse_resposta(texto):
             corpo.append(linha)
     return tipo, ggv, "\n".join(corpo).strip()
 
-def montar_teclado_confirmacao(doc_id, tipo, ggv):
+def teclado_confirmacao(doc_id, tipo, ggv):
     emoji_tipo = TIPOS.get(tipo, ("📄", tipo))[0]
-    label_ggv = ggv if ggv != "nao_identificado" else "❓GGV"
+    label_ggv  = ggv if ggv != "nao_identificado" else "❓GGV"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ Confirmar",         callback_data=f"ok:{doc_id}:{tipo}:{ggv}"),
+            InlineKeyboardButton("✅ Confirmar",          callback_data=f"ok:{doc_id}:{tipo}:{ggv}"),
             InlineKeyboardButton(f"🔄 {emoji_tipo} Tipo", callback_data=f"sel_tipo:{doc_id}:{tipo}:{ggv}"),
         ],
         [
-            InlineKeyboardButton(f"🏗 {label_ggv}",      callback_data=f"sel_ggv:{doc_id}:{tipo}:{ggv}"),
-            InlineKeyboardButton("❌ Cancelar",           callback_data=f"cancelar:{doc_id}"),
+            InlineKeyboardButton(f"🏗 {label_ggv}",       callback_data=f"sel_ggv:{doc_id}:{tipo}:{ggv}"),
+            InlineKeyboardButton("❌ Cancelar",            callback_data=f"cancelar:{doc_id}"),
         ]
     ])
 
-def montar_teclado_condicao(doc_id, ggv):
+def teclado_condicao(doc_id, ggv):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💰 PIX à vista",                callback_data=f"pgto:{doc_id}:{ggv}:pix_avista")],
+        [InlineKeyboardButton("💰 PIX à vista",                   callback_data=f"pgto:{doc_id}:{ggv}:pix_avista")],
         [InlineKeyboardButton("💰 PIX 50% entrada + 50% entrega", callback_data=f"pgto:{doc_id}:{ggv}:pix_50_50")],
-        [InlineKeyboardButton("✏️ Outro (digitar)",             callback_data=f"pgto:{doc_id}:{ggv}:outro")],
+        [InlineKeyboardButton("✏️ Outro (digitar)",                callback_data=f"pgto:{doc_id}:{ggv}:outro")],
     ])
 
-def montar_teclado_endereco(doc_id, ggv, pgto):
+def teclado_endereco(doc_id, ggv, pgto):
     chave_obra = f"obra_{ggv}"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"🏗 Obra ({ggv})", callback_data=f"end:{doc_id}:{ggv}:{pgto}:{chave_obra}")],
-        [InlineKeyboardButton("🏠 Casa",          callback_data=f"end:{doc_id}:{ggv}:{pgto}:casa")],
-        [InlineKeyboardButton("🏢 Escritório",    callback_data=f"end:{doc_id}:{ggv}:{pgto}:escritorio")],
-        [InlineKeyboardButton("🌳 Chácara",       callback_data=f"end:{doc_id}:{ggv}:{pgto}:chacara")],
-        [InlineKeyboardButton("✏️ Outro (digitar)", callback_data=f"end:{doc_id}:{ggv}:{pgto}:outro")],
+        [InlineKeyboardButton(f"🏗 Obra ({ggv})",    callback_data=f"end:{doc_id}:{ggv}:{pgto}:{chave_obra}")],
+        [InlineKeyboardButton("🏠 Casa",             callback_data=f"end:{doc_id}:{ggv}:{pgto}:casa")],
+        [InlineKeyboardButton("🏢 Escritório",       callback_data=f"end:{doc_id}:{ggv}:{pgto}:escritorio")],
+        [InlineKeyboardButton("🌳 Chácara",          callback_data=f"end:{doc_id}:{ggv}:{pgto}:chacara")],
+        [InlineKeyboardButton("✏️ Outro (digitar)",  callback_data=f"end:{doc_id}:{ggv}:{pgto}:outro")],
     ])
 
-# ── Handlers principais ────────────────────────────────────────────────────
+def teclado_pfm(doc_id, ggv):
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("📄 Gerar PFM", callback_data=f"pfm:{doc_id}:{ggv}")
+    ]])
+
+# ── Handlers ───────────────────────────────────────────────────────────────
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != DONO_ID:
@@ -214,10 +383,9 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ACEITOS = {"image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf"}
     if mime not in ACEITOS:
         await update.message.reply_text(
-            f"⚠️ Formato *{mime}* ainda não é suportado.\n\n"
+            f"⚠️ Formato não suportado: {mime}\n\n"
             "Aceito hoje:\n• 📷 Foto (JPEG, PNG, GIF, WEBP)\n• 📄 PDF\n\n"
-            "CSV e Excel chegam nas próximas versões.",
-            parse_mode="Markdown"
+            "CSV e Excel chegam nas próximas versões."
         )
         return
 
@@ -247,9 +415,8 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     label_ggv = ggv if ggv != "nao_identificado" else "❓ GGV não identificado"
 
     await update.message.reply_text(
-        f"{emoji} *{label_tipo}* | 🏗 *{label_ggv}*\n\n{corpo}\n\n_Confirmar ou ajustar?_",
-        parse_mode="Markdown",
-        reply_markup=montar_teclado_confirmacao(doc_id, tipo, ggv)
+        f"{emoji} {label_tipo} | 🏗 {label_ggv}\n\n{corpo}\n\nConfirmar ou ajustar?",
+        reply_markup=teclado_confirmacao(doc_id, tipo, ggv)
     )
 
 async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -269,118 +436,127 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.user_data["condicao_pgto"] = texto
         ctx.user_data["aguardando"] = None
         await update.message.reply_text(
-            f"✅ Condição: _{texto}_\n\nAgora, qual o endereço de entrega?",
-            parse_mode="Markdown",
-            reply_markup=montar_teclado_endereco(doc_id, ggv, "custom")
+            f"✅ Condição: {texto}\n\nQual o endereço de entrega?",
+            reply_markup=teclado_endereco(doc_id, ggv, "custom")
         )
 
     elif aguardando == "endereco_entrega":
+        condicao = ctx.user_data.get("condicao_pgto", "")
         atualizar(doc_id, endereco_entrega=texto, status="pronto_pfm")
         ctx.user_data["aguardando"] = None
-        condicao = ctx.user_data.get("condicao_pgto", "")
         await update.message.reply_text(
-            f"✅ Endereço: _{texto}_\n\n"
-            f"*Condição:* {condicao}\n"
-            f"*Entrega:* {texto}\n\n"
-            "Pronto para gerar o PFM. _(Fiada 8)_",
-            parse_mode="Markdown"
+            f"✅ Dados coletados\n\n"
+            f"🏗 {ggv}\n💰 {condicao}\n📍 {texto}",
+            reply_markup=teclado_pfm(doc_id, ggv)
         )
-
-# ── Callbacks dos botões ───────────────────────────────────────────────────
 
 async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     partes = query.data.split(":")
-    acao = partes[0]
+    acao   = partes[0]
 
-    if acao == "ok":
-        _, doc_id, tipo, ggv = partes
-        if ggv == "nao_identificado":
-            await query.answer("⚠️ Selecione o GGV antes de confirmar.", show_alert=True)
-            return
-        if tipo == "orcamento":
-            ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": None})
+    # GGV blocking — alert antes de responder, depois retorna
+    if acao == "ok" and partes[3] == "nao_identificado":
+        await query.answer("⚠️ Selecione o GGV antes de confirmar.", show_alert=True)
+        return
+
+    await query.answer()
+
+    try:
+        if acao == "ok":
+            _, doc_id, tipo, ggv = partes
+            if tipo == "orcamento":
+                ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": None})
+                await query.edit_message_text(
+                    f"📋 Orçamento | 🏗 {ggv}\n\nQual a condição de pagamento?",
+                    reply_markup=teclado_condicao(doc_id, ggv)
+                )
+            else:
+                atualizar(int(doc_id), status="confirmado")
+                emoji, label = TIPOS.get(tipo, ("📄", tipo))
+                await query.edit_message_text(f"✅ Confirmado: {emoji} {label} | 🏗 {ggv}")
+
+        elif acao == "cancelar":
+            atualizar(int(partes[1]), status="cancelado")
+            await query.edit_message_text("❌ Cancelado.")
+
+        elif acao == "sel_tipo":
+            _, doc_id, tipo, ggv = partes
+            botoes = [[InlineKeyboardButton(f"{e} {l}", callback_data=f"set_tipo:{doc_id}:{t}:{ggv}")]
+                      for t, (e, l) in TIPOS.items()]
+            await query.edit_message_reply_markup(InlineKeyboardMarkup(botoes))
+
+        elif acao == "set_tipo":
+            _, doc_id, novo_tipo, ggv = partes
+            atualizar(int(doc_id), tipo=novo_tipo)
+            emoji, label = TIPOS.get(novo_tipo, ("📄", novo_tipo))
+            label_ggv = ggv if ggv != "nao_identificado" else "❓ GGV não identificado"
             await query.edit_message_text(
-                f"📋 *Orçamento* | 🏗 *{ggv}*\n\nQual a condição de pagamento?",
-                parse_mode="Markdown",
-                reply_markup=montar_teclado_condicao(doc_id, ggv)
+                f"{emoji} {label} | 🏗 {label_ggv}\n\nTipo corrigido. Confirmar?",
+                reply_markup=teclado_confirmacao(int(doc_id), novo_tipo, ggv)
             )
-        else:
-            atualizar(int(doc_id), status="confirmado")
+
+        elif acao == "sel_ggv":
+            _, doc_id, tipo, ggv = partes
+            botoes = [[InlineKeyboardButton(g, callback_data=f"set_ggv:{doc_id}:{tipo}:{g}")] for g in GGVS]
+            botoes.append([InlineKeyboardButton("❓ Não identificado",
+                                                callback_data=f"set_ggv:{doc_id}:{tipo}:nao_identificado")])
+            await query.edit_message_reply_markup(InlineKeyboardMarkup(botoes))
+
+        elif acao == "set_ggv":
+            _, doc_id, tipo, novo_ggv = partes
+            atualizar(int(doc_id), ggv=novo_ggv)
             emoji, label = TIPOS.get(tipo, ("📄", tipo))
-            await query.edit_message_text(f"✅ Confirmado: {emoji} {label} | 🏗 {ggv}")
+            label_ggv = novo_ggv if novo_ggv != "nao_identificado" else "❓ GGV não identificado"
+            await query.edit_message_text(
+                f"{emoji} {label} | 🏗 {label_ggv}\n\nGGV corrigido. Confirmar?",
+                reply_markup=teclado_confirmacao(int(doc_id), tipo, novo_ggv)
+            )
 
-    elif acao == "cancelar":
-        atualizar(int(partes[1]), status="cancelado")
-        await query.edit_message_text("❌ Cancelado.")
+        elif acao == "pgto":
+            _, doc_id, ggv, escolha = partes
+            if escolha == "outro":
+                ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": "condicao_pgto"})
+                await query.edit_message_text("✏️ Digite a condição de pagamento:")
+                return
+            label_pgto = CONDICOES.get(escolha, escolha)
+            atualizar(int(doc_id), condicao_pgto=label_pgto)
+            ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "condicao_pgto": label_pgto})
+            await query.edit_message_text(
+                f"✅ Pagamento: {label_pgto}\n\nQual o endereço de entrega?",
+                reply_markup=teclado_endereco(doc_id, ggv, escolha)
+            )
 
-    elif acao == "sel_tipo":
-        _, doc_id, tipo, ggv = partes
-        botoes = [[InlineKeyboardButton(f"{e} {l}", callback_data=f"set_tipo:{doc_id}:{t}:{ggv}")]
-                  for t, (e, l) in TIPOS.items()]
-        await query.edit_message_reply_markup(InlineKeyboardMarkup(botoes))
+        elif acao == "end":
+            _, doc_id, ggv, pgto, escolha = partes
+            if escolha == "outro":
+                ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": "endereco_entrega"})
+                await query.edit_message_text("✏️ Digite o endereço de entrega:")
+                return
+            endereco = ENDERECOS.get(escolha, escolha)
+            condicao = CONDICOES.get(pgto, ctx.user_data.get("condicao_pgto", pgto))
+            atualizar(int(doc_id), endereco_entrega=endereco, status="pronto_pfm")
+            await query.edit_message_text(
+                f"✅ Dados coletados\n\n"
+                f"🏗 {ggv}\n💰 {condicao}\n📍 {endereco}",
+                reply_markup=teclado_pfm(doc_id, ggv)
+            )
 
-    elif acao == "set_tipo":
-        _, doc_id, novo_tipo, ggv = partes
-        atualizar(int(doc_id), tipo=novo_tipo)
-        emoji, label = TIPOS.get(novo_tipo, ("📄", novo_tipo))
-        label_ggv = ggv if ggv != "nao_identificado" else "❓ GGV não identificado"
-        await query.edit_message_text(
-            f"{emoji} *{label}* | 🏗 *{label_ggv}*\n\n_Tipo corrigido. Confirmar?_",
-            parse_mode="Markdown",
-            reply_markup=montar_teclado_confirmacao(int(doc_id), novo_tipo, ggv)
-        )
+        elif acao == "pfm":
+            _, doc_id, ggv = partes
+            await query.edit_message_text("⏳ Gerando PFM...")
+            caminho, codigo = gerar_pfm(int(doc_id))
+            with open(caminho, "rb") as f:
+                await ctx.bot.send_document(
+                    chat_id=DONO_ID,
+                    document=f,
+                    filename=f"{codigo}.docx",
+                    caption=f"📄 {codigo} gerado."
+                )
+            await ctx.bot.send_message(chat_id=DONO_ID, text=f"✅ {codigo} enviado. Pronto para fiada 9.")
 
-    elif acao == "sel_ggv":
-        _, doc_id, tipo, ggv = partes
-        botoes = [[InlineKeyboardButton(g, callback_data=f"set_ggv:{doc_id}:{tipo}:{g}")] for g in GGVS]
-        botoes.append([InlineKeyboardButton("❓ Não identificado", callback_data=f"set_ggv:{doc_id}:{tipo}:nao_identificado")])
-        await query.edit_message_reply_markup(InlineKeyboardMarkup(botoes))
-
-    elif acao == "set_ggv":
-        _, doc_id, tipo, novo_ggv = partes
-        atualizar(int(doc_id), ggv=novo_ggv)
-        emoji, label = TIPOS.get(tipo, ("📄", tipo))
-        label_ggv = novo_ggv if novo_ggv != "nao_identificado" else "❓ GGV não identificado"
-        await query.edit_message_text(
-            f"{emoji} *{label}* | 🏗 *{label_ggv}*\n\n_GGV corrigido. Confirmar?_",
-            parse_mode="Markdown",
-            reply_markup=montar_teclado_confirmacao(int(doc_id), tipo, novo_ggv)
-        )
-
-    elif acao == "pgto":
-        _, doc_id, ggv, escolha = partes
-        if escolha == "outro":
-            ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": "condicao_pgto"})
-            await query.edit_message_text("✏️ Digite a condição de pagamento:")
-            return
-        label_pgto = CONDICOES.get(escolha, escolha)
-        atualizar(int(doc_id), condicao_pgto=label_pgto)
-        ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "condicao_pgto": label_pgto})
-        await query.edit_message_text(
-            f"✅ Condição: _{label_pgto}_\n\nQual o endereço de entrega?",
-            parse_mode="Markdown",
-            reply_markup=montar_teclado_endereco(doc_id, ggv, escolha)
-        )
-
-    elif acao == "end":
-        _, doc_id, ggv, pgto, escolha = partes
-        if escolha == "outro":
-            ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": "endereco_entrega"})
-            await query.edit_message_text("✏️ Digite o endereço de entrega:")
-            return
-        endereco = ENDERECOS.get(escolha, escolha)
-        condicao = CONDICOES.get(pgto, ctx.user_data.get("condicao_pgto", pgto))
-        atualizar(int(doc_id), endereco_entrega=endereco, status="pronto_pfm")
-        await query.edit_message_text(
-            f"✅ *Dados do PFM coletados*\n\n"
-            f"🏗 GGV: *{ggv}*\n"
-            f"💰 Pagamento: _{condicao}_\n"
-            f"📍 Entrega: _{endereco}_\n\n"
-            "Pronto para gerar o PFM. _(Fiada 8)_",
-            parse_mode="Markdown"
-        )
+    except Exception as e:
+        await ctx.bot.send_message(chat_id=DONO_ID, text=f"❌ Erro interno: {e}")
 
 # ── Inicialização ──────────────────────────────────────────────────────────
 

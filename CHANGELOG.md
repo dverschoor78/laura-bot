@@ -10,7 +10,25 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próxima fiada
-- Fiada 8: gerar documento Word do PFM com docxtpl (numeração GGV03-XXX)
+- Fiada 9: converter Word para PDF (LibreOffice headless)
+
+---
+
+## [0.0.8] — 2026-06-25
+
+### Fiada 7+8 — Correção do fluxo + Geração do PFM Word (consolidado)
+- Corrigido bug: `query.answer()` duplo quebrava o handler de pagamento (pgto)
+  → Alerta de GGV ausente agora retorna antes do `query.answer()` padrão
+- Removido `parse_mode="Markdown"` das mensagens intermediárias (eliminada fonte de erros silenciosos)
+- Adicionado `try/except` global no handler de botões com mensagem de erro visível
+- Gerar PFM: botão "📄 Gerar PFM" aparece ao concluir coleta de dados
+- Função `gerar_pfm()` com python-docx: título, nº/data, fornecedor, empreendimento, itens, valor, pagamento, entrega, observações, assinatura
+- Numeração automática por GGV: GGV03-001, GGV03-002... (MAX+1 no SQLite)
+- Coluna `pfm_numero INTEGER` adicionada ao banco
+- PFM salvo em `data/pfms/{codigo}.docx`
+- Documento enviado via Telegram após geração
+- Helpers: `_campo()`, `_itens()`, `_obs()`, `_secao()`, `proximo_pfm_numero()`
+- `python-docx` adicionado às dependências
 
 ---
 
