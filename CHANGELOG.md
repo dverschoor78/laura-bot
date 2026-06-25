@@ -10,7 +10,16 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próxima fiada
-- Registrar arquivos no SQLite (duplicatas persistem entre reinicializações)
+- Enviar arquivo para Claude e mostrar o que foi extraído
+
+---
+
+## [0.0.4] — 2026-06-25
+
+### Fiada 4 — SQLite
+- Cria banco `data/laura.db` automaticamente na inicialização
+- Registra cada arquivo recebido: nome, caminho, hash, status, data
+- Detecção de duplicatas persiste entre reinicializações do bot
 
 ---
 
