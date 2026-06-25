@@ -10,11 +10,35 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas
-- Larguras de coluna conferidas com GGV03-004.docx ajustado manualmente ✅
 - PDF via LibreOffice headless
 - Salvar PFM na pasta OneDrive correta (GGV03/04 Aquisição)
 - Registrar "A PAGAR" no SQLite ao gerar PFM
 - Itens com qty × unit price vindos do Claude (atualmente calculado como total/qtde)
+- Corrigir dados errados no BD fornecedores (MO Construção com CNPJ DeltaD, etc.)
+
+---
+
+## [0.1.1] — 2026-06-25
+
+### Auditoria e refinamento
+
+**Bug crítico corrigido — "cliente como fornecedor"**
+- `buscar_fornecedor()`: ignora busca por CNPJ quando o CNPJ extraído pelo Claude pertence à própria DeltaD
+- Claude às vezes extrai o CNPJ do "DADOS PARA FATURA" (DeltaD) em vez do fornecedor real
+- Com o guard, cai direto na busca por nome, que encontra o fornecedor correto
+
+**Bugs menores corrigidos**
+- `_campo()`: `.strip("*").strip()` — asteriscos markdown podiam deixar espaço residual no valor
+- `_obs()`: `lstrip("- *")` para limpar markdown bold, igual ao `_itens()`
+- `CREATE TABLE documentos`: `data_entrega TEXT` ausente da definição inicial (existia só no ALTER TABLE)
+- `gerar_pfm()`: guard `if row is None` antes de desempacotar — `ValueError` explícito em vez de `TypeError` genérico
+- Mensagem pós-PFM: "Pronto para fiada 9." substituído por mensagem neutra
+
+**Código morto removido**
+- `_secao()`: função do layout v0.0.8 nunca chamada desde v0.1.0
+
+**PROMPT**
+- `[dados extraídos]` substituído por texto sem colchetes — consistente com a instrução "sem colchetes" do próprio PROMPT
 
 ---
 

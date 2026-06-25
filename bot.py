@@ -43,6 +43,7 @@ DELTAD = {
     "email": "dennis@deltad.com.br",
     "fone":  "(42) 99127-1255",
 }
+DELTAD_CNPJ_DIGITS = re.sub(r"\D", "", DELTAD["cnpj"])  # "58358802000158"
 
 GGV_DESC = {
     "GGV01": "GGV01 — Matrícula 39.333, Quadra 05 Lote 02, JD das Nações, Carambeí-PR",
@@ -116,7 +117,7 @@ GGV:GGV03
 Valores aceitos para TIPO: orcamento, comprovante_pix, extrato_mp, nao_relacionado
 Valores aceitos para GGV: GGV00, GGV01, GGV02, GGV03, nao_identificado
 
-[dados extraídos]
+Em seguida, os dados extraídos conforme o tipo identificado acima.
 """
 
 # ── Banco ──────────────────────────────────────────────────────────────────
@@ -133,6 +134,7 @@ def init_db():
                 ggv              TEXT DEFAULT 'nao_identificado',
                 dados_claude     TEXT,
                 condicao_pgto    TEXT,
+                data_entrega     TEXT,
                 endereco_entrega TEXT,
                 pfm_numero       INTEGER,
                 status           TEXT DEFAULT 'recebido',
@@ -193,15 +195,16 @@ def buscar_fornecedor(nome_claude, cnpj_claude=None):
     with sqlite3.connect(DB_PATH) as con:
         sel = f"SELECT {', '.join(_FORN_COLS)} FROM fornecedores"
 
-        # 1. CNPJ — mais confiável
+        # 1. CNPJ — mais confiável; ignora o nosso próprio CNPJ (dado para fatura extraído errado)
         if cnpj_claude and cnpj_claude != "A PREENCHER":
             cnpj_digits = re.sub(r"\D", "", cnpj_claude)
-            row = con.execute(
-                f"{sel} WHERE REPLACE(REPLACE(REPLACE(cnpj,'.','' ),'/',''),'-','') = ? LIMIT 1",
-                (cnpj_digits,)
-            ).fetchone()
-            if row:
-                return dict(zip(_FORN_COLS, row))
+            if cnpj_digits != DELTAD_CNPJ_DIGITS:
+                row = con.execute(
+                    f"{sel} WHERE REPLACE(REPLACE(REPLACE(cnpj,'.','' ),'/',''),'-','') = ? LIMIT 1",
+                    (cnpj_digits,)
+                ).fetchone()
+                if row:
+                    return dict(zip(_FORN_COLS, row))
 
         # 2. Prefixo do primeiro token do nome (evita falsos positivos de substring)
         if nome_claude and nome_claude != "A PREENCHER":
@@ -227,7 +230,7 @@ def _campo(dados, nome):
     for linha in dados.splitlines():
         stripped = linha.strip().lstrip("- *")
         if stripped.lower().startswith(nome.lower() + ":"):
-            val = stripped.split(":", 1)[1].strip().strip("*")
+            val = stripped.split(":", 1)[1].strip().strip("*").strip()
             if val.lower() not in nao_encontrado:
                 return val
     return "A PREENCHER"
@@ -286,7 +289,7 @@ def _obs(dados):
             capturando = True
             continue
         if capturando and stripped:
-            resultado.append(stripped.lstrip("- "))
+            resultado.append(stripped.lstrip("- *"))
     return "\n".join(resultado)
 
 def _data_extenso(dt):
@@ -332,12 +335,6 @@ def _kv_row(tbl, label, valor, label_bg="D9D9D9"):
     c_r.paragraphs[0].add_run(str(valor or "")).font.size = Pt(9)
     return row
 
-def _secao(doc, titulo):
-    p = doc.add_paragraph()
-    r = p.add_run(titulo)
-    r.bold = True
-    r.font.size = Pt(11)
-
 def proximo_pfm_numero(ggv):
     with sqlite3.connect(DB_PATH) as con:
         row = con.execute(
@@ -352,6 +349,8 @@ def gerar_pfm(doc_id):
             "SELECT ggv, dados_claude, condicao_pgto, data_entrega, endereco_entrega FROM documentos WHERE id=?",
             (doc_id,)
         ).fetchone()
+    if row is None:
+        raise ValueError(f"Documento {doc_id} não encontrado no banco.")
     ggv, dados, condicao, data_entrega_db, endereco = row
 
     nome_claude = _campo(dados, "Fornecedor")
@@ -834,7 +833,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     filename=f"{codigo}.docx",
                     caption=f"📄 {codigo} gerado."
                 )
-            await ctx.bot.send_message(chat_id=DONO_ID, text=f"✅ {codigo} enviado. Pronto para fiada 9.")
+            await ctx.bot.send_message(chat_id=DONO_ID, text=f"✅ {codigo} enviado.")
 
     except Exception as e:
         await ctx.bot.send_message(chat_id=DONO_ID, text=f"❌ Erro interno: {e}")
