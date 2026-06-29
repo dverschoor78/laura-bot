@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-06-29
-> Sessão: Engenharia de desenvolvimento — Fiada 5
+> Sessão: Engenharia de desenvolvimento — Laura Engineering v1.0 ✅
 
 ---
 
@@ -13,7 +13,8 @@
 - Código estável.
 - Nenhuma funcionalidade interrompida.
 - Nenhuma implementação parcialmente concluída.
-- Pronto para iniciar a próxima fase.
+- Engenharia de desenvolvimento concluída.
+- Pronto para iniciar a próxima fase de produto.
 
 ---
 
@@ -50,7 +51,8 @@
 
 - Detecção do código por regex (`PFM_CODIGO_RE`) sem chamada à IA
 - Objeto de domínio `Pedido` com `StatusPedido(Enum)` e 17 campos tipados
-- Pipeline de três funções com responsabilidade única: `buscar_pedido()`, `preparar_visualizacao_pedido()`, `mostrar_pedido()`
+- Pipeline de três funções com responsabilidade única: `buscar_pedido()`,
+  `preparar_visualizacao_pedido()`, `mostrar_pedido()`
 
 ---
 
@@ -62,7 +64,7 @@ Nada. A versão v0.3.0 foi encerrada limpa.
 
 ## Dívidas Técnicas Conhecidas
 
-- `bot.py` monolítico com 1418 linhas — aceitável até ~2000 linhas
+- `bot.py` monolítico com 1418 linhas — aceitável até ~2000 linhas (ADR-001)
 - BD fornecedores: MO Construção com CNPJ errado; PRUDENTÓPOLIS com split incorreto
 - `pfm_caminho` não existe como coluna — path reconstruído a cada consulta
 - `gerar_pfm()` acumula responsabilidades: geração Word + gravação no banco + criação de lançamento
@@ -73,21 +75,19 @@ Nada. A versão v0.3.0 foi encerrada limpa.
 
 - `Pedido` passou a ser o objeto central do domínio (v0.3.0)
 - Consulta por código explícito não usa IA — detecção via regex é suficiente
-- Monolito em `bot.py` mantido intencionalmente — ADR-001 será criado na fiada 4 da engenharia
+- Monolito em `bot.py` mantido intencionalmente — ver `docs/decisoes/ADR-001`
 
 ---
 
 ## Objetivo da Próxima Sessão
 
-Concluir a engenharia de desenvolvimento do projeto.
+Retorno ao desenvolvimento de produto.
 
 Próxima fiada:
 
-Criar `docs/PROCESSO.md` — formalizar o ciclo de trabalho (abertura, planejamento,
-implementação, encerramento) e os checklists de qualidade.
-
-Após o PROCESSO.md, a engenharia estará concluída e voltamos ao desenvolvimento
-de funcionalidades. Primeira funcionalidade: Marcar como PAGO.
+**Marcar como PAGO** — fechar o ciclo financeiro completo.
+Ao receber um comprovante PIX, o bot vincula ao lançamento correto e atualiza
+o status para PAGO.
 
 ---
 
@@ -100,8 +100,9 @@ Arquitetura detalhada:
 
 ## Documentos Recomendados
 
-- `CHANGELOG.md` — histórico completo de fiadas
+- `docs/PROCESSO.md` — como conduzir uma sessão de desenvolvimento
 - `docs/ROADMAP.md` — próximas fiadas e dívida técnica
+- `CHANGELOG.md` — histórico completo de fiadas
 - `docs/ARQUITETURA.md` — estrutura técnica atual
 
 ---

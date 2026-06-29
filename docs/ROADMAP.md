@@ -6,30 +6,29 @@
 
 ## Próxima Fiada
 
-**Criar `docs/PROCESSO.md`**
+**Marcar como PAGO**
 
-Objetivo: formalizar o ciclo de trabalho do projeto — abertura de sessão,
-planejamento da fiada, implementação, encerramento e checklists de qualidade.
+Objetivo: ao receber um comprovante PIX, o bot vincula ao lançamento correto
+e atualiza o status para PAGO, fechando o ciclo financeiro.
 
-Motivo: é o último documento da engenharia de desenvolvimento. Com ele concluído,
-qualquer sessão futura (com qualquer IA) pode ser iniciada com contexto completo
-e processo definido.
+Motivo: é o próximo passo natural após a geração do PFM. Sem isso, o fluxo
+termina aberto — o pagamento acontece, mas o banco não sabe.
 
-Critério de aceite: ao ler `docs/PROCESSO.md`, qualquer pessoa deve entender
-como abrir uma sessão, como planejar e executar uma fiada, e o que fazer antes
-de encerrar.
+Critério de aceite: Dennis envia foto de comprovante PIX → bot identifica fornecedor
+e valor → exibe o lançamento correspondente → Dennis confirma → status atualizado
+para PAGO no banco.
 
-Tamanho esperado: Pequeno
+Tamanho esperado: Médio
 
 ---
 
 ## Próximas Fiadas
 
-1. Marcar como PAGO — fechar o ciclo financeiro completo
-2. PDF via LibreOffice headless
-3. `pfm_revisar` — implementar revisão da PFM (botão existe, ação pendente)
-4. `pfm_hist` — histórico completo do pedido (botão existe, ação pendente)
-5. Corrigir BD fornecedores (MO Construção CNPJ, PRUDENTÓPOLIS split)
+1. PDF via LibreOffice headless
+2. `pfm_revisar` — implementar revisão da PFM (botão existe, ação pendente)
+3. `pfm_hist` — histórico completo do pedido (botão existe, ação pendente)
+4. Corrigir BD fornecedores (MO Construção CNPJ, PRUDENTÓPOLIS split)
+5. `pfm_caminho` como coluna no banco — eliminar reconstrução de path
 
 ---
 
