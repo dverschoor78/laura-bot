@@ -6,30 +6,50 @@
 
 ## Próxima Fiada
 
-**Apresentação Profissional do Pedido**
+**Design System**
 
-Objetivo: redesenhar a identidade visual do Pedido de Compra gerado pela Laura,
-mantendo todas as regras de negócio existentes.
+Objetivo: traduzir a identidade definida em `docs/IDENTIDADE_DO_PRODUTO.md` em
+componentes concretos de design — antes de qualquer implementação visual.
 
 Escopo:
-- Novo layout do DOCX — hierarquia visual mais clara, leitura rápida, impressão A4 adequada
-- Aparência moderna que reflita um Pedido de Compra profissional pronto para circular
-- Preparação para conversão em PDF
-- Geração automática de PDF via LibreOffice headless após o DOCX ser gerado
-- Ambos (Word e PDF) salvos na pasta do GGV e enviados pelo Telegram
+- Voz e linguagem: biblioteca de mensagens do Telegram (recebimento, status, confirmação, erro)
+- Sistema de status visual: uso consistente de 🟡 🟢 🔴 ⚫ ⚪ em toda a experiência
+- Estrutura de mensagem: hierarquia, separadores, botões, padrões por tipo de tela
+- Identidade do Pedido de Compra: layout, tipografia, hierarquia, cor, blocos de conteúdo
+- Definição: PDF como artefato canônico, Word como saída secundária
 
-Motivo: o documento atual foi construído para validar o fluxo de dados. Está na hora
-de cuidar da apresentação para que o Pedido de Compra possa circular com a cara da DeltaD.
-O PDF é consequência natural dessa melhoria, não o objetivo principal.
+Motivo: a identidade do produto foi definida na Sprint de Produto (2026-06-29).
+O Design System é a tradução dessa identidade em componentes reutilizáveis.
+A implementação da Apresentação Profissional do Pedido nasce deste Design System.
 
-Critério de aceite: ao gerar um pedido, a Laura cria um DOCX visualmente profissional
-e também gera o PDF correspondente. Ambos são salvos na pasta do GGV e enviados pelo Telegram.
+Critério de aceite: ao final da fiada, qualquer decisão visual (cor, layout, texto de botão,
+estrutura de mensagem) tem uma resposta no Design System — não depende de julgamento
+caso a caso.
 
-Tamanho esperado: Médio — envolve design do documento e conversão para PDF.
+Tamanho esperado: Médio — sem código, mas com definições exaustivas que guiarão
+toda implementação visual futura.
 
-Nota de linguagem: a partir desta fiada, a interface com o usuário passa a usar termos
-mais naturais — Pedido de Compra, Pedido em Word, Pedido em PDF, Financeiro, Entrega.
-O termo PFM continua existindo internamente no código e no banco.
+Referência obrigatória: `docs/IDENTIDADE_DO_PRODUTO.md`
+
+---
+
+## Fiada Seguinte
+
+**Apresentação Profissional do Pedido**
+
+Objetivo: implementar o Design System no documento gerado pela Laura.
+
+Escopo:
+- Novo layout do DOCX baseado no Design System aprovado
+- Geração automática de PDF via LibreOffice headless
+- PDF como output primário enviado pelo Telegram; Word como alternativa
+- Ambos salvos na pasta do GGV
+- Linguagem da interface atualizada: PFM → Pedido de Compra em todas as mensagens
+
+Critério de aceite: ao gerar um pedido, a Laura produz um PDF visualmente profissional
+e o envia pelo Telegram. O Word é gerado e salvo como saída secundária.
+
+Tamanho esperado: Médio — implementação guiada pelo Design System já aprovado.
 
 ---
 

@@ -10,11 +10,44 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Apresentação Profissional do Pedido — novo layout do Pedido de Compra, identidade visual moderna, geração automática de PDF
-2. Revisão do Pedido de Compra — botão existe, ação pendente
-3. Histórico do Pedido — botão existe, ação pendente
-4. Corrigir BD fornecedores (MO Construção CNPJ errado, PRUDENTÓPOLIS split)
-5. `pfm_caminho` como coluna no banco — eliminar reconstrução de path
+1. Design System — identidade visual, voz, componentes de mensagem, documento Word/PDF
+2. Apresentação Profissional do Pedido — novo layout, identidade visual, geração de PDF
+3. Revisão do Pedido de Compra — botão existe, ação pendente
+4. Histórico do Pedido — botão existe, ação pendente
+5. Corrigir BD fornecedores (MO Construção CNPJ errado, PRUDENTÓPOLIS split)
+6. `pfm_caminho` como coluna no banco — eliminar reconstrução de path
+
+---
+
+## [Sprint de Produto] — 2026-06-29
+
+### Sprint de Design e Identidade — fundação do produto
+
+Encerra a fase de engenharia e abre a fase de produto.
+Esta Sprint não alterou código. Definiu quem a Laura é.
+
+**O que foi construído:**
+
+- `docs/IDENTIDADE_DO_PRODUTO.md` — constituição de produto da Laura
+  - Missão, visão de cinco anos e promessa central
+  - Personalidade, voz e sistema de status visual
+  - Princípios de UX, design, navegação e tomada de decisão
+  - O que a Laura faz e o que ela nunca fará
+  - O que o usuário ganha (transformação antes/depois)
+
+**Decisões de produto aprovadas:**
+
+- A promessa central da Laura: *"Você nunca vai perder o rastro de uma compra."*
+- PDF é o artefato canônico do Pedido de Compra. Word é saída secundária.
+- "PFM" não existe para o usuário — apenas "Pedido de Compra" e o código (ex: GGV03-009).
+- Sistema de status unificado: 🟡 🟢 🔴 ⚫ ⚪ — únicos emojis semânticos permitidos.
+- Emojis decorativos são banidos da interface.
+- Seleção manual de tipo de documento é um andaime — deve desaparecer no produto maduro.
+- Princípio central de produto: *"Laura vem até o usuário. O usuário não adapta seu fluxo para Laura."*
+
+**Frase que define o produto:**
+
+> *"Laura não é uma ferramenta que você usa. É uma memória que você carrega."*
 
 ---
 

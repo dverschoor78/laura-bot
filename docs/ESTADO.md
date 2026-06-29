@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-06-29
-> Sessão: Marcar como PAGO — ciclo financeiro completo
+> Sessão: Sprint de Produto — identidade da Laura
 
 ---
 
@@ -67,7 +67,15 @@
 
 ## Em Andamento
 
-Nada. A versão v0.5.0 foi encerrada limpa.
+Nada. Sprint de Produto encerrada limpa.
+
+---
+
+## Marcos do Produto
+
+- **v0.1–0.3** — Fundação de engenharia: arquitetura, processo, documentação
+- **v0.4–0.5** — Ciclo financeiro completo: orçamento → pedido → a pagar → pago
+- **Sprint de Produto (2026-06-29)** — Identidade definida: quem a Laura é, o que ela promete, como ela fala
 
 ---
 
@@ -95,9 +103,10 @@ Nada. A versão v0.5.0 foi encerrada limpa.
 
 ## Objetivo da Próxima Sessão
 
-**Apresentação Profissional do Pedido** — redesenhar o documento gerado pela Laura,
-criando uma identidade visual mais moderna para o Pedido de Compra. Após aprovação
-do layout, implementar a geração automática do PDF via LibreOffice headless.
+**Design System** — traduzir a identidade do produto em componentes concretos:
+voz e mensagens do Telegram, identidade visual do Pedido de Compra, tipografia,
+hierarquia, cor e estrutura do documento. A implementação da Apresentação Profissional
+do Pedido (Word + PDF) nasce deste Design System.
 
 ---
 
