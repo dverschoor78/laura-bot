@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-06-29
-> Sessão: Engenharia de desenvolvimento — Fiada 1
+> Sessão: Engenharia de desenvolvimento — Fiada 3
 
 ---
 
@@ -83,7 +83,8 @@ Continuar a engenharia de desenvolvimento do projeto.
 
 Próxima fiada:
 
-Criar `docs/ROADMAP.md` com o backlog vivo (migrar de `CHANGELOG.md`).
+Atualizar `docs/ARQUITETURA.md` para refletir a realidade atual — monólito em `bot.py`,
+SQLite, Claude API, Telegram e OneDrive. Remover a estrutura modular que não existe.
 
 ---
 
@@ -97,7 +98,7 @@ Arquitetura detalhada:
 ## Documentos Recomendados
 
 - `CHANGELOG.md` — histórico completo de fiadas
-- `docs/ROADMAP.md` — backlog (quando existir)
+- `docs/ROADMAP.md` — próximas fiadas e dívida técnica
 - `docs/ARQUITETURA.md` — estrutura técnica atual
 
 ---
