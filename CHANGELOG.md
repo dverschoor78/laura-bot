@@ -10,11 +10,36 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Marcar como PAGO — comprovante vinculado ao lançamento → status PAGO
-2. PDF via LibreOffice headless
-3. `pfm_revisar` — revisão da PFM (botão existe, ação pendente)
-4. `pfm_hist` — histórico completo do pedido (botão existe, ação pendente)
-5. Corrigir BD fornecedores (MO Construção CNPJ errado, PRUDENTÓPOLIS split)
+1. Apresentação Profissional do Pedido — novo layout do Pedido de Compra, identidade visual moderna, geração automática de PDF
+2. Revisão do Pedido de Compra — botão existe, ação pendente
+3. Histórico do Pedido — botão existe, ação pendente
+4. Corrigir BD fornecedores (MO Construção CNPJ errado, PRUDENTÓPOLIS split)
+5. `pfm_caminho` como coluna no banco — eliminar reconstrução de path
+
+---
+
+## [0.5.0] — 2026-06-29
+
+### Fiada — Marcar como PAGO
+
+Ciclo financeiro completo: orçamento → PFM → A PAGAR → comprovante PIX → PAGO.
+
+- Botões de candidato (`💳 Confirmar GGV03-001`) exibidos junto à lista de correspondências
+- Tela de confirmação final mostra comprovante × lançamento lado a lado antes de gravar
+- `lancamentos.status` atualizado para `pago` somente após confirmação explícita
+- Campos gravados: `valor_pago`, `data_pagamento`, `doc_id_comprovante`, `identificador_comprovante`
+- `ID da transação` extraído pelo Claude (número MP ou E2E Pix) — campo dedicado no PROMPT
+- Proteção 1: `UPDATE WHERE pfm_codigo=? AND status='a_pagar'` + verificação de `rowcount`
+  — bloqueia duplo clique ou status alterado entre telas
+- Proteção 2: verifica `identificador_comprovante` antes de listar candidatos e antes de gravar
+  — bloqueia reutilização do mesmo comprovante mesmo quando reenviado em sessão diferente
+- Ao consultar o pedido, tela mostra `🟢 PAGO`
+- Colunas adicionadas via `ALTER TABLE` seguro: `valor_pago`, `data_pagamento`,
+  `doc_id_comprovante`, `identificador_comprovante`
+
+**Limitação conhecida:** se o Claude não extrair o `ID da transação` do comprovante
+(comprovante sem número de transação visível), a proteção por identificador não atua.
+O pagamento ocorre normalmente, mas reenvio do mesmo arquivo não é detectado.
 
 ---
 
