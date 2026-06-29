@@ -11,6 +11,8 @@
 ## A Alma
 
 > *Laura não é uma ferramenta que você usa. É uma memória que você carrega.*
+>
+> *Laura não espera ser perguntada. Ela mostra o que precisa de atenção.*
 
 Laura existe para uma finalidade única:
 

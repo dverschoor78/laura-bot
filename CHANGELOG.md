@@ -10,12 +10,33 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Design System — identidade visual, voz, componentes de mensagem, documento Word/PDF
-2. Apresentação Profissional do Pedido — novo layout, identidade visual, geração de PDF
-3. Revisão do Pedido de Compra — botão existe, ação pendente
-4. Histórico do Pedido — botão existe, ação pendente
-5. Corrigir BD fornecedores (MO Construção CNPJ errado, PRUDENTÓPOLIS split)
-6. `pfm_caminho` como coluna no banco — eliminar reconstrução de path
+1. Fase 1 — Voz: reescrever mensagens aplicando Glossário e padrões de mensagem
+2. Fase 2 — Estrutura: reorganizar conteúdo das telas principais
+3. Fase 3 — Navegação: Cockpit da Obra, cartão de fornecedor, /pendentes melhorado
+4. Fase 4 — Pedido de Compra: novo layout DOCX + PDF via LibreOffice headless
+5. Revisão do Pedido de Compra — botão existe, ação pendente
+6. Histórico do Pedido — botão existe, ação pendente
+7. Corrigir BD fornecedores (MO Construção CNPJ errado, PRUDENTÓPOLIS split)
+
+---
+
+## [Sprint de Experiência — Fase 0] — 2026-06-29
+
+### Glossário e base da Sprint de Experiência
+
+- `docs/GLOSSARIO.md` criado — decisões de linguagem com justificativa para cada termo
+  aprovado, cada termo banido e cada distinção conceitual relevante
+- `docs/IDENTIDADE_DO_PRODUTO.md` atualizado — segunda frase fundadora adicionada:
+  *"Laura não espera ser perguntada. Ela mostra o que precisa de atenção."*
+- ROADMAP atualizado: quatro fases de implementação definidas (Voz → Estrutura →
+  Navegação → Pedido de Compra) substituem "Design System" e "Apresentação Profissional"
+  como nomenclatura de fiadas
+
+**Decisões de linguagem aprovadas no Glossário:**
+- Corrigir vs. Ajustar: distinção conceitual entre correção de extração e decisão deliberada
+- Cockpit vs. Painel: a visão do GGV é um cockpit ativo, não um painel passivo
+- Orçamento vs. Pedido de Compra: objetos distintos, direções opostas
+- Comprovante vs. Extrato: pagamento único vs. histórico de conta
 
 ---
 

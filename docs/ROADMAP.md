@@ -6,50 +6,50 @@
 
 ## Próxima Fiada
 
-**Design System**
+**Fase 1 — Voz**
 
-Objetivo: traduzir a identidade definida em `docs/IDENTIDADE_DO_PRODUTO.md` em
-componentes concretos de design — antes de qualquer implementação visual.
+Objetivo: reescrever todas as mensagens da Laura seguindo os padrões A/B/C/D definidos
+na Sprint de Experiência. Nenhuma lógica alterada — apenas linguagem e estrutura visual.
 
 Escopo:
-- Voz e linguagem: biblioteca de mensagens do Telegram (recebimento, status, confirmação, erro)
-- Sistema de status visual: uso consistente de 🟡 🟢 🔴 ⚫ ⚪ em toda a experiência
-- Estrutura de mensagem: hierarquia, separadores, botões, padrões por tipo de tela
-- Identidade do Pedido de Compra: layout, tipografia, hierarquia, cor, blocos de conteúdo
-- Definição: PDF como artefato canônico, Word como saída secundária
+- Aplicar Glossário: banir PFM, a_pagar, candidatos e demais termos proibidos
+- Reescrever mensagens de recebimento, extração, confirmação, status e erro
+- Remover emojis decorativos; manter apenas os cinco marcadores de status
+- Estrutura de mensagem: linha de identidade + separador + dados + separador + ações
+- Botões: máximo 3, hierarquizados, nomeados por destino ou ação — não por processo
 
-Motivo: a identidade do produto foi definida na Sprint de Produto (2026-06-29).
-O Design System é a tradução dessa identidade em componentes reutilizáveis.
-A implementação da Apresentação Profissional do Pedido nasce deste Design System.
+Motivo: a voz é a camada mais visível do produto. Mudar apenas textos já transforma
+a experiência — sem alterar uma linha de lógica.
 
-Critério de aceite: ao final da fiada, qualquer decisão visual (cor, layout, texto de botão,
-estrutura de mensagem) tem uma resposta no Design System — não depende de julgamento
-caso a caso.
+Critério de aceite: enviar um orçamento e gerar um pedido sem encontrar nenhuma mensagem
+que use linguagem interna, emojis decorativos ou estrutura contrária aos padrões.
 
-Tamanho esperado: Médio — sem código, mas com definições exaustivas que guiarão
-toda implementação visual futura.
+Tamanho esperado: Pequeno/Médio — sem lógica nova, muitas linhas de texto alteradas.
 
-Referência obrigatória: `docs/IDENTIDADE_DO_PRODUTO.md`
+Referências: `docs/GLOSSARIO.md`, `docs/IDENTIDADE_DO_PRODUTO.md`
 
 ---
 
-## Fiada Seguinte
+## Fases Seguintes — Sprint de Experiência
 
-**Apresentação Profissional do Pedido**
+**Fase 2 — Estrutura de mensagens**
+- Tela de extração: fornecedor e valor em destaque na primeira linha
+- Tela de pedido criado: incluir saldo atualizado do GGV
+- Tela de pagamento confirmado: incluir saldo restante da obra
+- Cartão do pedido: histórico resumido (criado em, pago em)
+- Erros: sempre com próximo passo — nunca mensagens genéricas
 
-Objetivo: implementar o Design System no documento gerado pela Laura.
+**Fase 3 — Navegação e visões**
+- Digitar "GGV03" → Cockpit da Obra (novo)
+- Digitar nome de fornecedor → cartão do fornecedor (novo)
+- /pendentes: lista por obra, vencidos destacados com ⚠️
+- Tela de correção campo a campo (refatorado de "editar" para "corrigir")
 
-Escopo:
-- Novo layout do DOCX baseado no Design System aprovado
-- Geração automática de PDF via LibreOffice headless
-- PDF como output primário enviado pelo Telegram; Word como alternativa
-- Ambos salvos na pasta do GGV
-- Linguagem da interface atualizada: PFM → Pedido de Compra em todas as mensagens
-
-Critério de aceite: ao gerar um pedido, a Laura produz um PDF visualmente profissional
-e o envia pelo Telegram. O Word é gerado e salvo como saída secundária.
-
-Tamanho esperado: Médio — implementação guiada pelo Design System já aprovado.
+**Fase 4 — Pedido de Compra**
+- Novo layout DOCX: sete zonas definidas na Sprint de Experiência
+- PDF gerado automaticamente via LibreOffice headless
+- PDF como output primário no Telegram; Word salvo no OneDrive
+- Cabeçalho repetido em documentos multipágina
 
 ---
 

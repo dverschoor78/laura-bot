@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-06-29
-> Sessão: Sprint de Produto — identidade da Laura
+> Sessão: Sprint de Experiência — Fase 0 (Glossário)
 
 ---
 
@@ -103,10 +103,9 @@ Nada. Sprint de Produto encerrada limpa.
 
 ## Objetivo da Próxima Sessão
 
-**Design System** — traduzir a identidade do produto em componentes concretos:
-voz e mensagens do Telegram, identidade visual do Pedido de Compra, tipografia,
-hierarquia, cor e estrutura do documento. A implementação da Apresentação Profissional
-do Pedido (Word + PDF) nasce deste Design System.
+**Fase 1 — Voz** — reescrever todas as mensagens da Laura aplicando o Glossário e
+os padrões de mensagem da Sprint de Experiência. Nenhuma lógica nova — apenas
+linguagem e estrutura visual. A Laura já deve soar como produto depois desta fase.
 
 ---
 
