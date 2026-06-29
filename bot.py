@@ -4,7 +4,10 @@ import hashlib
 import sqlite3
 import base64
 import anthropic
+from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
+from typing import Optional
 from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -19,8 +22,9 @@ load_dotenv()
 TOKEN       = os.environ["TELEGRAM_BOT_TOKEN"]
 DONO_ID     = int(os.environ["TELEGRAM_USER_ID"])
 CLAUDE_KEY  = os.environ["CLAUDE_API_KEY"]
-UPLOADS     = Path("data/uploads")
-DB_PATH     = Path("data/laura.db")
+TEST_MODE = os.environ.get("LAURA_ENV", "prod") == "test"
+DB_PATH   = Path("data/laura_test.db") if TEST_MODE else Path("data/laura.db")
+UPLOADS   = Path("data/test_uploads")  if TEST_MODE else Path("data/uploads")
 UPLOADS.mkdir(parents=True, exist_ok=True)
 
 claude = anthropic.Anthropic(api_key=CLAUDE_KEY)
@@ -70,6 +74,43 @@ ENDERECOS = {
     "chacara":     "Avenida dos Pioneiros, 5125 - Carambeí-PR CEP 84.145-000",
 }
 
+class StatusPedido(str, Enum):
+    A_PAGAR          = "a_pagar"
+    PAGO             = "pago"
+    PENDENTE_REVISAO = "pendente_revisao"
+    SUBSTITUIDO      = "substituido"
+    SEM_LANCAMENTO   = "sem_lancamento"
+
+@dataclass
+class Pedido:
+    # Identificação
+    codigo: str
+    doc_id: int
+    ggv:    str
+
+    # Domínio
+    status:             StatusPedido
+    fornecedor:         str
+    cnpj:               str
+    valor_orcamento:    float
+    desconto:           float
+    valor_negociado:    float
+    condicao_pagamento: str
+    vencimento:         str
+    entrega_prevista:   str
+
+    # Datas de registro — base para construir o histórico
+    doc_criado_em:  Optional[str] = None
+    lanc_criado_em: Optional[str] = None
+
+    # Arquivos — populados por preparar_visualizacao_pedido()
+    caminho_orcamento: Optional[str] = None
+    caminho_docx:      Optional[str] = None
+    caminho_pdf:       Optional[str] = None   # futuro
+
+    # Histórico — populado por preparar_visualizacao_pedido()
+    historico: list = field(default_factory=list)
+
 PROMPT = """
 Você recebeu um arquivo enviado para um sistema de gestão de obras de construção civil.
 
@@ -103,9 +144,11 @@ Se [orcamento]:
 Se [comprovante_pix]:
 - Data do pagamento:
 - Valor:
-- Destinatário:
-- CNPJ/CPF do destinatário:
+- Favorecido:
+- CNPJ/CPF do favorecido:
 - Chave PIX:
+- Instituição financeira:
+- Identificador / Observação:
 
 Se [extrato_mp]:
 - Período:
@@ -124,6 +167,13 @@ Valores aceitos para GGV: GGV00, GGV01, GGV02, GGV03, nao_identificado
 
 Em seguida, os dados extraídos conforme o tipo identificado acima.
 """
+
+def _pasta_pfm(ggv: str) -> Path:
+    if TEST_MODE:
+        pasta = Path("data/test_pfms")
+        pasta.mkdir(parents=True, exist_ok=True)
+        return pasta
+    return GGV_ONEDRIVE.get(ggv, Path("data/pfms"))
 
 # ── Banco ──────────────────────────────────────────────────────────────────
 
@@ -191,6 +241,8 @@ def init_db():
         """)
 
 def ja_existe(hash_arquivo):
+    if TEST_MODE:
+        return None
     with sqlite3.connect(DB_PATH) as con:
         return con.execute("SELECT id FROM documentos WHERE hash = ?", (hash_arquivo,)).fetchone()
 
@@ -236,6 +288,8 @@ _CAMPOS_RESUMO_RE = re.compile(
     r"^\s*-\s*\*{0,2}(Desconto|Condição de pagamento|Prazo de entrega|Data.prazo de entrega)\b",
     re.IGNORECASE
 )
+
+PFM_CODIGO_RE = re.compile(r"\b(GGV\d{2}-\d{3}(?:-R\d+)?)\b", re.IGNORECASE)
 
 def _dados_display(dados):
     """Remove do texto do Claude os campos que já aparecem no bloco de resumo."""
@@ -717,15 +771,116 @@ def gerar_pfm(doc_id):
     p_ent.runs[0].font.size = Pt(8)
     _linha(c_dados, endereco or "A PREENCHER", size=9)
 
-    pasta = GGV_ONEDRIVE.get(ggv, Path("data/pfms"))
+    pasta = _pasta_pfm(ggv)
     pasta.mkdir(parents=True, exist_ok=True)
-    caminho = pasta / f"{pfm_codigo}.docx"
+    prefixo = "TESTE-" if TEST_MODE else ""
+    caminho = pasta / f"{prefixo}{pfm_codigo}.docx"
     doc.save(caminho)
 
     lanc_status, ja_existia = registrar_lancamento(
         doc_id, pfm_codigo, ggv, fornecedor, total_final_v, data_entrega_db
     )
     return caminho, pfm_codigo, fornecedor, total_final_v, lanc_status, ja_existia
+
+# ── Comprovante PIX ────────────────────────────────────────────────────────
+
+def parse_comprovante(dados_claude: str) -> dict:
+    """Extrai campos estruturados do texto retornado pelo Claude para comprovante_pix."""
+    valor_str = _campo(dados_claude, "Valor")
+    try:
+        valor_v = _parse_brl(re.sub(r"[^\d,.]", "", valor_str)) if valor_str != "A PREENCHER" else 0.0
+    except Exception:
+        valor_v = 0.0
+    return {
+        "valor_v":    valor_v,
+        "valor_fmt":  _fmt_brl(valor_v) if valor_v > 0 else valor_str,
+        "data":       _campo(dados_claude, "Data do pagamento"),
+        "favorecido": _campo(dados_claude, "Favorecido"),
+        "cnpj":       _campo(dados_claude, "CNPJ/CPF do favorecido"),
+        "chave_pix":  _campo(dados_claude, "Chave PIX"),
+        "instituicao":_campo(dados_claude, "Instituição financeira"),
+        "obs":        _campo(dados_claude, "Identificador / Observação"),
+    }
+
+def buscar_candidatos_pix(valor_v: float, favorecido: str, cnpj: str) -> list:
+    """Pontua lançamentos A PAGAR e retorna os 3 melhores candidatos."""
+    cnpj_digits = re.sub(r"\D", "", cnpj) if cnpj and cnpj != "A PREENCHER" else ""
+    fav_token   = favorecido.strip().upper().split()[0] if favorecido and favorecido != "A PREENCHER" else ""
+
+    # Tenta validar o nome via CNPJ na tabela de fornecedores
+    nome_canonico_token = ""
+    if cnpj_digits:
+        with sqlite3.connect(DB_PATH) as con:
+            row = con.execute(
+                "SELECT nome FROM fornecedores "
+                "WHERE REPLACE(REPLACE(REPLACE(cnpj,'.',''),'/',''),'-','') = ? LIMIT 1",
+                (cnpj_digits,)
+            ).fetchone()
+        if row:
+            nome_canonico_token = row[0].strip().upper().split()[0]
+
+    with sqlite3.connect(DB_PATH) as con:
+        rows = con.execute(
+            "SELECT pfm_codigo, ggv, fornecedor, valor FROM lancamentos WHERE status='a_pagar'"
+        ).fetchall()
+
+    candidatos = []
+    for pfm_codigo, ggv, fornecedor, valor_lanc in rows:
+        score     = 0
+        forn_token = (fornecedor or "").strip().upper().split()[0] if fornecedor else ""
+
+        # Valor
+        if valor_v > 0 and valor_lanc:
+            if abs(valor_v - valor_lanc) <= 0.01:
+                score += 3
+            elif valor_lanc > 0 and abs(valor_v - valor_lanc) / valor_lanc <= 0.10:
+                score += 1
+
+        # Nome — CNPJ validado tem peso maior que coincidência direta
+        if nome_canonico_token and forn_token == nome_canonico_token:
+            score += 3
+        elif fav_token and forn_token == fav_token:
+            score += 2
+
+        if score > 0:
+            candidatos.append({
+                "pfm_codigo": pfm_codigo,
+                "ggv":        ggv,
+                "fornecedor": fornecedor,
+                "valor_lanc": valor_lanc,
+                "score":      score,
+            })
+
+    candidatos.sort(key=lambda c: c["score"], reverse=True)
+    return candidatos[:3]
+
+def mostrar_comprovante_candidatos(dados: dict, candidatos: list) -> str:
+    """Formata a mensagem de comprovante + candidatos para o Telegram. Sem IO."""
+    def _conf(score):
+        if score >= 5: return "Alta ✅"
+        if score >= 3: return "Média 🟡"
+        return "Baixa 🔸"
+
+    linhas = ["💰 Comprovante identificado\n"]
+    linhas.append(f"• Valor:      R$ {dados['valor_fmt']}")
+    if dados["data"]        != "A PREENCHER": linhas.append(f"• Data:       {dados['data']}")
+    if dados["favorecido"]  != "A PREENCHER": linhas.append(f"• Favorecido: {dados['favorecido']}")
+    if dados["instituicao"] != "A PREENCHER": linhas.append(f"• Instituição: {dados['instituicao']}")
+    if dados["obs"]         != "A PREENCHER": linhas.append(f"• Identificador: {dados['obs']}")
+
+    linhas.append("")
+
+    if not candidatos:
+        linhas.append("Nenhum lançamento A PAGAR corresponde a este comprovante.")
+        return "\n".join(linhas)
+
+    linhas.append("Possíveis correspondências:\n")
+    for i, c in enumerate(candidatos, 1):
+        valor_fmt = f"R$ {_fmt_brl(c['valor_lanc'])}" if c["valor_lanc"] else "—"
+        linhas.append(f"{i}. {c['pfm_codigo']} — {c['fornecedor']} — {valor_fmt}")
+        linhas.append(f"   Confiança: {_conf(c['score'])}\n")
+
+    return "\n".join(linhas)
 
 # ── UI helpers ─────────────────────────────────────────────────────────────
 
@@ -758,6 +913,14 @@ def teclado_confirmacao(doc_id, tipo, ggv):
         ]
     ])
 
+def teclado_tipo_inicial(doc_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 Orçamento / Cotação",  callback_data=f"sel_tipo_inicial:{doc_id}:orcamento")],
+        [InlineKeyboardButton("💰 Comprovante PIX",       callback_data=f"sel_tipo_inicial:{doc_id}:comprovante_pix")],
+        [InlineKeyboardButton("🏦 Extrato Mercado Pago", callback_data=f"sel_tipo_inicial:{doc_id}:extrato_mp")],
+        [InlineKeyboardButton("🗑 Outro",                 callback_data=f"sel_tipo_inicial:{doc_id}:nao_relacionado")],
+    ])
+
 def teclado_condicao(doc_id, ggv):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💰 PIX à vista",                   callback_data=f"pgto:{doc_id}:{ggv}:pix_avista")],
@@ -775,6 +938,141 @@ def teclado_endereco(doc_id, ggv):
         [InlineKeyboardButton("✏️ Outro (digitar)",  callback_data=f"end:{doc_id}:{ggv}:outro")],
     ])
 
+def _fmt_data_curta(dt_str):
+    """'2026-07-03 10:30:00' → '03/07'"""
+    try:
+        return f"{dt_str[8:10]}/{dt_str[5:7]}"
+    except Exception:
+        return dt_str[:10] if dt_str else "—"
+
+def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
+    """Consulta o banco e retorna um Pedido com dados brutos e cálculos financeiros, ou None."""
+    m = re.match(r"^(GGV\d{2,3})-(\d{3})(?:-R\d+)?$", pfm_codigo.upper())
+    if not m:
+        return None
+    ggv, pfm_num = m.group(1), int(m.group(2))
+    with sqlite3.connect(DB_PATH) as con:
+        doc = con.execute(
+            "SELECT id, ggv, dados_claude, condicao_pgto, data_entrega, desconto_rs, caminho, criado_em "
+            "FROM documentos WHERE ggv=? AND pfm_numero=?",
+            (ggv, pfm_num)
+        ).fetchone()
+        if not doc:
+            return None
+        doc_id, ggv_db, dados, condicao_pgto, data_entrega, desconto_rs, caminho, doc_criado = doc
+        lanc = con.execute(
+            "SELECT fornecedor, valor, data_prevista_entrega, vencimento_pagamento, status, criado_em "
+            "FROM lancamentos WHERE pfm_codigo=?",
+            (pfm_codigo,)
+        ).fetchone()
+
+    forn_lanc = data_prev_ent = venc = status_raw = lanc_criado = None
+    if lanc:
+        forn_lanc, _, data_prev_ent, venc, status_raw, lanc_criado = lanc
+
+    try:
+        status = StatusPedido(status_raw) if status_raw else StatusPedido.SEM_LANCAMENTO
+    except ValueError:
+        status = StatusPedido.SEM_LANCAMENTO
+
+    subtotal_v, desconto_v, total_v = _calcular_totais(dados, desconto_rs)
+
+    return Pedido(
+        codigo             = pfm_codigo,
+        doc_id             = doc_id,
+        ggv                = ggv_db,
+        status             = status,
+        fornecedor         = forn_lanc or _campo(dados, "Fornecedor") or "—",
+        cnpj               = _campo(dados, "CNPJ/CPF") or "—",
+        valor_orcamento    = subtotal_v,
+        desconto           = desconto_v,
+        valor_negociado    = total_v,
+        condicao_pagamento = condicao_pgto or "—",
+        vencimento         = venc or "—",
+        entrega_prevista   = data_prev_ent or data_entrega or "—",
+        doc_criado_em      = doc_criado,
+        lanc_criado_em     = lanc_criado,
+        caminho_orcamento  = caminho,
+    )
+
+def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
+    """Verifica existência de arquivos em disco e constrói o histórico. Retorna o Pedido enriquecido."""
+    if pedido.caminho_orcamento and not Path(pedido.caminho_orcamento).exists():
+        pedido.caminho_orcamento = None
+
+    pasta    = _pasta_pfm(pedido.ggv)
+    prefixo  = "TESTE-" if TEST_MODE else ""
+    pfm_docx = pasta / f"{prefixo}{pedido.codigo}.docx"
+    pedido.caminho_docx = str(pfm_docx) if pfm_docx.exists() else None
+
+    historico = []
+    if pedido.doc_criado_em:
+        historico.append((_fmt_data_curta(pedido.doc_criado_em), "Orçamento recebido"))
+    if pedido.lanc_criado_em:
+        historico.append((_fmt_data_curta(pedido.lanc_criado_em), "PFM gerada · lançamento criado"))
+    pedido.historico = historico
+
+    return pedido
+
+def mostrar_pedido(pedido: Pedido) -> str:
+    """Formata o Pedido como mensagem Telegram. Sem IO — apenas formatação."""
+    _STATUS_LABEL = {
+        StatusPedido.A_PAGAR:          "🟡 A PAGAR",
+        StatusPedido.PAGO:             "🟢 PAGO",
+        StatusPedido.PENDENTE_REVISAO: "🔴 PENDENTE DE REVISÃO",
+        StatusPedido.SUBSTITUIDO:      "⚫ SUBSTITUÍDO",
+        StatusPedido.SEM_LANCAMENTO:   "⚪ Sem lançamento",
+    }
+    SEP = "\n──────────────────────────────\n"
+
+    cabecalho = (
+        f"📦 Pedido {pedido.codigo}\n\n"
+        f"Status:\n{_STATUS_LABEL.get(pedido.status, pedido.status)}\n\n"
+        f"Fornecedor:\n{pedido.fornecedor}\n\n"
+        f"CNPJ:\n{pedido.cnpj}"
+    )
+
+    fin = ["Financeiro"]
+    if pedido.valor_orcamento > 0:
+        fin.append(f"Valor orçamento:\nR$ {_fmt_brl(pedido.valor_orcamento)}")
+    if pedido.desconto > 0:
+        fin.append(f"Desconto:\n-R$ {_fmt_brl(pedido.desconto)}")
+        fin.append(f"Valor negociado:\nR$ {_fmt_brl(pedido.valor_negociado)}")
+    elif pedido.valor_negociado > 0:
+        fin.append(f"Valor:\nR$ {_fmt_brl(pedido.valor_negociado)}")
+    fin.append(f"Condição de pagamento:\n{pedido.condicao_pagamento}")
+    fin.append(f"Vencimento:\n{pedido.vencimento}")
+    financeiro = "\n\n".join(fin)
+
+    entrega = f"Entrega\n\nData prevista:\n{pedido.entrega_prevista}"
+
+    arq = ["Arquivos vinculados"]
+    if pedido.caminho_orcamento:
+        arq.append(f"📎 {Path(pedido.caminho_orcamento).name}")
+    if pedido.caminho_docx:
+        arq.append(f"📄 {pedido.codigo}.docx")
+    if not (pedido.caminho_orcamento or pedido.caminho_docx):
+        arq.append("(nenhum arquivo localizado)")
+    arquivos = "\n".join(arq)
+
+    hist = ["Histórico"]
+    for data, evento in pedido.historico:
+        hist.append(f"{data}\n{evento}")
+    if not pedido.historico:
+        hist.append("(sem eventos registrados)")
+    historico = "\n\n".join(hist)
+
+    return SEP.join([cabecalho, financeiro, entrega, arquivos, historico])
+
+def teclado_pedido(doc_id, pfm_codigo):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Revisar",        callback_data=f"pfm_revisar:{doc_id}:{pfm_codigo}")],
+        [InlineKeyboardButton("📄 Ver PFM",        callback_data=f"pfm_ver:{doc_id}:{pfm_codigo}")],
+        [InlineKeyboardButton("💾 Lançamento",     callback_data=f"pfm_lanc:{doc_id}:{pfm_codigo}")],
+        [InlineKeyboardButton("📎 Histórico",      callback_data=f"pfm_hist:{doc_id}:{pfm_codigo}")],
+        [InlineKeyboardButton("✖️ Fechar",          callback_data=f"pfm_fechar:{doc_id}")],
+    ])
+
 def teclado_gerar(doc_id, tipo, ggv):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📄 Gerar PFM",      callback_data=f"pfm:{doc_id}:{ggv}")],
@@ -787,7 +1085,15 @@ def teclado_gerar(doc_id, tipo, ggv):
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != DONO_ID:
         return
-    await update.message.reply_text("Estou online.")
+    if TEST_MODE:
+        await update.message.reply_text(
+            "🧪 MODO TESTE ATIVO\n"
+            "Banco: data/laura_test.db\n"
+            "Uploads: data/test_uploads\n"
+            "PFMs: data/test_pfms"
+        )
+    else:
+        await update.message.reply_text("Estou online.")
 
 async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != DONO_ID:
@@ -807,6 +1113,8 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     conteudo = await tg_file.download_as_bytearray()
     hash_arquivo = hashlib.sha256(conteudo).hexdigest()
+    if TEST_MODE:
+        hash_arquivo += f"_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
 
     if ja_existe(hash_arquivo):
         await update.message.reply_text("⚠️ Este arquivo já foi recebido antes. Ignorando.")
@@ -826,45 +1134,43 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     caminho = UPLOADS / nome
     caminho.write_bytes(conteudo)
-    await update.message.reply_text("✅ Arquivo salvo. Classificando com IA...")
+    if TEST_MODE:
+        await update.message.reply_text("🧪 MODO TESTE ATIVO — dados não afetam produção.")
 
-    tipo_conteudo = "document" if mime == "application/pdf" else "image"
-    dados_b64 = base64.standard_b64encode(conteudo).decode()
-
-    resposta = claude.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=4096,
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": tipo_conteudo, "source": {"type": "base64", "media_type": mime, "data": dados_b64}},
-                {"type": "text", "text": PROMPT}
-            ]
-        }]
-    )
-
-    tipo, ggv, corpo = parse_resposta(resposta.content[0].text)
-    doc_id = registrar(nome, caminho, hash_arquivo, tipo, ggv, corpo)
-
-    emoji, label_tipo = TIPOS.get(tipo, ("📄", tipo))
-    label_ggv = ggv if ggv != "nao_identificado" else "❓ GGV não identificado"
+    doc_id = registrar(nome, caminho, hash_arquivo, "pendente", "nao_identificado", "")
 
     await update.message.reply_text(
-        f"{emoji} {label_tipo} | 🏗 {label_ggv}\n\n{corpo}\n\nConfirmar ou ajustar?",
-        reply_markup=teclado_confirmacao(doc_id, tipo, ggv)
+        "Arquivo salvo. Que tipo de documento é este?",
+        reply_markup=teclado_tipo_inicial(doc_id)
     )
 
 async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != DONO_ID:
         return
     aguardando = ctx.user_data.get("aguardando")
+    texto      = update.message.text.strip()
+
     if not aguardando:
-        await update.message.reply_text("Recebi. Ainda não sei o que fazer com isso.")
+        m = PFM_CODIGO_RE.search(texto)
+        if m:
+            pfm_codigo = m.group(1).upper()
+            pedido = buscar_pedido(pfm_codigo)
+            if pedido:
+                preparar_visualizacao_pedido(pedido)
+                await update.message.reply_text(
+                    mostrar_pedido(pedido),
+                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo)
+                )
+            else:
+                await update.message.reply_text(f"❌ Pedido {pfm_codigo} não encontrado.")
+        else:
+            await update.message.reply_text(
+                "Não entendi. Para abrir um pedido, use:\nabrir GGV03-009"
+            )
         return
 
     doc_id = ctx.user_data.get("doc_id")
     ggv    = ctx.user_data.get("ggv")
-    texto  = update.message.text.strip()
 
     if aguardando == "condicao_pgto":
         atualizar(doc_id, condicao_pgto=texto)
@@ -942,6 +1248,11 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": None})
                 texto, markup = _resumo_gerar(int(doc_id))
                 await query.edit_message_text(texto, reply_markup=markup)
+            elif tipo == "comprovante_pix":
+                dados_claude = _dados_doc(int(doc_id))
+                dados        = parse_comprovante(dados_claude)
+                candidatos   = buscar_candidatos_pix(dados["valor_v"], dados["favorecido"], dados["cnpj"])
+                await query.edit_message_text(mostrar_comprovante_candidatos(dados, candidatos))
             else:
                 emoji, label = TIPOS.get(tipo, ("📄", tipo))
                 await query.edit_message_text(f"✅ Confirmado: {emoji} {label} | 🏗 {ggv}")
@@ -971,6 +1282,52 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(
                     f"{emoji} {label} | 🏗 {label_ggv}\n\n{corpo}\n\nTipo corrigido. Confirmar ou ajustar?",
                     reply_markup=teclado_confirmacao(int(doc_id), novo_tipo, ggv)
+                )
+
+        elif acao == "sel_tipo_inicial":
+            _, doc_id, tipo = partes
+            with sqlite3.connect(DB_PATH) as con:
+                row = con.execute("SELECT caminho FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
+            if not row:
+                await query.edit_message_text("❌ Documento não encontrado.")
+                return
+            caminho_doc = row[0]
+            mime_inf = "application/pdf" if caminho_doc.lower().endswith(".pdf") else "image/jpeg"
+            tipo_conteudo = "document" if mime_inf == "application/pdf" else "image"
+            conteudo = Path(caminho_doc).read_bytes()
+            dados_b64 = base64.standard_b64encode(conteudo).decode()
+            await query.edit_message_text("⏳ Analisando com IA...")
+            resposta = claude.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=4096,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": tipo_conteudo, "source": {"type": "base64", "media_type": mime_inf, "data": dados_b64}},
+                        {"type": "text", "text": PROMPT}
+                    ]
+                }]
+            )
+            _, ggv, corpo = parse_resposta(resposta.content[0].text)
+            atualizar(int(doc_id), tipo=tipo, ggv=ggv, dados_claude=corpo)
+            emoji, label_tipo = TIPOS.get(tipo, ("📄", tipo))
+            label_ggv = ggv if ggv != "nao_identificado" else "❓ GGV não identificado"
+            if tipo == "comprovante_pix":
+                dados    = parse_comprovante(corpo)
+                candidatos = buscar_candidatos_pix(dados["valor_v"], dados["favorecido"], dados["cnpj"])
+                await query.edit_message_text(mostrar_comprovante_candidatos(dados, candidatos))
+            elif tipo == "orcamento":
+                await query.edit_message_text(
+                    f"{emoji} {label_tipo} | 🏗 {label_ggv}\n\n{corpo}\n\nConfirmar ou ajustar?",
+                    reply_markup=teclado_confirmacao(int(doc_id), tipo, ggv)
+                )
+            else:
+                await query.edit_message_text(
+                    f"{emoji} {label_tipo}\n\n{corpo}\n\nConfirmar ou cancelar?",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("✅ Confirmar", callback_data=f"ok:{doc_id}:{tipo}:{ggv}"),
+                        InlineKeyboardButton("❌ Cancelar",  callback_data=f"cancelar:{doc_id}"),
+                    ]])
                 )
 
         elif acao == "sel_ggv":
@@ -1132,6 +1489,86 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     f"   Status: A PAGAR"
                 )
             await ctx.bot.send_message(chat_id=DONO_ID, text=lanc_msg)
+
+        elif acao == "pfm_revisar":
+            _, doc_id, pfm_codigo = partes
+            await query.edit_message_text(
+                f"🔄 Revisão de {pfm_codigo} será implementada na próxima fiada.",
+                reply_markup=teclado_pedido(doc_id, pfm_codigo)
+            )
+
+        elif acao == "pfm_ver":
+            _, doc_id, pfm_codigo = partes
+            with sqlite3.connect(DB_PATH) as con:
+                row = con.execute("SELECT ggv FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
+            if not row:
+                await query.answer("Documento não encontrado.", show_alert=True)
+                return
+            ggv_doc = row[0]
+            pasta = _pasta_pfm(ggv_doc)
+            prefixo = "TESTE-" if TEST_MODE else ""
+            pfm_path = pasta / f"{prefixo}{pfm_codigo}.docx"
+            if pfm_path.exists():
+                with open(pfm_path, "rb") as f:
+                    await ctx.bot.send_document(
+                        chat_id=DONO_ID,
+                        document=f,
+                        filename=f"{pfm_codigo}.docx",
+                        caption=f"📄 {pfm_codigo}"
+                    )
+            else:
+                await query.answer(
+                    "Arquivo PFM não localizado no disco.\n"
+                    "Pode ter sido movido, renomeado ou ainda não gerado.",
+                    show_alert=True
+                )
+
+        elif acao == "pfm_lanc":
+            _, doc_id, pfm_codigo = partes
+            with sqlite3.connect(DB_PATH) as con:
+                row = con.execute(
+                    "SELECT fornecedor, valor, data_prevista_entrega, vencimento_pagamento, status, criado_em "
+                    "FROM lancamentos WHERE pfm_codigo=?",
+                    (pfm_codigo,)
+                ).fetchone()
+            if not row:
+                await query.edit_message_text(
+                    f"❌ Nenhum lançamento registrado para {pfm_codigo}.",
+                    reply_markup=teclado_pedido(doc_id, pfm_codigo)
+                )
+                return
+            forn, valor, data_ent, venc, status_lanc, criado = row
+            valor_fmt = f"R$ {_fmt_brl(valor)}" if valor else "Não informado"
+            status_labels = {
+                "a_pagar":          "A PAGAR",
+                "pago":             "PAGO",
+                "substituido":      "SUBSTITUÍDO",
+                "pendente_revisao": "PENDENTE DE REVISÃO",
+            }
+            status_fmt = status_labels.get(status_lanc, status_lanc)
+            texto_lanc = (
+                f"💾 Lançamento {pfm_codigo}\n\n"
+                f"👤 Fornecedor: {forn or 'Não informado'}\n"
+                f"💲 Valor: {valor_fmt}\n"
+                f"📅 Prev. entrega: {data_ent or 'Não informada'}\n"
+                f"🗓 Vencimento pgto: {venc or 'Não definido'}\n"
+                f"📌 Status: {status_fmt}\n"
+                f"🕐 Registrado: {criado}"
+            )
+            await query.edit_message_text(
+                texto_lanc,
+                reply_markup=teclado_pedido(doc_id, pfm_codigo)
+            )
+
+        elif acao == "pfm_hist":
+            _, doc_id, pfm_codigo = partes
+            await query.edit_message_text(
+                f"📎 Histórico completo de {pfm_codigo} será implementado em breve.",
+                reply_markup=teclado_pedido(doc_id, pfm_codigo)
+            )
+
+        elif acao == "pfm_fechar":
+            await query.edit_message_text("✖️ Fechado.")
 
     except Exception as e:
         await ctx.bot.send_message(chat_id=DONO_ID, text=f"❌ Erro interno: {e}")
