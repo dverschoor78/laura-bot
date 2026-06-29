@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-06-29
-> Sessão: Engenharia de desenvolvimento — Fiada 3
+> Sessão: Engenharia de desenvolvimento — Fiada 5
 
 ---
 
@@ -79,12 +79,15 @@ Nada. A versão v0.3.0 foi encerrada limpa.
 
 ## Objetivo da Próxima Sessão
 
-Continuar a engenharia de desenvolvimento do projeto.
+Concluir a engenharia de desenvolvimento do projeto.
 
 Próxima fiada:
 
-Atualizar `docs/ARQUITETURA.md` para refletir a realidade atual — monólito em `bot.py`,
-SQLite, Claude API, Telegram e OneDrive. Remover a estrutura modular que não existe.
+Criar `docs/PROCESSO.md` — formalizar o ciclo de trabalho (abertura, planejamento,
+implementação, encerramento) e os checklists de qualidade.
+
+Após o PROCESSO.md, a engenharia estará concluída e voltamos ao desenvolvimento
+de funcionalidades. Primeira funcionalidade: Marcar como PAGO.
 
 ---
 

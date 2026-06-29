@@ -6,18 +6,18 @@
 
 ## Próxima Fiada
 
-**Atualizar `docs/ARQUITETURA.md`**
+**Criar `docs/PROCESSO.md`**
 
-Objetivo: atualizar o documento de arquitetura para refletir a realidade atual do projeto.
+Objetivo: formalizar o ciclo de trabalho do projeto — abertura de sessão,
+planejamento da fiada, implementação, encerramento e checklists de qualidade.
 
-Motivo: o documento atual descreve uma estrutura modular que não existe. O sistema
-funciona como monólito em `bot.py`, com SQLite, Claude API, Telegram e OneDrive.
-A documentação precisa refletir o que existe, não a arquitetura idealizada.
+Motivo: é o último documento da engenharia de desenvolvimento. Com ele concluído,
+qualquer sessão futura (com qualquer IA) pode ser iniciada com contexto completo
+e processo definido.
 
-Critério de aceite: ao ler `docs/ARQUITETURA.md`, qualquer pessoa deve entender
-o que a Laura faz hoje, quais tecnologias estão em uso, qual é a arquitetura real,
-quais tabelas existem no banco, quais fluxos principais funcionam e quais limitações
-arquiteturais são conhecidas.
+Critério de aceite: ao ler `docs/PROCESSO.md`, qualquer pessoa deve entender
+como abrir uma sessão, como planejar e executar uma fiada, e o que fazer antes
+de encerrar.
 
 Tamanho esperado: Pequeno
 
@@ -25,11 +25,11 @@ Tamanho esperado: Pequeno
 
 ## Próximas Fiadas
 
-1. Criar `docs/decisoes/ADR-001-monolito-vs-modulos.md`
-2. Criar `docs/PROCESSO.md`
-3. Marcar como PAGO — fechar o ciclo financeiro completo
-4. PDF via LibreOffice headless
-5. `pfm_revisar` — implementar revisão da PFM (botão existe, ação pendente)
+1. Marcar como PAGO — fechar o ciclo financeiro completo
+2. PDF via LibreOffice headless
+3. `pfm_revisar` — implementar revisão da PFM (botão existe, ação pendente)
+4. `pfm_hist` — histórico completo do pedido (botão existe, ação pendente)
+5. Corrigir BD fornecedores (MO Construção CNPJ, PRUDENTÓPOLIS split)
 
 ---
 

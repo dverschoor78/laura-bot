@@ -116,18 +116,18 @@ Dennis digita o código (ex: GGV03-009)
 
 Referências para navegação no arquivo (1418 linhas):
 
-| Bloco | Âncora | O que faz |
+| Bloco | Referência | O que faz |
 |---|---|---|
-| Imports e inicialização | linha 1 — `import os` | Dependências, variáveis de ambiente, cliente Claude |
-| Constantes e configuração | linha 30 — `TIPOS` | TIPOS, GGVS, DELTAD, GGV_ONEDRIVE, ENDERECOS |
-| Domínio — Pedido | linha 75 — `StatusPedido` | Enum de status e dataclass `Pedido` com 17 campos |
-| Integração Claude | linha 113 — `PROMPT` | Prompt de extração estruturada |
-| Banco de dados | linha 168 — `init_db()` | Criação de tabelas, CRUD: `registrar()`, `atualizar()`, `buscar_fornecedor()` |
-| Geração de PFM | linha 348 — `_campo()` | Helpers de parsing e formatação; `gerar_pfm()` na linha 533 |
-| Domínio — consulta | linha 827 — `buscar_pedido()` | Pipeline: `buscar_pedido()` → `preparar_visualizacao_pedido()` → `mostrar_pedido()` |
-| Teclados | linha 774 — `parse_resposta()` | `parse_resposta()` e todas as funções `teclado_*()` |
-| Handlers Telegram | linha 961 — `start()` | `receber_arquivo()`, `receber_texto()`, `responder_botao()` |
-| Inicialização | linha 1410 | Registro dos handlers e `app.run_polling()` |
+| Imports e inicialização | `load_dotenv()`, `claude = anthropic...` | Dependências, variáveis de ambiente, cliente Claude |
+| Constantes e configuração | `TIPOS`, `DELTAD`, `GGV_ONEDRIVE` | Mapeamentos de tipos, GGVs, dados DeltaD, endereços |
+| Domínio — Pedido | `StatusPedido`, `Pedido` | Enum de status e dataclass com 17 campos |
+| Integração Claude | `PROMPT` | Prompt de extração estruturada |
+| Banco de dados | `init_db()`, `buscar_fornecedor()` | Criação de tabelas, CRUD |
+| Geração de PFM | `gerar_pfm()`, `_campo()`, `_itens()` | Helpers de parsing e formatação; geração do Word |
+| Domínio — consulta | `buscar_pedido()`, `mostrar_pedido()` | Pipeline de visualização do pedido |
+| Teclados | `parse_resposta()`, `teclado_confirmacao()` | Parse da resposta Claude e botões inline |
+| Handlers Telegram | `receber_arquivo()`, `receber_texto()`, `responder_botao()` | Handlers de mensagens e callbacks |
+| Inicialização | `app.run_polling()` | Registro dos handlers e loop principal |
 
 ---
 
