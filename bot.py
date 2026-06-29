@@ -302,35 +302,58 @@ def _dados_display(dados):
     linhas = [l for l in dados.split('\n') if not _CAMPOS_RESUMO_RE.match(l)]
     return '\n'.join(linhas).strip()
 
-def _resumo_gerar(doc_id):
+def _resumo_gerar(doc_id, cta="Confirmar para gerar o Pedido de Compra."):
     with sqlite3.connect(DB_PATH) as con:
         row = con.execute(
-            "SELECT dados_claude, tipo, ggv, condicao_pgto, data_entrega, endereco_entrega, desconto_rs FROM documentos WHERE id=?",
+            "SELECT dados_claude, tipo, ggv, condicao_pgto, data_entrega, desconto_rs FROM documentos WHERE id=?",
             (doc_id,)
         ).fetchone()
     if not row:
         return "Documento não encontrado.", None
-    dados, tipo, ggv, condicao, data_ent, endereco, desconto_rs = row
-    emoji, label_tipo = TIPOS.get(tipo, ("📄", tipo))
+    dados, tipo, ggv, condicao, data_ent, desconto_rs = row
+    _, label_tipo = TIPOS.get(tipo, ("📄", tipo))
     label_ggv = ggv if ggv != "nao_identificado" else "Obra não identificada"
-    linhas_resumo = [
-        f"Pagamento: {condicao}" if condicao  else "Pagamento: não informado",
-        f"Entrega: {data_ent}"   if data_ent  else "Entrega: não informada",
-        f"Endereço: {endereco}"  if endereco  else "Endereço: não informado",
-    ]
+
+    fornecedor = _campo(dados, "Fornecedor") or "Fornecedor não identificado"
+    cnpj       = _campo(dados, "CNPJ/CPF")
+    pix        = _campo(dados, "Chave PIX")
+    condicao   = condicao or _campo(dados, "Condição de pagamento") or ""
+    data_ent   = data_ent  or _campo(dados, "Prazo de entrega") or ""
+    n_itens    = sum(1 for l in dados.splitlines() if re.match(r"^\d+\.", l.strip()))
     subtotal_v, desconto_v, total_final_v = _calcular_totais(dados, desconto_rs)
-    linhas_resumo.append("")
-    if desconto_v > 0 and subtotal_v > 0:
-        pct = desconto_v / subtotal_v * 100
-        linhas_resumo += [
-            f"Subtotal:            R$ {_fmt_brl(subtotal_v)}",
-            f"Desconto:           -R$ {_fmt_brl(desconto_v)} ({pct:.1f}%)",
-            f"Valor com desconto:  R$ {_fmt_brl(total_final_v)}",
-        ]
-    elif total_final_v > 0:
-        linhas_resumo.append(f"Valor:   R$ {_fmt_brl(total_final_v)}")
-    texto = f"{label_tipo} · {label_ggv}\n\n{_dados_display(dados)}\n\n" + "\n".join(linhas_resumo) + "\n\nConfirmar para gerar o Pedido de Compra."
-    return texto, teclado_gerar(doc_id, tipo, ggv)
+
+    SEP = "──────────────────────────────────"
+    linhas = [fornecedor, f"{label_tipo} · {label_ggv}", SEP]
+
+    if total_final_v > 0:
+        valor_str = f"R$ {_fmt_brl(total_final_v)}"
+        if desconto_v > 0 and subtotal_v > 0:
+            pct = desconto_v / subtotal_v * 100
+            valor_str += f"  (desconto {pct:.0f}%)"
+        linhas.append(valor_str)
+
+    detalhe = []
+    if n_itens > 0:
+        detalhe.append(f"{n_itens} {'item' if n_itens == 1 else 'itens'}")
+    cond = condicao.strip()
+    if cond and cond.lower() not in ("a preencher", "não especificado"):
+        detalhe.append(cond)
+    if detalhe:
+        linhas.append(" · ".join(detalhe))
+
+    data = data_ent.strip()
+    if data and data.lower() not in ("a preencher", "não especificado"):
+        linhas.append(f"Entrega: {data}")
+
+    linhas.append(SEP)
+
+    if cnpj or pix:
+        if cnpj: linhas.append(f"CNPJ   {cnpj}")
+        if pix:  linhas.append(f"PIX    {pix}")
+        linhas.append(SEP)
+
+    linhas.append(cta)
+    return "\n".join(linhas), teclado_gerar(doc_id, tipo, ggv)
 
 _FORN_COLS = ["nome", "razao_social", "cnpj", "cpf", "chave_pix", "email",
               "whatsapp", "logradouro", "numero", "bairro", "cidade", "uf", "cep"]
@@ -1292,11 +1315,9 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 texto, markup = _resumo_gerar(int(doc_id))
                 await query.edit_message_text(texto, reply_markup=markup)
             else:
-                _, label = TIPOS.get(novo_tipo, ("📄", novo_tipo))
-                label_ggv = ggv if ggv != "nao_identificado" else "Obra não identificada"
-                corpo = _dados_doc(int(doc_id))
+                texto_resumo, _ = _resumo_gerar(int(doc_id), "Tipo corrigido. Confirmar?")
                 await query.edit_message_text(
-                    f"{label} · {label_ggv}\n\n{corpo}\n\nTipo corrigido. Confirmar?",
+                    texto_resumo,
                     reply_markup=teclado_confirmacao(int(doc_id), novo_tipo, ggv)
                 )
 
@@ -1353,8 +1374,9 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                         reply_markup=markup
                     )
             elif tipo == "orcamento":
+                texto_resumo, _ = _resumo_gerar(int(doc_id), "Confirmar ou corrigir?")
                 await query.edit_message_text(
-                    f"{label_tipo} · {label_ggv}\n\n{corpo}\n\nConfirmar ou corrigir?",
+                    texto_resumo,
                     reply_markup=teclado_confirmacao(int(doc_id), tipo, ggv)
                 )
             else:
@@ -1463,11 +1485,9 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 texto, markup = _resumo_gerar(int(doc_id))
                 await query.edit_message_text(texto, reply_markup=markup)
             else:
-                _, label = TIPOS.get(tipo, ("📄", tipo))
-                label_ggv = novo_ggv if novo_ggv != "nao_identificado" else "Obra não identificada"
-                corpo = _dados_doc(int(doc_id))
+                texto_resumo, _ = _resumo_gerar(int(doc_id), "Obra corrigida. Confirmar?")
                 await query.edit_message_text(
-                    f"{label} · {label_ggv}\n\n{corpo}\n\nObra corrigida. Confirmar?",
+                    texto_resumo,
                     reply_markup=teclado_confirmacao(int(doc_id), tipo, novo_ggv)
                 )
 
