@@ -870,7 +870,7 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Documento não encontrado.")
 
     elif aguardando == "endereco_entrega":
-        atualizar(doc_id, endereco_entrega=texto, status="pronto_pfm")
+        atualizar(doc_id, endereco_entrega=texto)
         ctx.user_data["aguardando"] = None
         texto_resumo, markup = _resumo_gerar(doc_id)
         await update.message.reply_text(texto_resumo, reply_markup=markup)
@@ -969,7 +969,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text("✏️ Digite o endereço de entrega:")
                 return
             endereco = ENDERECOS.get(escolha, escolha)
-            atualizar(int(doc_id), endereco_entrega=endereco, status="pronto_pfm")
+            atualizar(int(doc_id), endereco_entrega=endereco)
             texto, markup = _resumo_gerar(int(doc_id))
             await query.edit_message_text(texto, reply_markup=markup)
 
