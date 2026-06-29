@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-06-29
-> Sessão: Sprint de Experiência — Fase 0 (Glossário)
+> Sessão: Sprint de Experiência — Fase 1 (Voz)
 
 ---
 
@@ -103,9 +103,9 @@ Nada. Sprint de Produto encerrada limpa.
 
 ## Objetivo da Próxima Sessão
 
-**Fase 1 — Voz** — reescrever todas as mensagens da Laura aplicando o Glossário e
-os padrões de mensagem da Sprint de Experiência. Nenhuma lógica nova — apenas
-linguagem e estrutura visual. A Laura já deve soar como produto depois desta fase.
+**Fase 2 — Estrutura** — reorganizar o conteúdo das telas principais: extração com
+fornecedor e valor em destaque, tela de pedido criado com saldo do GGV, tela de
+pagamento confirmado com saldo restante, erros com próximo passo sempre informado.
 
 ---
 

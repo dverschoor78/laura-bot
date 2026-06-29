@@ -309,27 +309,27 @@ def _resumo_gerar(doc_id):
             (doc_id,)
         ).fetchone()
     if not row:
-        return "❌ Documento não encontrado.", None
+        return "Documento não encontrado.", None
     dados, tipo, ggv, condicao, data_ent, endereco, desconto_rs = row
     emoji, label_tipo = TIPOS.get(tipo, ("📄", tipo))
-    label_ggv = ggv if ggv != "nao_identificado" else "❓ GGV não identificado"
+    label_ggv = ggv if ggv != "nao_identificado" else "Obra não identificada"
     linhas_resumo = [
-        f"💰 {condicao}"  if condicao  else "💰 Condição de pgto: não informada",
-        f"📅 {data_ent}"  if data_ent  else "📅 Data de entrega: não informada",
-        f"📍 {endereco}"  if endereco  else "📍 Endereço: não informado",
+        f"Pagamento: {condicao}" if condicao  else "Pagamento: não informado",
+        f"Entrega: {data_ent}"   if data_ent  else "Entrega: não informada",
+        f"Endereço: {endereco}"  if endereco  else "Endereço: não informado",
     ]
     subtotal_v, desconto_v, total_final_v = _calcular_totais(dados, desconto_rs)
     linhas_resumo.append("")
     if desconto_v > 0 and subtotal_v > 0:
         pct = desconto_v / subtotal_v * 100
         linhas_resumo += [
-            f"💲 Subtotal:         R$ {_fmt_brl(subtotal_v)}",
-            f"🏷️ Desconto:        -R$ {_fmt_brl(desconto_v)} ({pct:.1f}%)",
-            f"✅ Valor negociado:  R$ {_fmt_brl(total_final_v)}",
+            f"Subtotal:            R$ {_fmt_brl(subtotal_v)}",
+            f"Desconto:           -R$ {_fmt_brl(desconto_v)} ({pct:.1f}%)",
+            f"Valor com desconto:  R$ {_fmt_brl(total_final_v)}",
         ]
     elif total_final_v > 0:
-        linhas_resumo.append(f"✅ Valor:            R$ {_fmt_brl(total_final_v)}")
-    texto = f"{emoji} {label_tipo} | 🏗 {label_ggv}\n\n{_dados_display(dados)}\n\n" + "\n".join(linhas_resumo) + "\n\nRevisar e gerar PFM."
+        linhas_resumo.append(f"Valor:   R$ {_fmt_brl(total_final_v)}")
+    texto = f"{label_tipo} · {label_ggv}\n\n{_dados_display(dados)}\n\n" + "\n".join(linhas_resumo) + "\n\nConfirmar para gerar o Pedido de Compra."
     return texto, teclado_gerar(doc_id, tipo, ggv)
 
 _FORN_COLS = ["nome", "razao_social", "cnpj", "cpf", "chave_pix", "email",
@@ -617,7 +617,7 @@ def gerar_pfm(doc_id):
     c_l = tbl_h.rows[0].cells[0]
     r = c_l.paragraphs[0].add_run("DeltaD Engenharia")
     r.bold = True; r.font.size = Pt(13)
-    p2 = c_l.add_paragraph("Pedido de Fornecimento de Material")
+    p2 = c_l.add_paragraph("Pedido de Compra")
     p2.runs[0].font.size = Pt(9)
 
     c_r = tbl_h.rows[0].cells[1]
@@ -864,28 +864,29 @@ def buscar_candidatos_pix(valor_v: float, favorecido: str, cnpj: str) -> list:
 def mostrar_comprovante_candidatos(dados: dict, candidatos: list) -> str:
     """Formata a mensagem de comprovante + candidatos para o Telegram. Sem IO."""
     def _conf(score):
-        if score >= 5: return "Alta ✅"
-        if score >= 3: return "Média 🟡"
-        return "Baixa 🔸"
+        if score >= 5: return "✓ exato"
+        if score >= 3: return "≈ próximo"
+        return "?"
 
-    linhas = ["💰 Comprovante identificado\n"]
-    linhas.append(f"• Valor:      R$ {dados['valor_fmt']}")
-    if dados["data"]        != "A PREENCHER": linhas.append(f"• Data:       {dados['data']}")
-    if dados["favorecido"]  != "A PREENCHER": linhas.append(f"• Favorecido: {dados['favorecido']}")
-    if dados["instituicao"] != "A PREENCHER": linhas.append(f"• Instituição: {dados['instituicao']}")
-    if dados["obs"]         != "A PREENCHER": linhas.append(f"• Identificador: {dados['obs']}")
+    linhas = ["Pagamento identificado.\n"]
+    if dados["favorecido"] != "A PREENCHER":
+        linhas.append(f"{dados['favorecido']} — R$ {dados['valor_fmt']}")
+    else:
+        linhas.append(f"R$ {dados['valor_fmt']}")
+    if dados["data"]        != "A PREENCHER": linhas.append(dados["data"])
+    if dados["instituicao"] != "A PREENCHER": linhas.append(dados["instituicao"])
+    if dados["obs"]         != "A PREENCHER": linhas.append(f"Ref: {dados['obs']}")
 
     linhas.append("")
 
     if not candidatos:
-        linhas.append("Nenhum lançamento A PAGAR corresponde a este comprovante.")
+        linhas.append("Nenhum pedido em aberto corresponde a este pagamento.")
         return "\n".join(linhas)
 
-    linhas.append("Possíveis correspondências:\n")
-    for i, c in enumerate(candidatos, 1):
+    linhas.append("Qual pedido este pagamento quita?\n")
+    for c in candidatos:
         valor_fmt = f"R$ {_fmt_brl(c['valor_lanc'])}" if c["valor_lanc"] else "—"
-        linhas.append(f"{i}. {c['pfm_codigo']} — {c['fornecedor']} — {valor_fmt}")
-        linhas.append(f"   Confiança: {_conf(c['score'])}\n")
+        linhas.append(f"🟡 #{c['pfm_codigo']}   {c['fornecedor']}   {valor_fmt}   {_conf(c['score'])}")
 
     return "\n".join(linhas)
 
@@ -904,19 +905,18 @@ def parse_resposta(texto):
     return tipo, ggv, "\n".join(corpo).strip()
 
 def teclado_confirmacao(doc_id, tipo, ggv):
-    emoji_tipo = TIPOS.get(tipo, ("📄", tipo))[0]
-    label_ggv  = ggv if ggv != "nao_identificado" else "❓GGV"
+    label_ggv = ggv if ggv != "nao_identificado" else "❓ Obra"
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("✅ Confirmar",          callback_data=f"ok:{doc_id}:{tipo}:{ggv}"),
-            InlineKeyboardButton(f"🔄 {emoji_tipo} Tipo", callback_data=f"sel_tipo:{doc_id}:{tipo}:{ggv}"),
+            InlineKeyboardButton("Tipo",                  callback_data=f"sel_tipo:{doc_id}:{tipo}:{ggv}"),
         ],
         [
-            InlineKeyboardButton(f"🏗 {label_ggv}",       callback_data=f"sel_ggv:{doc_id}:{tipo}:{ggv}"),
-            InlineKeyboardButton("❌ Cancelar",            callback_data=f"cancelar:{doc_id}"),
+            InlineKeyboardButton(f"Obra: {label_ggv}",   callback_data=f"sel_ggv:{doc_id}:{tipo}:{ggv}"),
+            InlineKeyboardButton("Cancelar",              callback_data=f"cancelar:{doc_id}"),
         ],
         [
-            InlineKeyboardButton("✏️ Editar campos",      callback_data=f"sel_edit:{doc_id}:{tipo}:{ggv}"),
+            InlineKeyboardButton("✏️ Corrigir campos",   callback_data=f"sel_edit:{doc_id}:{tipo}:{ggv}"),
         ]
     ])
 
@@ -924,10 +924,10 @@ def teclado_candidatos_pix(doc_id_comp: int, candidatos: list):
     botoes = []
     for c in candidatos:
         botoes.append([InlineKeyboardButton(
-            f"💳 Confirmar {c['pfm_codigo']}",
+            f"Pedido #{c['pfm_codigo']}",
             callback_data=f"pix_confirmar:{doc_id_comp}:{c['pfm_codigo']}"
         )])
-    botoes.append([InlineKeyboardButton("❌ Cancelar", callback_data="pix_cancelar")])
+    botoes.append([InlineKeyboardButton("Nenhum destes", callback_data="pix_cancelar")])
     return InlineKeyboardMarkup(botoes)
 
 def teclado_tipo_inicial(doc_id):
@@ -1026,7 +1026,7 @@ def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
     if pedido.doc_criado_em:
         historico.append((_fmt_data_curta(pedido.doc_criado_em), "Orçamento recebido"))
     if pedido.lanc_criado_em:
-        historico.append((_fmt_data_curta(pedido.lanc_criado_em), "PFM gerada · lançamento criado"))
+        historico.append((_fmt_data_curta(pedido.lanc_criado_em), "Pedido de Compra gerado"))
     pedido.historico = historico
 
     return pedido
@@ -1034,16 +1034,16 @@ def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
 def mostrar_pedido(pedido: Pedido) -> str:
     """Formata o Pedido como mensagem Telegram. Sem IO — apenas formatação."""
     _STATUS_LABEL = {
-        StatusPedido.A_PAGAR:          "🟡 A PAGAR",
-        StatusPedido.PAGO:             "🟢 PAGO",
-        StatusPedido.PENDENTE_REVISAO: "🔴 PENDENTE DE REVISÃO",
-        StatusPedido.SUBSTITUIDO:      "⚫ SUBSTITUÍDO",
-        StatusPedido.SEM_LANCAMENTO:   "⚪ Sem lançamento",
+        StatusPedido.A_PAGAR:          "🟡 Aguardando pagamento",
+        StatusPedido.PAGO:             "🟢 Pago",
+        StatusPedido.PENDENTE_REVISAO: "🔴 Requer atenção",
+        StatusPedido.SUBSTITUIDO:      "⚫ Substituído",
+        StatusPedido.SEM_LANCAMENTO:   "⚪ Sem registro financeiro",
     }
     SEP = "\n──────────────────────────────\n"
 
     cabecalho = (
-        f"📦 Pedido {pedido.codigo}\n\n"
+        f"Pedido #{pedido.codigo}\n\n"
         f"Status:\n{_STATUS_LABEL.get(pedido.status, pedido.status)}\n\n"
         f"Fornecedor:\n{pedido.fornecedor}\n\n"
         f"CNPJ:\n{pedido.cnpj}"
@@ -1054,7 +1054,7 @@ def mostrar_pedido(pedido: Pedido) -> str:
         fin.append(f"Valor orçamento:\nR$ {_fmt_brl(pedido.valor_orcamento)}")
     if pedido.desconto > 0:
         fin.append(f"Desconto:\n-R$ {_fmt_brl(pedido.desconto)}")
-        fin.append(f"Valor negociado:\nR$ {_fmt_brl(pedido.valor_negociado)}")
+        fin.append(f"Valor com desconto:\nR$ {_fmt_brl(pedido.valor_negociado)}")
     elif pedido.valor_negociado > 0:
         fin.append(f"Valor:\nR$ {_fmt_brl(pedido.valor_negociado)}")
     fin.append(f"Condição de pagamento:\n{pedido.condicao_pagamento}")
@@ -1063,13 +1063,13 @@ def mostrar_pedido(pedido: Pedido) -> str:
 
     entrega = f"Entrega\n\nData prevista:\n{pedido.entrega_prevista}"
 
-    arq = ["Arquivos vinculados"]
+    arq = ["Documentos"]
     if pedido.caminho_orcamento:
-        arq.append(f"📎 {Path(pedido.caminho_orcamento).name}")
+        arq.append("📎 Orçamento original")
     if pedido.caminho_docx:
-        arq.append(f"📄 {pedido.codigo}.docx")
+        arq.append("📄 Pedido em Word")
     if not (pedido.caminho_orcamento or pedido.caminho_docx):
-        arq.append("(nenhum arquivo localizado)")
+        arq.append("Nenhum arquivo disponível")
     arquivos = "\n".join(arq)
 
     hist = ["Histórico"]
@@ -1083,18 +1083,18 @@ def mostrar_pedido(pedido: Pedido) -> str:
 
 def teclado_pedido(doc_id, pfm_codigo):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Revisar",        callback_data=f"pfm_revisar:{doc_id}:{pfm_codigo}")],
-        [InlineKeyboardButton("📄 Ver PFM",        callback_data=f"pfm_ver:{doc_id}:{pfm_codigo}")],
-        [InlineKeyboardButton("💾 Lançamento",     callback_data=f"pfm_lanc:{doc_id}:{pfm_codigo}")],
-        [InlineKeyboardButton("📎 Histórico",      callback_data=f"pfm_hist:{doc_id}:{pfm_codigo}")],
-        [InlineKeyboardButton("✖️ Fechar",          callback_data=f"pfm_fechar:{doc_id}")],
+        [InlineKeyboardButton("Revisar",        callback_data=f"pfm_revisar:{doc_id}:{pfm_codigo}")],
+        [InlineKeyboardButton("📄 Word",        callback_data=f"pfm_ver:{doc_id}:{pfm_codigo}")],
+        [InlineKeyboardButton("Financeiro",     callback_data=f"pfm_lanc:{doc_id}:{pfm_codigo}")],
+        [InlineKeyboardButton("Histórico",      callback_data=f"pfm_hist:{doc_id}:{pfm_codigo}")],
+        [InlineKeyboardButton("✖ Fechar",       callback_data=f"pfm_fechar:{doc_id}")],
     ])
 
 def teclado_gerar(doc_id, tipo, ggv):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📄 Gerar PFM",      callback_data=f"pfm:{doc_id}:{ggv}")],
-        [InlineKeyboardButton("✏️ Editar campos",  callback_data=f"sel_edit:{doc_id}:{tipo}:{ggv}")],
-        [InlineKeyboardButton("❌ Cancelar",        callback_data=f"cancelar:{doc_id}")],
+        [InlineKeyboardButton("✅ Gerar Pedido de Compra", callback_data=f"pfm:{doc_id}:{ggv}")],
+        [InlineKeyboardButton("✏️ Corrigir campos",        callback_data=f"sel_edit:{doc_id}:{tipo}:{ggv}")],
+        [InlineKeyboardButton("Cancelar",                  callback_data=f"cancelar:{doc_id}")],
     ])
 
 # ── Handlers ───────────────────────────────────────────────────────────────
@@ -1107,7 +1107,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "🧪 MODO TESTE ATIVO\n"
             "Banco: data/laura_test.db\n"
             "Uploads: data/test_uploads\n"
-            "PFMs: data/test_pfms"
+            "Pedidos: data/test_pfms"
         )
     else:
         await update.message.reply_text("Estou online.")
@@ -1134,7 +1134,7 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         hash_arquivo += f"_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
 
     if ja_existe(hash_arquivo):
-        await update.message.reply_text("⚠️ Este arquivo já foi recebido antes. Ignorando.")
+        await update.message.reply_text("Este arquivo já foi recebido.")
         return
 
     if mime is None:
@@ -1143,9 +1143,8 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ACEITOS = {"image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf"}
     if mime not in ACEITOS:
         await update.message.reply_text(
-            f"⚠️ Formato não suportado: {mime}\n\n"
-            "Aceito hoje:\n• 📷 Foto (JPEG, PNG, GIF, WEBP)\n• 📄 PDF\n\n"
-            "CSV e Excel chegam nas próximas versões."
+            f"Formato não suportado: {mime}\n\n"
+            "Aceito: foto (JPEG, PNG, GIF, WEBP) ou PDF."
         )
         return
 
@@ -1157,7 +1156,7 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     doc_id = registrar(nome, caminho, hash_arquivo, "pendente", "nao_identificado", "")
 
     await update.message.reply_text(
-        "Arquivo salvo. Que tipo de documento é este?",
+        "Documento recebido.\n\nO que você trouxe?",
         reply_markup=teclado_tipo_inicial(doc_id)
     )
 
@@ -1179,10 +1178,10 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo)
                 )
             else:
-                await update.message.reply_text(f"❌ Pedido {pfm_codigo} não encontrado.")
+                await update.message.reply_text(f"Pedido {pfm_codigo} não encontrado.")
         else:
             await update.message.reply_text(
-                "Não entendi. Para abrir um pedido, use:\nabrir GGV03-009"
+                "Para consultar um pedido, envie o código — ex: GGV03-009."
             )
         return
 
@@ -1237,7 +1236,7 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(texto_resumo, reply_markup=markup)
         else:
             ctx.user_data["aguardando"] = None
-            await update.message.reply_text("❌ Documento não encontrado.")
+            await update.message.reply_text("Documento não encontrado.")
 
     elif aguardando == "endereco_entrega":
         atualizar(doc_id, endereco_entrega=texto)
@@ -1252,7 +1251,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # GGV blocking — alert antes de responder, depois retorna
     if acao == "ok" and partes[3] == "nao_identificado":
-        await query.answer("⚠️ Selecione o GGV antes de confirmar.", show_alert=True)
+        await query.answer("Selecione a obra antes de confirmar.", show_alert=True)
         return
 
     await query.answer()
@@ -1272,11 +1271,11 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(mostrar_comprovante_candidatos(dados, candidatos))
             else:
                 emoji, label = TIPOS.get(tipo, ("📄", tipo))
-                await query.edit_message_text(f"✅ Confirmado: {emoji} {label} | 🏗 {ggv}")
+                await query.edit_message_text(f"Confirmado: {label}")
 
         elif acao == "cancelar":
             atualizar(int(partes[1]), status="cancelado")
-            await query.edit_message_text("❌ Cancelado.")
+            await query.edit_message_text("Cancelado.")
 
         elif acao == "sel_tipo":
             _, doc_id, tipo, ggv = partes
@@ -1293,11 +1292,11 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 texto, markup = _resumo_gerar(int(doc_id))
                 await query.edit_message_text(texto, reply_markup=markup)
             else:
-                emoji, label = TIPOS.get(novo_tipo, ("📄", novo_tipo))
-                label_ggv = ggv if ggv != "nao_identificado" else "❓ GGV não identificado"
+                _, label = TIPOS.get(novo_tipo, ("📄", novo_tipo))
+                label_ggv = ggv if ggv != "nao_identificado" else "Obra não identificada"
                 corpo = _dados_doc(int(doc_id))
                 await query.edit_message_text(
-                    f"{emoji} {label} | 🏗 {label_ggv}\n\n{corpo}\n\nTipo corrigido. Confirmar ou ajustar?",
+                    f"{label} · {label_ggv}\n\n{corpo}\n\nTipo corrigido. Confirmar?",
                     reply_markup=teclado_confirmacao(int(doc_id), novo_tipo, ggv)
                 )
 
@@ -1306,14 +1305,14 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             with sqlite3.connect(DB_PATH) as con:
                 row = con.execute("SELECT caminho FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
             if not row:
-                await query.edit_message_text("❌ Documento não encontrado.")
+                await query.edit_message_text("Documento não encontrado.")
                 return
             caminho_doc = row[0]
             mime_inf = "application/pdf" if caminho_doc.lower().endswith(".pdf") else "image/jpeg"
             tipo_conteudo = "document" if mime_inf == "application/pdf" else "image"
             conteudo = Path(caminho_doc).read_bytes()
             dados_b64 = base64.standard_b64encode(conteudo).decode()
-            await query.edit_message_text("⏳ Analisando com IA...")
+            await query.edit_message_text("Analisando...")
             resposta = claude.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=4096,
@@ -1328,7 +1327,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             _, ggv, corpo = parse_resposta(resposta.content[0].text)
             atualizar(int(doc_id), tipo=tipo, ggv=ggv, dados_claude=corpo)
             emoji, label_tipo = TIPOS.get(tipo, ("📄", tipo))
-            label_ggv = ggv if ggv != "nao_identificado" else "❓ GGV não identificado"
+            label_ggv = ggv if ggv != "nao_identificado" else "Obra não identificada"
             if tipo == "comprovante_pix":
                 dados = parse_comprovante(corpo)
                 ident = dados["id_transacao"] if dados["id_transacao"] != "A PREENCHER" else None
@@ -1342,10 +1341,9 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                         ).fetchone()
                 if ja_pago:
                     await query.edit_message_text(
-                        f"⚠️ Este comprovante já foi usado.\n\n"
-                        f"Pedido:\n{ja_pago[0]}\n\n"
-                        f"Status:\nPAGO\n\n"
-                        "Não é possível usar o mesmo comprovante para outro lançamento."
+                        f"Comprovante já registrado.\n\n"
+                        f"Pedido #{ja_pago[0]} — 🟢 Pago\n\n"
+                        "Cada comprovante pode ser usado apenas uma vez."
                     )
                 else:
                     candidatos = buscar_candidatos_pix(dados["valor_v"], dados["favorecido"], dados["cnpj"])
@@ -1356,15 +1354,15 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     )
             elif tipo == "orcamento":
                 await query.edit_message_text(
-                    f"{emoji} {label_tipo} | 🏗 {label_ggv}\n\n{corpo}\n\nConfirmar ou ajustar?",
+                    f"{label_tipo} · {label_ggv}\n\n{corpo}\n\nConfirmar ou corrigir?",
                     reply_markup=teclado_confirmacao(int(doc_id), tipo, ggv)
                 )
             else:
                 await query.edit_message_text(
-                    f"{emoji} {label_tipo}\n\n{corpo}\n\nConfirmar ou cancelar?",
+                    f"{label_tipo}\n\n{corpo}\n\nConfirmar ou cancelar?",
                     reply_markup=InlineKeyboardMarkup([[
                         InlineKeyboardButton("✅ Confirmar", callback_data=f"ok:{doc_id}:{tipo}:{ggv}"),
-                        InlineKeyboardButton("❌ Cancelar",  callback_data=f"cancelar:{doc_id}"),
+                        InlineKeyboardButton("Cancelar",    callback_data=f"cancelar:{doc_id}"),
                     ]])
                 )
 
@@ -1379,19 +1377,18 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     (pfm_codigo,)
                 ).fetchone()
             if not comp or not lanc:
-                await query.edit_message_text("❌ Dados não encontrados. Operação cancelada.")
+                await query.edit_message_text("Dados não encontrados.")
                 return
             dados_comp   = parse_comprovante(comp[0])
             forn, valor_lanc, status_lanc = lanc
-            status_label = {"a_pagar": "🟡 A PAGAR", "pago": "🟢 PAGO"}.get(status_lanc, status_lanc)
+            status_label = {"a_pagar": "🟡 Aguardando pagamento", "pago": "🟢 Pago"}.get(status_lanc, status_lanc)
             valor_lanc_fmt = f"R$ {_fmt_brl(valor_lanc)}" if valor_lanc else "—"
             texto = (
-                f"⚠️ Confirmar pagamento?\n\n"
-                f"• Comprovante:  R$ {dados_comp['valor_fmt']}  —  {dados_comp['data']}\n"
-                f"• Lançamento:   {pfm_codigo}\n"
-                f"• Fornecedor:   {forn}\n"
-                f"• Valor:        {valor_lanc_fmt}\n"
-                f"• Status atual: {status_label}"
+                f"Confirmar pagamento?\n\n"
+                f"Comprovante:  R$ {dados_comp['valor_fmt']}  {dados_comp['data']}\n"
+                f"Pedido:       #{pfm_codigo} — {forn}\n"
+                f"Valor:        {valor_lanc_fmt}\n"
+                f"Status:       {status_label}"
             )
             await query.edit_message_text(texto, reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ Confirmar pagamento",
@@ -1407,7 +1404,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     "SELECT dados_claude FROM documentos WHERE id=?", (int(doc_id_comp),)
                 ).fetchone()
             if not comp:
-                await query.edit_message_text("❌ Comprovante não encontrado. Operação cancelada.")
+                await query.edit_message_text("Comprovante não encontrado.")
                 return
             dados_comp = parse_comprovante(comp[0])
             ident_comp = dados_comp["id_transacao"] if dados_comp["id_transacao"] != "A PREENCHER" else None
@@ -1421,9 +1418,8 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     ).fetchone()
             if ja_usado:
                 await query.edit_message_text(
-                    f"⚠️ Este comprovante já foi usado para marcar o pedido "
-                    f"{ja_usado[0]} como PAGO.\n"
-                    "Não é possível usar o mesmo comprovante para outro lançamento."
+                    f"Comprovante já registrado no Pedido #{ja_usado[0]}.\n"
+                    "Cada comprovante pode ser usado apenas uma vez."
                 )
                 return
             data_pgto = dados_comp["data"] if dados_comp["data"] != "A PREENCHER" \
@@ -1440,16 +1436,16 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 rowcount = cur.rowcount
             if rowcount == 0:
                 await query.edit_message_text(
-                    "⚠️ Não foi possível marcar como pago.\n"
-                    "O lançamento pode já estar pago, cancelado ou ter sido alterado."
+                    "Não foi possível registrar o pagamento.\n"
+                    "O pedido pode já estar pago ou ter sido alterado."
                 )
                 return
             await query.edit_message_text(
-                f"✅ Pagamento confirmado.\n{pfm_codigo} marcado como 🟢 PAGO."
+                f"🟢 Pedido #{pfm_codigo} — pago."
             )
 
         elif acao == "pix_cancelar":
-            await query.edit_message_text("Operação cancelada.")
+            await query.edit_message_text("Cancelado.")
 
         elif acao == "sel_ggv":
             _, doc_id, tipo, ggv = partes
@@ -1467,11 +1463,11 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 texto, markup = _resumo_gerar(int(doc_id))
                 await query.edit_message_text(texto, reply_markup=markup)
             else:
-                emoji, label = TIPOS.get(tipo, ("📄", tipo))
-                label_ggv = novo_ggv if novo_ggv != "nao_identificado" else "❓ GGV não identificado"
+                _, label = TIPOS.get(tipo, ("📄", tipo))
+                label_ggv = novo_ggv if novo_ggv != "nao_identificado" else "Obra não identificada"
                 corpo = _dados_doc(int(doc_id))
                 await query.edit_message_text(
-                    f"{emoji} {label} | 🏗 {label_ggv}\n\n{corpo}\n\nGGV corrigido. Confirmar ou ajustar?",
+                    f"{label} · {label_ggv}\n\n{corpo}\n\nObra corrigida. Confirmar?",
                     reply_markup=teclado_confirmacao(int(doc_id), tipo, novo_ggv)
                 )
 
@@ -1479,7 +1475,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             _, doc_id, ggv, escolha = partes
             if escolha == "outro":
                 ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": "condicao_pgto"})
-                await query.edit_message_text("✏️ Digite a condição de pagamento:")
+                await query.edit_message_text("Condição de pagamento:")
                 return
             label_pgto = CONDICOES.get(escolha, escolha)
             atualizar(int(doc_id), condicao_pgto=label_pgto)
@@ -1491,7 +1487,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             _, doc_id, ggv, escolha = partes
             if escolha == "outro":
                 ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": "endereco_entrega"})
-                await query.edit_message_text("✏️ Digite o endereço de entrega:")
+                await query.edit_message_text("Endereço de entrega:")
                 return
             endereco = ENDERECOS.get(escolha, escolha)
             atualizar(int(doc_id), endereco_entrega=endereco)
@@ -1523,13 +1519,13 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if campo == "pgto":
                 ctx.user_data["aguardando"] = None
                 await query.edit_message_text(
-                    "💰 Selecione a condição de pagamento:",
+                    "Condição de pagamento:",
                     reply_markup=teclado_condicao(doc_id, ggv)
                 )
             elif campo == "endereco":
                 ctx.user_data["aguardando"] = None
                 await query.edit_message_text(
-                    "📍 Selecione o endereço de entrega:",
+                    "Endereço de entrega:",
                     reply_markup=teclado_endereco(doc_id, ggv)
                 )
             elif campo == "itens":
@@ -1538,14 +1534,11 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     row = con.execute("SELECT dados_claude FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
                 bloco = _bloco_itens(row[0] if row else "")
                 await query.edit_message_text(
-                    f"📦 Itens atuais:\n\n{bloco}\n\n"
-                    "✏️ Digite os novos itens.\n\n"
-                    "Para cálculo automático do total no PFM, use o formato:\n"
-                    "1. Descrição (qtde UN) — R$ valor_total\n\n"
-                    "Exemplo:\n"
-                    "1. Cimento 50kg (10 sc) — R$ 350,00\n"
-                    "2. Areia grossa (5 m³) — R$ 875,00\n\n"
-                    "Formato livre também é aceito, mas sem cálculo automático."
+                    f"Itens atuais:\n\n{bloco}\n\n"
+                    "Novos itens:\n"
+                    "Use o formato para cálculo automático:\n"
+                    "1. Descrição (qtde UN) — R$ valor_total\n"
+                    "Ex: 1. Cimento 50kg (10 sc) — R$ 350,00"
                 )
             else:
                 aguardando_campo = "data_entrega" if campo == "data" else f"edit_{campo}"
@@ -1576,7 +1569,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 else:
                     atual = _campo(dados_atuais, campo_doc.get(campo, campo))
                 await query.edit_message_text(
-                    f"Valor atual:\n{atual}\n\n✏️ Digite o {labels.get(campo, campo)}:"
+                    f"Atual: {atual}\n\nNovo valor:"
                 )
 
         elif acao == "voltar_edit":
@@ -1586,35 +1579,33 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         elif acao == "pfm":
             _, doc_id, ggv = partes
-            await query.edit_message_text("⏳ Gerando PFM...")
+            await query.edit_message_text("Gerando Pedido de Compra...")
             caminho, codigo, fornecedor, valor_v, lanc_status, ja_existia = gerar_pfm(int(doc_id))
             with open(caminho, "rb") as f:
                 await ctx.bot.send_document(
                     chat_id=DONO_ID,
                     document=f,
                     filename=f"{codigo}.docx",
-                    caption=f"📄 {codigo} gerado."
+                    caption=f"Pedido #{codigo}"
                 )
             if ja_existia:
-                lanc_msg = f"⚠️ Lançamento {codigo} já estava registrado."
+                lanc_msg = f"Pedido #{codigo} já tinha registro financeiro."
             elif lanc_status == "pendente_revisao":
                 lanc_msg = (
-                    f"⚠️ Lançamento criado como PENDENTE DE REVISÃO\n"
-                    f"(fornecedor ou valor ausente — revisar manualmente)"
+                    f"🔴 Pedido #{codigo} requer atenção.\n"
+                    f"Fornecedor ou valor ausente — verifique antes de pagar."
                 )
             else:
                 lanc_msg = (
-                    f"💾 Lançamento registrado:\n"
-                    f"   Fornecedor: {fornecedor}\n"
-                    f"   Valor: R$ {_fmt_brl(valor_v)}\n"
-                    f"   Status: A PAGAR"
+                    f"🟡 {codigo} — aguardando pagamento\n\n"
+                    f"{fornecedor} — R$ {_fmt_brl(valor_v)}"
                 )
             await ctx.bot.send_message(chat_id=DONO_ID, text=lanc_msg)
 
         elif acao == "pfm_revisar":
             _, doc_id, pfm_codigo = partes
             await query.edit_message_text(
-                f"🔄 Revisão de {pfm_codigo} será implementada na próxima fiada.",
+                f"Revisão do Pedido #{pfm_codigo} ainda não está disponível.",
                 reply_markup=teclado_pedido(doc_id, pfm_codigo)
             )
 
@@ -1639,8 +1630,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     )
             else:
                 await query.answer(
-                    "Arquivo PFM não localizado no disco.\n"
-                    "Pode ter sido movido, renomeado ou ainda não gerado.",
+                    "Arquivo não localizado. Pode ter sido movido ou ainda não foi gerado.",
                     show_alert=True
                 )
 
@@ -1654,27 +1644,27 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ).fetchone()
             if not row:
                 await query.edit_message_text(
-                    f"❌ Nenhum lançamento registrado para {pfm_codigo}.",
+                    f"Nenhum registro financeiro para o Pedido #{pfm_codigo}.",
                     reply_markup=teclado_pedido(doc_id, pfm_codigo)
                 )
                 return
             forn, valor, data_ent, venc, status_lanc, criado = row
             valor_fmt = f"R$ {_fmt_brl(valor)}" if valor else "Não informado"
             status_labels = {
-                "a_pagar":          "A PAGAR",
-                "pago":             "PAGO",
-                "substituido":      "SUBSTITUÍDO",
-                "pendente_revisao": "PENDENTE DE REVISÃO",
+                "a_pagar":          "🟡 Aguardando pagamento",
+                "pago":             "🟢 Pago",
+                "substituido":      "⚫ Substituído",
+                "pendente_revisao": "🔴 Requer atenção",
             }
             status_fmt = status_labels.get(status_lanc, status_lanc)
             texto_lanc = (
-                f"💾 Lançamento {pfm_codigo}\n\n"
-                f"👤 Fornecedor: {forn or 'Não informado'}\n"
-                f"💲 Valor: {valor_fmt}\n"
-                f"📅 Prev. entrega: {data_ent or 'Não informada'}\n"
-                f"🗓 Vencimento pgto: {venc or 'Não definido'}\n"
-                f"📌 Status: {status_fmt}\n"
-                f"🕐 Registrado: {criado}"
+                f"Financeiro — Pedido #{pfm_codigo}\n\n"
+                f"Fornecedor: {forn or 'Não informado'}\n"
+                f"Valor: {valor_fmt}\n"
+                f"Entrega prevista: {data_ent or 'Não informada'}\n"
+                f"Vencimento: {venc or 'Não definido'}\n"
+                f"Status: {status_fmt}\n"
+                f"Registrado: {criado}"
             )
             await query.edit_message_text(
                 texto_lanc,
@@ -1684,15 +1674,15 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         elif acao == "pfm_hist":
             _, doc_id, pfm_codigo = partes
             await query.edit_message_text(
-                f"📎 Histórico completo de {pfm_codigo} será implementado em breve.",
+                f"Histórico completo do Pedido #{pfm_codigo} em breve.",
                 reply_markup=teclado_pedido(doc_id, pfm_codigo)
             )
 
         elif acao == "pfm_fechar":
-            await query.edit_message_text("✖️ Fechado.")
+            await query.edit_message_text("Fechado.")
 
     except Exception as e:
-        await ctx.bot.send_message(chat_id=DONO_ID, text=f"❌ Erro interno: {e}")
+        await ctx.bot.send_message(chat_id=DONO_ID, text=f"Erro inesperado — tente novamente.\n{e}")
 
 # ── Inicialização ──────────────────────────────────────────────────────────
 

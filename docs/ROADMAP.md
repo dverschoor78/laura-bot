@@ -6,25 +6,25 @@
 
 ## Próxima Fiada
 
-**Fase 1 — Voz**
+**Fase 2 — Estrutura**
 
-Objetivo: reescrever todas as mensagens da Laura seguindo os padrões A/B/C/D definidos
-na Sprint de Experiência. Nenhuma lógica alterada — apenas linguagem e estrutura visual.
+Objetivo: reorganizar o conteúdo das telas principais para dar destaque ao que importa.
+Nenhuma lógica alterada — apenas organização e hierarquia da informação.
 
 Escopo:
-- Aplicar Glossário: banir PFM, a_pagar, candidatos e demais termos proibidos
-- Reescrever mensagens de recebimento, extração, confirmação, status e erro
-- Remover emojis decorativos; manter apenas os cinco marcadores de status
-- Estrutura de mensagem: linha de identidade + separador + dados + separador + ações
-- Botões: máximo 3, hierarquizados, nomeados por destino ou ação — não por processo
+- Tela de extração: fornecedor e valor em destaque na primeira linha (acima dos dados brutos)
+- Tela de pedido criado: incluir saldo atualizado do GGV após geração
+- Tela de pagamento confirmado: incluir saldo restante da obra
+- Cartão do pedido: histórico resumido (criado em, pago em) diretamente visível
+- Mensagens de erro: sempre com próximo passo explícito — nunca terminam em ponto final sozinho
 
-Motivo: a voz é a camada mais visível do produto. Mudar apenas textos já transforma
-a experiência — sem alterar uma linha de lógica.
+Motivo: a voz está correta (Fase 1 concluída). O próximo passo é organizar o conteúdo
+para que o mais importante apareça primeiro.
 
-Critério de aceite: enviar um orçamento e gerar um pedido sem encontrar nenhuma mensagem
-que use linguagem interna, emojis decorativos ou estrutura contrária aos padrões.
+Critério de aceite: receber um orçamento e ver fornecedor + valor antes de qualquer
+outra informação extraída.
 
-Tamanho esperado: Pequeno/Médio — sem lógica nova, muitas linhas de texto alteradas.
+Tamanho esperado: Pequeno — nenhum dado novo, apenas reorganização de exibição.
 
 Referências: `docs/GLOSSARIO.md`, `docs/IDENTIDADE_DO_PRODUTO.md`
 

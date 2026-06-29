@@ -10,13 +10,41 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Fase 1 — Voz: reescrever mensagens aplicando Glossário e padrões de mensagem
-2. Fase 2 — Estrutura: reorganizar conteúdo das telas principais
-3. Fase 3 — Navegação: Cockpit da Obra, cartão de fornecedor, /pendentes melhorado
-4. Fase 4 — Pedido de Compra: novo layout DOCX + PDF via LibreOffice headless
-5. Revisão do Pedido de Compra — botão existe, ação pendente
-6. Histórico do Pedido — botão existe, ação pendente
-7. Corrigir BD fornecedores (MO Construção CNPJ errado, PRUDENTÓPOLIS split)
+1. Fase 2 — Estrutura: reorganizar conteúdo das telas principais
+2. Fase 3 — Navegação: Cockpit da Obra, cartão de fornecedor, /pendentes melhorado
+3. Fase 4 — Pedido de Compra: novo layout DOCX + PDF via LibreOffice headless
+4. Revisão do Pedido de Compra — botão existe, ação pendente
+5. Histórico do Pedido — botão existe, ação pendente
+6. Corrigir BD fornecedores (MO Construção CNPJ errado, PRUDENTÓPOLIS split)
+
+---
+
+## [Sprint de Experiência — Fase 1] — 2026-06-29
+
+### Voz — reescrita de todas as mensagens do bot
+
+Nenhuma lógica alterada. Apenas linguagem e estrutura visual.
+
+**Critério de aceite aplicado:** enviar um orçamento e gerar um pedido sem encontrar
+nenhuma mensagem com linguagem interna, emojis decorativos ou estrutura contrária
+aos padrões definidos na Sprint de Experiência.
+
+**Aplicações do Glossário:**
+- "PFM" → "Pedido de Compra" em todas as mensagens e no próprio documento Word
+- "A PAGAR" → "🟡 Aguardando pagamento" (e demais status com labels corretos)
+- "Editar campos" → "Corrigir campos"
+- "Lançamento" → "Financeiro" (nas telas de usuário)
+- "Candidatos" → removido; "Qual pedido este pagamento quita?" como linha guia
+- "Comprovante identificado" → "Pagamento identificado."
+- "Possíveis correspondências" → "Qual pedido este pagamento quita?"
+- "PFM gerada · lançamento criado" (histórico) → "Pedido de Compra gerado"
+- "Arquivo salvo. Que tipo de documento é este?" → "Documento recebido. O que você trouxe?"
+- "Revisar e gerar PFM." → "Confirmar para gerar o Pedido de Compra."
+- "GGV não identificado" → "Obra não identificada"
+
+**Emojis decorativos removidos:** `❌`, `⚠️`, `⏳`, `💰`, `📅`, `📍`, `💲`, `🏷️`,
+`✅` (fora de botões), `💾`, `👤`, `📌`, `🕐`, `📎`, `🔄` das mensagens de texto.
+Mantidos: 🟡🟢🔴⚫⚪ (marcadores de status) e 🧪 (modo teste).
 
 ---
 
