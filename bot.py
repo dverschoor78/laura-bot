@@ -153,6 +153,20 @@ def init_db():
             except Exception:
                 pass
         con.execute("""
+            CREATE TABLE IF NOT EXISTS lancamentos (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                doc_id                INTEGER NOT NULL,
+                pfm_codigo            TEXT NOT NULL UNIQUE,
+                ggv                   TEXT,
+                fornecedor            TEXT,
+                valor                 REAL,
+                data_prevista_entrega TEXT,
+                vencimento_pagamento  TEXT,
+                status                TEXT DEFAULT 'a_pagar',
+                criado_em             TEXT DEFAULT (datetime('now','localtime'))
+            )
+        """)
+        con.execute("""
             CREATE TABLE IF NOT EXISTS fornecedores (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 nome         TEXT NOT NULL,
@@ -193,6 +207,26 @@ def atualizar(doc_id, **campos):
     with sqlite3.connect(DB_PATH) as con:
         con.execute(f"UPDATE documentos SET {sets} WHERE id=?", (*campos.values(), doc_id))
 
+def registrar_lancamento(doc_id, pfm_codigo, ggv, fornecedor, valor_v, data_entrega):
+    """Insere lançamento A PAGAR. Idempotente: se pfm_codigo já existe, retorna o existente."""
+    forn_ok  = fornecedor and fornecedor != "A PREENCHER"
+    valor_ok = valor_v and valor_v > 0
+    status   = "a_pagar" if (forn_ok and valor_ok) else "pendente_revisao"
+    with sqlite3.connect(DB_PATH) as con:
+        cur = con.execute(
+            """INSERT OR IGNORE INTO lancamentos
+               (doc_id, pfm_codigo, ggv, fornecedor, valor, data_prevista_entrega, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (doc_id, pfm_codigo, ggv, fornecedor, valor_v, data_entrega, status)
+        )
+        ja_existia = cur.rowcount == 0
+        if ja_existia:
+            row = con.execute(
+                "SELECT status FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)
+            ).fetchone()
+            status = row[0] if row else status
+    return status, ja_existia
+
 def _dados_doc(doc_id):
     with sqlite3.connect(DB_PATH) as con:
         row = con.execute("SELECT dados_claude FROM documentos WHERE id=?", (doc_id,)).fetchone()
@@ -224,11 +258,17 @@ def _resumo_gerar(doc_id):
         f"📅 {data_ent}"  if data_ent  else "📅 Data de entrega: não informada",
         f"📍 {endereco}"  if endereco  else "📍 Endereço: não informado",
     ]
-    if desconto_rs:
-        try:
-            linhas_resumo.append(f"🏷️ Desconto: R$ {_fmt_brl(_parse_brl(re.sub(r'[^\d,.]', '', str(desconto_rs))))}")
-        except Exception:
-            pass
+    subtotal_v, desconto_v, total_final_v = _calcular_totais(dados, desconto_rs)
+    linhas_resumo.append("")
+    if desconto_v > 0 and subtotal_v > 0:
+        pct = desconto_v / subtotal_v * 100
+        linhas_resumo += [
+            f"💲 Subtotal:         R$ {_fmt_brl(subtotal_v)}",
+            f"🏷️ Desconto:        -R$ {_fmt_brl(desconto_v)} ({pct:.1f}%)",
+            f"✅ Valor negociado:  R$ {_fmt_brl(total_final_v)}",
+        ]
+    elif total_final_v > 0:
+        linhas_resumo.append(f"✅ Valor:            R$ {_fmt_brl(total_final_v)}")
     texto = f"{emoji} {label_tipo} | 🏗 {label_ggv}\n\n{_dados_display(dados)}\n\n" + "\n".join(linhas_resumo) + "\n\nRevisar e gerar PFM."
     return texto, teclado_gerar(doc_id, tipo, ggv)
 
@@ -377,6 +417,26 @@ def _obs(dados):
             resultado.append(stripped.lstrip("- *"))
     return "\n".join(resultado)
 
+def _calcular_totais(dados, desconto_rs):
+    """Retorna (subtotal_v, desconto_v, total_final_v) a partir dos dados extraídos."""
+    itens = _itens(dados)
+    subtotal_v = sum(i.get("_total_v", 0) for i in itens if isinstance(i, dict))
+    if not subtotal_v:
+        try:
+            subtotal_v = _parse_brl(re.sub(r"[^\d,.]", "", _campo(dados, "Valor total")))
+        except Exception:
+            subtotal_v = 0.0
+    desconto_v = 0.0
+    desconto_raw = desconto_rs or (
+        _campo(dados, "Desconto") if _campo(dados, "Desconto") != "A PREENCHER" else None
+    )
+    if desconto_raw:
+        try:
+            desconto_v = _parse_brl(re.sub(r"[^\d,.]", "", str(desconto_raw)))
+        except Exception:
+            desconto_v = 0.0
+    return subtotal_v, desconto_v, subtotal_v - desconto_v
+
 def _data_extenso(dt):
     return f"Carambeí, {dt.day} de {MESES[dt.month-1]} de {dt.year}."
 
@@ -471,24 +531,7 @@ def gerar_pfm(doc_id):
     itens        = _itens(dados)
     obs          = _obs(dados)
 
-    # Calcula totais — subtotal dos itens, desconto, total final
-    subtotal_v = sum(i.get("_total_v", 0) for i in itens if isinstance(i, dict))
-    if not subtotal_v:
-        try:
-            subtotal_v = _parse_brl(re.sub(r"[^\d,.]", "", _campo(dados, "Valor total")))
-        except Exception:
-            subtotal_v = 0
-
-    desconto_v = 0.0
-    desconto_str_claude = _campo(dados, "Desconto")
-    desconto_raw = desconto_rs or (desconto_str_claude if desconto_str_claude != "A PREENCHER" else None)
-    if desconto_raw:
-        try:
-            desconto_v = _parse_brl(re.sub(r"[^\d,.]", "", desconto_raw))
-        except Exception:
-            desconto_v = 0.0
-
-    total_final_v = subtotal_v - desconto_v
+    subtotal_v, desconto_v, total_final_v = _calcular_totais(dados, desconto_rs)
     valor = f"R$ {_fmt_brl(total_final_v)}" if total_final_v > 0 else _campo(dados, "Valor total")
 
     pfm_num    = proximo_pfm_numero(ggv)
@@ -678,7 +721,11 @@ def gerar_pfm(doc_id):
     pasta.mkdir(parents=True, exist_ok=True)
     caminho = pasta / f"{pfm_codigo}.docx"
     doc.save(caminho)
-    return caminho, pfm_codigo
+
+    lanc_status, ja_existia = registrar_lancamento(
+        doc_id, pfm_codigo, ggv, fornecedor, total_final_v, data_entrega_db
+    )
+    return caminho, pfm_codigo, fornecedor, total_final_v, lanc_status, ja_existia
 
 # ── UI helpers ─────────────────────────────────────────────────────────────
 
@@ -1062,7 +1109,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         elif acao == "pfm":
             _, doc_id, ggv = partes
             await query.edit_message_text("⏳ Gerando PFM...")
-            caminho, codigo = gerar_pfm(int(doc_id))
+            caminho, codigo, fornecedor, valor_v, lanc_status, ja_existia = gerar_pfm(int(doc_id))
             with open(caminho, "rb") as f:
                 await ctx.bot.send_document(
                     chat_id=DONO_ID,
@@ -1070,7 +1117,21 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     filename=f"{codigo}.docx",
                     caption=f"📄 {codigo} gerado."
                 )
-            await ctx.bot.send_message(chat_id=DONO_ID, text=f"✅ {codigo} enviado.")
+            if ja_existia:
+                lanc_msg = f"⚠️ Lançamento {codigo} já estava registrado."
+            elif lanc_status == "pendente_revisao":
+                lanc_msg = (
+                    f"⚠️ Lançamento criado como PENDENTE DE REVISÃO\n"
+                    f"(fornecedor ou valor ausente — revisar manualmente)"
+                )
+            else:
+                lanc_msg = (
+                    f"💾 Lançamento registrado:\n"
+                    f"   Fornecedor: {fornecedor}\n"
+                    f"   Valor: R$ {_fmt_brl(valor_v)}\n"
+                    f"   Status: A PAGAR"
+                )
+            await ctx.bot.send_message(chat_id=DONO_ID, text=lanc_msg)
 
     except Exception as e:
         await ctx.bot.send_message(chat_id=DONO_ID, text=f"❌ Erro interno: {e}")
