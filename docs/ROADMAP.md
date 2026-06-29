@@ -8,17 +8,17 @@
 
 **Marcar como PAGO**
 
-Objetivo: ao receber um comprovante PIX, o bot vincula ao lançamento correto
-e atualiza o status para PAGO, fechando o ciclo financeiro.
+Objetivo: com a lista de candidatos já exibida, adicionar botões de confirmação
+ao resultado do comprovante. Ao confirmar, gravar `status='pago'` no lançamento
+escolhido e registrar valor pago, data de pagamento e vínculo com o comprovante.
 
-Motivo: é o próximo passo natural após a geração do PFM. Sem isso, o fluxo
-termina aberto — o pagamento acontece, mas o banco não sabe.
+Motivo: a base de identificação de candidatos está pronta. Esta fiada fecha o
+ciclo financeiro — o pagamento acontece e o banco sabe.
 
-Critério de aceite: Dennis envia foto de comprovante PIX → bot identifica fornecedor
-e valor → exibe o lançamento correspondente → Dennis confirma → status atualizado
-para PAGO no banco.
+Critério de aceite: Dennis confirma o candidato → `lancamentos.status` atualizado
+para `pago` → consultar o pedido mostra "🟢 PAGO".
 
-Tamanho esperado: Médio
+Tamanho esperado: Pequeno (a fundação já existe).
 
 ---
 
@@ -46,9 +46,13 @@ Tamanho esperado: Médio
   O caminho do arquivo é reconstruído a cada consulta.
   Justificativa: risco de inconsistência se a estrutura de pastas mudar.
 
-- **Baixa — `bot.py` monolítico com 1418 linhas**
+- **Média — `mime_type` não gravado no banco**
+  Inferido pela extensão do arquivo ao reprocessar.
+  Justificativa: funciona para o MVP; pode falhar para arquivos sem extensão clara.
+
+- **Baixa — `bot.py` monolítico com ~1584 linhas**
   Aceitável até ~2000 linhas.
-  Justificativa: monólito é decisão consciente — será registrado na ADR-001.
+  Justificativa: monólito é decisão consciente — registrado na ADR-001.
 
 ---
 
@@ -59,3 +63,4 @@ Tamanho esperado: Médio
 - Exportação XLSX dos lançamentos
 - `/pendentes` com filtros por GGV e período
 - Backup automático do banco via cron
+- Sugestão automática de tipo de documento ("Sugerir automaticamente")

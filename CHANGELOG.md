@@ -9,13 +9,80 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ## [Não lançado]
 
-### Próximas fiadas
-- PDF via LibreOffice headless
-- Registrar "A PAGAR" no SQLite ao gerar PFM
-- Decidir destino da pasta `app/` (scaffolding abandonado)
-- Mover `import_fornecedores.py` para `scripts/`
-- Remover `status="pronto_pfm"` (valor órfão)
-- Corrigir dados errados no BD fornecedores (MO Construção com CNPJ DeltaD, PRUDENTÓPOLIS, etc.)
+### Próximas fiadas (priorizadas)
+1. Marcar como PAGO — comprovante vinculado ao lançamento → status PAGO
+2. PDF via LibreOffice headless
+3. `pfm_revisar` — revisão da PFM (botão existe, ação pendente)
+4. `pfm_hist` — histórico completo do pedido (botão existe, ação pendente)
+5. Corrigir BD fornecedores (MO Construção CNPJ errado, PRUDENTÓPOLIS split)
+
+---
+
+## [0.4.0] — 2026-06-29
+
+### Fiada — Modo teste (`LAURA_ENV=test`)
+- `LAURA_ENV=test` no `.env` ativa modo de desenvolvimento isolado
+- Banco separado: `data/laura_test.db`
+- Uploads separados: `data/test_uploads/`
+- PFMs gerados em teste salvos em `data/test_pfms/` com prefixo `TESTE-`
+- Hash com sufixo de timestamp em modo teste — permite reprocessar o mesmo arquivo
+- `/start` exibe aviso completo: banco, uploads e pasta de PFMs ativos
+- Aviso `🧪 MODO TESTE ATIVO` ao receber arquivo
+- Produção (`data/laura.db`) não é tocada durante testes
+- `.env.example` atualizado com `LAURA_ENV=test` comentado
+
+### Fiada — Tipo do documento escolhido antes da IA
+- Ao receber arquivo, bot pergunta o tipo antes de chamar Claude:
+  📋 Orçamento / 💰 Comprovante PIX / 🏦 Extrato MP / 🗑 Outro
+- Claude só é chamado após seleção explícita — evita extração com tipo errado
+- Callback `sel_tipo_inicial` lê o arquivo do disco, infere mime pela extensão e aciona Claude
+- Fluxo de orçamento preservado integralmente
+- Comprovante PIX segue fluxo próprio, sem exibir "Revisar e gerar PFM"
+- Botão de correção de tipo pós-extração mantido para ajustes
+
+### Fiada — Identificar candidatos para comprovante PIX
+- `parse_comprovante(dados_claude)`: extrai valor, data, favorecido, CNPJ, chave PIX,
+  instituição financeira e identificador/observação do texto Claude
+- `buscar_candidatos_pix(valor_v, favorecido, cnpj)`: pontua lançamentos `a_pagar`
+  por valor exato (+3), valor ±10% (+1), CNPJ via BD fornecedores (+3),
+  primeiro token do favorecido (+2) — retorna até 3 candidatos ordenados por score
+- `mostrar_comprovante_candidatos(dados, candidatos)`: formata resultado para o Telegram
+  com confiança Alta ✅ / Média 🟡 / Baixa 🔸
+- PROMPT atualizado: "Destinatário" → "Favorecido", campos Instituição financeira e
+  Identificador/Observação adicionados
+- Nenhum dado financeiro alterado — fiada é somente leitura
+
+---
+
+## [0.3.0] — 2026-06-29
+
+### Fiada — Abrir pedido via texto livre
+- Digitar `GGV03-009` (ou qualquer texto contendo o código) abre o painel do pedido
+- Detecção por regex (`PFM_CODIGO_RE`) — zero chamada à IA para código explícito
+- `buscar_pedido(pfm_codigo)` parseia o código e consulta `documentos` + `lancamentos`
+- `teclado_pedido()`: 5 botões — Revisar, Ver PFM, Lançamento, Histórico, Fechar
+- `pfm_ver`: verifica existência do arquivo em disco antes de enviar (alerta se não encontrar)
+- `pfm_lanc`: mostra detalhes do registro financeiro
+- `pfm_revisar` e `pfm_hist`: placeholders para fiadas futuras
+- `pfm_fechar`: encerra o painel
+
+### Fiada — Tela do Pedido (objeto central)
+- Nova tela rica com 5 seções separadas por `──────────────────────────────`
+  1. Cabeçalho: status, fornecedor, CNPJ
+  2. Financeiro: valor orçamento, desconto, valor negociado, condição pgto, vencimento
+  3. Entrega: data prevista
+  4. Arquivos vinculados: orçamento original + PFM.docx (se existirem em disco)
+  5. Histórico resumido: data de recebimento + data de geração da PFM
+
+### Fiada — Objeto de domínio `Pedido`
+- `StatusPedido(str, Enum)`: centraliza os status possíveis — A_PAGAR, PAGO, PENDENTE_REVISAO, SUBSTITUIDO, SEM_LANCAMENTO
+- `@dataclass Pedido`: 17 campos tipados — substitui dicionários `raw` e `vm`
+- Pipeline de 3 funções com responsabilidade única:
+  - `buscar_pedido()` — DB + cálculos financeiros → retorna `Pedido`
+  - `preparar_visualizacao_pedido()` — filesystem (arquivos existem?) + histórico → enriquece `Pedido`
+  - `mostrar_pedido()` — formatação pura → retorna `str`; sem IO
+- Status lógico separado da apresentação: `Pedido.status = StatusPedido.A_PAGAR`; emojis/labels apenas em `mostrar_pedido()`
+- `_fmt_data_curta()`: helper de formatação de data para o histórico
 
 ---
 
