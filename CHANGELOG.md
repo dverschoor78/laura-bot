@@ -11,10 +11,57 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ### Próximas fiadas
 - PDF via LibreOffice headless
-- Salvar PFM na pasta OneDrive correta (GGV03/04 Aquisição)
 - Registrar "A PAGAR" no SQLite ao gerar PFM
-- Itens com qty × unit price vindos do Claude (atualmente calculado como total/qtde)
-- Corrigir dados errados no BD fornecedores (MO Construção com CNPJ DeltaD, etc.)
+- Decidir destino da pasta `app/` (scaffolding abandonado)
+- Mover `import_fornecedores.py` para `scripts/`
+- Remover `status="pronto_pfm"` (valor órfão)
+- Corrigir dados errados no BD fornecedores (MO Construção com CNPJ DeltaD, PRUDENTÓPOLIS, etc.)
+
+---
+
+## [0.2.0] — 2026-06-28
+
+### Fiada 13 — PFM salvo na pasta OneDrive correta
+- `GGV_ONEDRIVE` dict mapeia cada GGV para sua pasta de destino no OneDrive
+- PFMs do GGV03 salvos em `00 Obras/2026-06 GGV03/04 Aquisição e Execução/`
+- Fallback para `data/pfms/` para GGVs sem mapeamento
+
+### Fiada 14 — Edição de campos extraídos pela IA
+- Botão "✏️ Editar campos" na tela de confirmação inicial
+- Submenu com 11 campos editáveis: Fornecedor, CNPJ/CPF, Valor total, Chave PIX, Itens, Desconto, Condição pgto, Data entrega, Endereço, GGV, Tipo doc.
+- Campos de texto exibem valor atual antes do prompt (permite copiar e colar)
+- Itens: exibe bloco completo com instrução de formato
+- GGV e Tipo: reutilizam os seletores já existentes; retornam à tela de revisão se já confirmado
+- `_substituir_campo()` e `_substituir_itens()`: edição inline no `dados_claude` sem re-extração
+- Botão ◀️ Voltar retorna à tela de revisão
+
+### Desconto
+- Claude extrai desconto automaticamente do documento (campo "Desconto" no PROMPT)
+- Se informado em %, Claude converte para R$ usando o total do orçamento
+- Usuário pode editar manualmente via botão 🏷️ Desconto no submenu
+- PFM mostra 3 linhas de total quando desconto > 0: SUBTOTAL / DESCONTO (x.xx%) / TOTAL DO PEDIDO
+- Valor gravado em coluna `desconto_rs TEXT` no banco
+
+### Opção B — UX redesenhada (tela de revisão central)
+- ✅ Confirmar vai direto para tela de revisão com todos os dados extraídos
+- Tela de revisão mostra dados do Claude + bloco de resumo (💰/📅/📍/🏷️) + botões Gerar/Editar/Cancelar
+- Condição de pgto, Data de entrega e Endereço são editados pelo submenu (não mais em fluxo sequencial obrigatório)
+- Todas as edições retornam à tela de revisão
+- `_resumo_gerar()`: função central que monta tela de revisão a partir do banco
+- `_dados_display()`: filtra do texto do Claude os campos duplicados no bloco de resumo (Desconto, Condição de pagamento, Prazo de entrega)
+
+### Melhorias e correções
+- `max_tokens` 1024 → 4096: suporte a orçamentos com 37+ itens
+- PROMPT: Chave PIX com dica para buscar em qualquer parte do documento
+- PROMPT: "liste todos os itens" (removido limite de 10)
+- PFM: "PRAZO / OBSERVAÇÃO" renomeado para "OBSERVAÇÃO"; prazo e obs mesclados sem duplicar
+- `teclado_gerar()` substituiu `teclado_pfm()`: inclui botões Editar e Cancelar além de Gerar PFM
+- `teclado_endereco()` sem parâmetro `pgto` (removido com Opção B)
+
+### Housekeeping
+- Dead code removido: variáveis não utilizadas no handler `edit_desconto` (emoji, label_tipo, label_ggv, dados_atuais, ggv_db)
+- Bug corrigido: `float(desconto_atual)` → `_parse_brl()` para suportar vírgula decimal
+- Defaults automáticos removidos: PIX à vista e endereço obra não são mais setados ao confirmar (eram inconsistentes)
 
 ---
 

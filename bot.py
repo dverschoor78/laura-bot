@@ -52,6 +52,10 @@ GGV_DESC = {
     "GGV00": "GGV00 — Despesas Gerais",
 }
 
+GGV_ONEDRIVE = {
+    "GGV03": Path(r"C:\Users\denni\OneDrive\00 Obras\2026-06 GGV03\04 Aquisição e Execução"),
+}
+
 CONDICOES = {
     "pix_avista":  "PIX à vista",
     "pix_50_50":   "PIX 50% entrada + 50% na entrega",
@@ -87,9 +91,10 @@ PASSO 3 — Extraia os dados em português conforme o tipo:
 Se [orcamento]:
 - Fornecedor:
 - CNPJ/CPF:
-- Chave PIX:
-- Itens (formato: N. Descrição do produto (QTDE UND) — R$ TOTAL; até 10 itens):
+- Chave PIX: (procure em qualquer parte do documento — dados cadastrais, cabeçalho, rodapé, condições de pagamento; pode ser CPF, CNPJ, e-mail ou telefone)
+- Itens (formato: N. Descrição do produto (QTDE UND) — R$ TOTAL; liste todos os itens do orçamento):
 - Valor total:
+- Desconto (valor em R$, se houver; se informado em %, calcule o valor sobre o total):
 - Condição de pagamento:
 - Prazo de entrega: (lead time ou data de entrega do material — NÃO a validade da proposta)
 - Validade da proposta: (data até quando o preço é válido)
@@ -136,12 +141,13 @@ def init_db():
                 condicao_pgto    TEXT,
                 data_entrega     TEXT,
                 endereco_entrega TEXT,
+                desconto_rs      TEXT,
                 pfm_numero       INTEGER,
                 status           TEXT DEFAULT 'recebido',
                 criado_em        TEXT DEFAULT (datetime('now','localtime'))
             )
         """)
-        for col in ["tipo", "ggv", "dados_claude", "condicao_pgto", "data_entrega", "endereco_entrega", "pfm_numero INTEGER"]:
+        for col in ["tipo", "ggv", "dados_claude", "condicao_pgto", "data_entrega", "endereco_entrega", "desconto_rs TEXT", "pfm_numero INTEGER"]:
             try:
                 con.execute(f"ALTER TABLE documentos ADD COLUMN {col}")
             except Exception:
@@ -186,6 +192,45 @@ def atualizar(doc_id, **campos):
     sets = ", ".join(f"{k}=?" for k in campos)
     with sqlite3.connect(DB_PATH) as con:
         con.execute(f"UPDATE documentos SET {sets} WHERE id=?", (*campos.values(), doc_id))
+
+def _dados_doc(doc_id):
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute("SELECT dados_claude FROM documentos WHERE id=?", (doc_id,)).fetchone()
+    return row[0] if row else ""
+
+_CAMPOS_RESUMO_RE = re.compile(
+    r"^\s*-\s*\*{0,2}(Desconto|Condição de pagamento|Prazo de entrega|Data.prazo de entrega)\b",
+    re.IGNORECASE
+)
+
+def _dados_display(dados):
+    """Remove do texto do Claude os campos que já aparecem no bloco de resumo."""
+    linhas = [l for l in dados.split('\n') if not _CAMPOS_RESUMO_RE.match(l)]
+    return '\n'.join(linhas).strip()
+
+def _resumo_gerar(doc_id):
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT dados_claude, tipo, ggv, condicao_pgto, data_entrega, endereco_entrega, desconto_rs FROM documentos WHERE id=?",
+            (doc_id,)
+        ).fetchone()
+    if not row:
+        return "❌ Documento não encontrado.", None
+    dados, tipo, ggv, condicao, data_ent, endereco, desconto_rs = row
+    emoji, label_tipo = TIPOS.get(tipo, ("📄", tipo))
+    label_ggv = ggv if ggv != "nao_identificado" else "❓ GGV não identificado"
+    linhas_resumo = [
+        f"💰 {condicao}"  if condicao  else "💰 Condição de pgto: não informada",
+        f"📅 {data_ent}"  if data_ent  else "📅 Data de entrega: não informada",
+        f"📍 {endereco}"  if endereco  else "📍 Endereço: não informado",
+    ]
+    if desconto_rs:
+        try:
+            linhas_resumo.append(f"🏷️ Desconto: R$ {_fmt_brl(_parse_brl(re.sub(r'[^\d,.]', '', str(desconto_rs))))}")
+        except Exception:
+            pass
+    texto = f"{emoji} {label_tipo} | 🏗 {label_ggv}\n\n{_dados_display(dados)}\n\n" + "\n".join(linhas_resumo) + "\n\nRevisar e gerar PFM."
+    return texto, teclado_gerar(doc_id, tipo, ggv)
 
 _FORN_COLS = ["nome", "razao_social", "cnpj", "cpf", "chave_pix", "email",
               "whatsapp", "logradouro", "numero", "bairro", "cidade", "uf", "cep"]
@@ -234,6 +279,46 @@ def _campo(dados, nome):
             if val.lower() not in nao_encontrado:
                 return val
     return "A PREENCHER"
+
+def _substituir_campo(dados, nome, novo_valor):
+    linhas = dados.splitlines()
+    for i, linha in enumerate(linhas):
+        stripped = linha.strip().lstrip("- *")
+        if stripped.lower().startswith(nome.lower() + ":"):
+            linhas[i] = f"{nome}: {novo_valor}"
+            return "\n".join(linhas)
+    return dados + f"\n{nome}: {novo_valor}"
+
+def _bloco_itens(dados):
+    linhas = dados.splitlines()
+    capturando, resultado = False, []
+    for linha in linhas:
+        stripped = linha.strip().lstrip("- *")
+        if re.match(r"^(itens|materiais)", stripped, re.IGNORECASE) and ":" in stripped:
+            capturando = True
+            continue
+        if capturando:
+            if stripped and not re.match(r"^\d+\.", stripped) and ":" in stripped and not stripped.startswith("http"):
+                break
+            resultado.append(linha)
+    return "\n".join(resultado).strip() or "Nenhum item encontrado."
+
+def _substituir_itens(dados, novo_bloco):
+    linhas = dados.splitlines()
+    inicio, fim, capturando = None, len(linhas), False
+    for i, linha in enumerate(linhas):
+        stripped = linha.strip().lstrip("- *")
+        if re.match(r"^(itens|materiais)", stripped, re.IGNORECASE) and ":" in stripped:
+            inicio = i
+            capturando = True
+            continue
+        if capturando:
+            if stripped and not re.match(r"^\d+\.", stripped) and ":" in stripped and not stripped.startswith("http"):
+                fim = i
+                break
+    if inicio is None:
+        return dados + f"\nItens:\n{novo_bloco}"
+    return "\n".join(linhas[:inicio + 1] + novo_bloco.splitlines() + linhas[fim:])
 
 ITEM_RE = re.compile(
     r"^\d+\.\s+(.+?)\s+\(([0-9,.]+)\s+([A-Za-z]{1,4})\)\s*[—–\-]+\s*R\$\s*([0-9.,]+)",
@@ -346,12 +431,12 @@ def proximo_pfm_numero(ggv):
 def gerar_pfm(doc_id):
     with sqlite3.connect(DB_PATH) as con:
         row = con.execute(
-            "SELECT ggv, dados_claude, condicao_pgto, data_entrega, endereco_entrega FROM documentos WHERE id=?",
+            "SELECT ggv, dados_claude, condicao_pgto, data_entrega, endereco_entrega, desconto_rs FROM documentos WHERE id=?",
             (doc_id,)
         ).fetchone()
     if row is None:
         raise ValueError(f"Documento {doc_id} não encontrado no banco.")
-    ggv, dados, condicao, data_entrega_db, endereco = row
+    ggv, dados, condicao, data_entrega_db, endereco, desconto_rs = row
 
     nome_claude = _campo(dados, "Fornecedor")
     cnpj_claude = _campo(dados, "CNPJ/CPF")
@@ -386,9 +471,25 @@ def gerar_pfm(doc_id):
     itens        = _itens(dados)
     obs          = _obs(dados)
 
-    # Calcula total dos itens estruturados; fallback para extração do Claude
-    total_v = sum(i.get("_total_v", 0) for i in itens if isinstance(i, dict))
-    valor   = f"R$ {_fmt_brl(total_v)}" if total_v > 0 else _campo(dados, "Valor total")
+    # Calcula totais — subtotal dos itens, desconto, total final
+    subtotal_v = sum(i.get("_total_v", 0) for i in itens if isinstance(i, dict))
+    if not subtotal_v:
+        try:
+            subtotal_v = _parse_brl(re.sub(r"[^\d,.]", "", _campo(dados, "Valor total")))
+        except Exception:
+            subtotal_v = 0
+
+    desconto_v = 0.0
+    desconto_str_claude = _campo(dados, "Desconto")
+    desconto_raw = desconto_rs or (desconto_str_claude if desconto_str_claude != "A PREENCHER" else None)
+    if desconto_raw:
+        try:
+            desconto_v = _parse_brl(re.sub(r"[^\d,.]", "", desconto_raw))
+        except Exception:
+            desconto_v = 0.0
+
+    total_final_v = subtotal_v - desconto_v
+    valor = f"R$ {_fmt_brl(total_final_v)}" if total_final_v > 0 else _campo(dados, "Valor total")
 
     pfm_num    = proximo_pfm_numero(ggv)
     pfm_codigo = f"{ggv}-{pfm_num:03d}"
@@ -489,22 +590,30 @@ def gerar_pfm(doc_id):
                 ri.cells[j].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 ri.cells[j].paragraphs[0].add_run("—").font.size = Pt(9)
 
-    # Total
-    row_tot = tbl_m.add_row()
-    cell_tot = row_tot.cells[0]
-    for i in range(1, 5):
-        cell_tot.merge(row_tot.cells[i])
-    _cell_bg(cell_tot, "D9D9D9")
-    p_tot = cell_tot.paragraphs[0]
-    p_tot.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    r_tot = p_tot.add_run("TOTAL DO PEDIDO:")
-    r_tot.bold = True; r_tot.font.size = Pt(9)
-    c_val = row_tot.cells[5]
-    _cell_bg(c_val, "D9D9D9")
-    p_val = c_val.paragraphs[0]
-    p_val.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    r_val = p_val.add_run(valor)
-    r_val.bold = True; r_val.font.size = Pt(9)
+    # Totais — subtotal + desconto (se houver) + total final
+    def _total_row(tbl, label, valor_str, bg="D9D9D9"):
+        r = tbl.add_row()
+        c_label = r.cells[0]
+        for i in range(1, 5):
+            c_label.merge(r.cells[i])
+        _cell_bg(c_label, bg)
+        p = c_label.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        run = p.add_run(label)
+        run.bold = True; run.font.size = Pt(9)
+        c_v = r.cells[5]
+        _cell_bg(c_v, bg)
+        p_v = c_v.paragraphs[0]
+        p_v.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        run_v = p_v.add_run(valor_str)
+        run_v.bold = True; run_v.font.size = Pt(9)
+
+    if desconto_v > 0 and subtotal_v > 0:
+        pct = desconto_v / subtotal_v * 100
+        _total_row(tbl_m, "SUBTOTAL:", f"R$ {_fmt_brl(subtotal_v)}", "F2F2F2")
+        _total_row(tbl_m, f"DESCONTO ({pct:.2f}%):", f"-R$ {_fmt_brl(desconto_v)}", "F2F2F2")
+
+    _total_row(tbl_m, "TOTAL DO PEDIDO:", valor)
 
     # ── PARTE INFERIOR: PRAZO | DADOS ────────────────────────────────────────
     doc.add_paragraph()
@@ -528,10 +637,14 @@ def gerar_pfm(doc_id):
     _kv_p(c_prazo, "CONDIÇÕES DE PAGAMENTO", condicao)
     _kv_p(c_prazo, "CHAVE PIX", pix)
     _kv_p(c_prazo, "DATA DE ENTREGA", data_entrega)
-    if prazo and prazo != "A PREENCHER" and prazo != data_entrega:
-        _kv_p(c_prazo, "PRAZO / OBSERVAÇÃO", prazo)
-    if obs:
-        _kv_p(c_prazo, "OBSERVAÇÕES", obs)
+    obs_partes = []
+    prazo_texto = prazo if prazo and prazo not in ("A PREENCHER",) and prazo != data_entrega else None
+    if prazo_texto:
+        obs_partes.append(prazo_texto)
+    if obs and obs != prazo_texto:
+        obs_partes.append(obs)
+    if obs_partes:
+        _kv_p(c_prazo, "OBSERVAÇÃO", " | ".join(obs_partes))
 
     # Nota de foto
     p_foto = c_prazo.add_paragraph()
@@ -561,8 +674,9 @@ def gerar_pfm(doc_id):
     p_ent.runs[0].font.size = Pt(8)
     _linha(c_dados, endereco or "A PREENCHER", size=9)
 
-    Path("data/pfms").mkdir(parents=True, exist_ok=True)
-    caminho = Path("data/pfms") / f"{pfm_codigo}.docx"
+    pasta = GGV_ONEDRIVE.get(ggv, Path("data/pfms"))
+    pasta.mkdir(parents=True, exist_ok=True)
+    caminho = pasta / f"{pfm_codigo}.docx"
     doc.save(caminho)
     return caminho, pfm_codigo
 
@@ -591,6 +705,9 @@ def teclado_confirmacao(doc_id, tipo, ggv):
         [
             InlineKeyboardButton(f"🏗 {label_ggv}",       callback_data=f"sel_ggv:{doc_id}:{tipo}:{ggv}"),
             InlineKeyboardButton("❌ Cancelar",            callback_data=f"cancelar:{doc_id}"),
+        ],
+        [
+            InlineKeyboardButton("✏️ Editar campos",      callback_data=f"sel_edit:{doc_id}:{tipo}:{ggv}"),
         ]
     ])
 
@@ -601,20 +718,22 @@ def teclado_condicao(doc_id, ggv):
         [InlineKeyboardButton("✏️ Outro (digitar)",                callback_data=f"pgto:{doc_id}:{ggv}:outro")],
     ])
 
-def teclado_endereco(doc_id, ggv, pgto):
+def teclado_endereco(doc_id, ggv):
     chave_obra = f"obra_{ggv}"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"🏗 Obra ({ggv})",    callback_data=f"end:{doc_id}:{ggv}:{pgto}:{chave_obra}")],
-        [InlineKeyboardButton("🏠 Casa",             callback_data=f"end:{doc_id}:{ggv}:{pgto}:casa")],
-        [InlineKeyboardButton("🏢 Escritório",       callback_data=f"end:{doc_id}:{ggv}:{pgto}:escritorio")],
-        [InlineKeyboardButton("🌳 Chácara",          callback_data=f"end:{doc_id}:{ggv}:{pgto}:chacara")],
-        [InlineKeyboardButton("✏️ Outro (digitar)",  callback_data=f"end:{doc_id}:{ggv}:{pgto}:outro")],
+        [InlineKeyboardButton(f"🏗 Obra ({ggv})",    callback_data=f"end:{doc_id}:{ggv}:{chave_obra}")],
+        [InlineKeyboardButton("🏠 Casa",             callback_data=f"end:{doc_id}:{ggv}:casa")],
+        [InlineKeyboardButton("🏢 Escritório",       callback_data=f"end:{doc_id}:{ggv}:escritorio")],
+        [InlineKeyboardButton("🌳 Chácara",          callback_data=f"end:{doc_id}:{ggv}:chacara")],
+        [InlineKeyboardButton("✏️ Outro (digitar)",  callback_data=f"end:{doc_id}:{ggv}:outro")],
     ])
 
-def teclado_pfm(doc_id, ggv):
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("📄 Gerar PFM", callback_data=f"pfm:{doc_id}:{ggv}")
-    ]])
+def teclado_gerar(doc_id, tipo, ggv):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📄 Gerar PFM",      callback_data=f"pfm:{doc_id}:{ggv}")],
+        [InlineKeyboardButton("✏️ Editar campos",  callback_data=f"sel_edit:{doc_id}:{tipo}:{ggv}")],
+        [InlineKeyboardButton("❌ Cancelar",        callback_data=f"cancelar:{doc_id}")],
+    ])
 
 # ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -667,7 +786,7 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     resposta = claude.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=1024,
+        max_tokens=4096,
         messages=[{
             "role": "user",
             "content": [
@@ -702,32 +821,59 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if aguardando == "condicao_pgto":
         atualizar(doc_id, condicao_pgto=texto)
-        ctx.user_data["condicao_pgto"] = texto
-        ctx.user_data["aguardando"] = "data_entrega"
-        await update.message.reply_text(
-            f"✅ Condição: {texto}\n\n📅 Qual a data de entrega? (ex: 01/08/2026, 7 dias úteis, A combinar)"
-        )
+        ctx.user_data["aguardando"] = None
+        texto_resumo, markup = _resumo_gerar(doc_id)
+        await update.message.reply_text(texto_resumo, reply_markup=markup)
 
     elif aguardando == "data_entrega":
         atualizar(doc_id, data_entrega=texto)
-        ctx.user_data["data_entrega"] = texto
         ctx.user_data["aguardando"] = None
-        condicao = ctx.user_data.get("condicao_pgto", "")
-        await update.message.reply_text(
-            f"✅ Data de entrega: {texto}\n\nQual o endereço de entrega?",
-            reply_markup=teclado_endereco(doc_id, ggv, "custom")
-        )
+        texto_resumo, markup = _resumo_gerar(doc_id)
+        await update.message.reply_text(texto_resumo, reply_markup=markup)
+
+    elif aguardando == "edit_desconto":
+        try:
+            v = _parse_brl(re.sub(r"[^\d,.]", "", texto))
+        except Exception:
+            v = 0.0
+        atualizar(doc_id, desconto_rs=f"{v:.2f}" if v > 0 else None)
+        ctx.user_data["aguardando"] = None
+        texto_resumo, markup = _resumo_gerar(doc_id)
+        await update.message.reply_text(texto_resumo, reply_markup=markup)
+
+    elif aguardando in ("edit_fornecedor", "edit_cnpj", "edit_valor", "edit_pix", "edit_itens"):
+        campo_map = {
+            "edit_fornecedor": "Fornecedor",
+            "edit_cnpj":       "CNPJ/CPF",
+            "edit_valor":      "Valor total",
+            "edit_pix":        "Chave PIX",
+        }
+        tipo = ctx.user_data.get("tipo", "orcamento")
+        with sqlite3.connect(DB_PATH) as con:
+            row = con.execute(
+                "SELECT dados_claude, ggv FROM documentos WHERE id=?", (doc_id,)
+            ).fetchone()
+        if row:
+            dados_atuais, ggv_db = row
+            if aguardando == "edit_itens":
+                novos_dados = _substituir_itens(dados_atuais, texto)
+                nome_campo = "Itens"
+            else:
+                nome_campo = campo_map[aguardando]
+                novos_dados = _substituir_campo(dados_atuais, nome_campo, texto)
+            atualizar(doc_id, dados_claude=novos_dados)
+            ctx.user_data["aguardando"] = None
+            texto_resumo, markup = _resumo_gerar(doc_id)
+            await update.message.reply_text(texto_resumo, reply_markup=markup)
+        else:
+            ctx.user_data["aguardando"] = None
+            await update.message.reply_text("❌ Documento não encontrado.")
 
     elif aguardando == "endereco_entrega":
-        condicao   = ctx.user_data.get("condicao_pgto", "")
-        data_ent   = ctx.user_data.get("data_entrega", "")
         atualizar(doc_id, endereco_entrega=texto, status="pronto_pfm")
         ctx.user_data["aguardando"] = None
-        await update.message.reply_text(
-            f"✅ Dados coletados\n\n"
-            f"🏗 {ggv}\n💰 {condicao}\n📅 {data_ent}\n📍 {texto}",
-            reply_markup=teclado_pfm(doc_id, ggv)
-        )
+        texto_resumo, markup = _resumo_gerar(doc_id)
+        await update.message.reply_text(texto_resumo, reply_markup=markup)
 
 async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -744,14 +890,12 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         if acao == "ok":
             _, doc_id, tipo, ggv = partes
+            atualizar(int(doc_id), status="confirmado")
             if tipo == "orcamento":
                 ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": None})
-                await query.edit_message_text(
-                    f"📋 Orçamento | 🏗 {ggv}\n\nQual a condição de pagamento?",
-                    reply_markup=teclado_condicao(doc_id, ggv)
-                )
+                texto, markup = _resumo_gerar(int(doc_id))
+                await query.edit_message_text(texto, reply_markup=markup)
             else:
-                atualizar(int(doc_id), status="confirmado")
                 emoji, label = TIPOS.get(tipo, ("📄", tipo))
                 await query.edit_message_text(f"✅ Confirmado: {emoji} {label} | 🏗 {ggv}")
 
@@ -768,12 +912,19 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         elif acao == "set_tipo":
             _, doc_id, novo_tipo, ggv = partes
             atualizar(int(doc_id), tipo=novo_tipo)
-            emoji, label = TIPOS.get(novo_tipo, ("📄", novo_tipo))
-            label_ggv = ggv if ggv != "nao_identificado" else "❓ GGV não identificado"
-            await query.edit_message_text(
-                f"{emoji} {label} | 🏗 {label_ggv}\n\nTipo corrigido. Confirmar?",
-                reply_markup=teclado_confirmacao(int(doc_id), novo_tipo, ggv)
-            )
+            with sqlite3.connect(DB_PATH) as con:
+                status = con.execute("SELECT status FROM documentos WHERE id=?", (int(doc_id),)).fetchone()[0]
+            if status == "confirmado":
+                texto, markup = _resumo_gerar(int(doc_id))
+                await query.edit_message_text(texto, reply_markup=markup)
+            else:
+                emoji, label = TIPOS.get(novo_tipo, ("📄", novo_tipo))
+                label_ggv = ggv if ggv != "nao_identificado" else "❓ GGV não identificado"
+                corpo = _dados_doc(int(doc_id))
+                await query.edit_message_text(
+                    f"{emoji} {label} | 🏗 {label_ggv}\n\n{corpo}\n\nTipo corrigido. Confirmar ou ajustar?",
+                    reply_markup=teclado_confirmacao(int(doc_id), novo_tipo, ggv)
+                )
 
         elif acao == "sel_ggv":
             _, doc_id, tipo, ggv = partes
@@ -785,12 +936,19 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         elif acao == "set_ggv":
             _, doc_id, tipo, novo_ggv = partes
             atualizar(int(doc_id), ggv=novo_ggv)
-            emoji, label = TIPOS.get(tipo, ("📄", tipo))
-            label_ggv = novo_ggv if novo_ggv != "nao_identificado" else "❓ GGV não identificado"
-            await query.edit_message_text(
-                f"{emoji} {label} | 🏗 {label_ggv}\n\nGGV corrigido. Confirmar?",
-                reply_markup=teclado_confirmacao(int(doc_id), tipo, novo_ggv)
-            )
+            with sqlite3.connect(DB_PATH) as con:
+                status = con.execute("SELECT status FROM documentos WHERE id=?", (int(doc_id),)).fetchone()[0]
+            if status == "confirmado":
+                texto, markup = _resumo_gerar(int(doc_id))
+                await query.edit_message_text(texto, reply_markup=markup)
+            else:
+                emoji, label = TIPOS.get(tipo, ("📄", tipo))
+                label_ggv = novo_ggv if novo_ggv != "nao_identificado" else "❓ GGV não identificado"
+                corpo = _dados_doc(int(doc_id))
+                await query.edit_message_text(
+                    f"{emoji} {label} | 🏗 {label_ggv}\n\n{corpo}\n\nGGV corrigido. Confirmar ou ajustar?",
+                    reply_markup=teclado_confirmacao(int(doc_id), tipo, novo_ggv)
+                )
 
         elif acao == "pgto":
             _, doc_id, ggv, escolha = partes
@@ -800,27 +958,106 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 return
             label_pgto = CONDICOES.get(escolha, escolha)
             atualizar(int(doc_id), condicao_pgto=label_pgto)
-            ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv,
-                                   "condicao_pgto": label_pgto, "aguardando": "data_entrega"})
-            await query.edit_message_text(
-                f"✅ Pagamento: {label_pgto}\n\n📅 Qual a data de entrega? (ex: 01/08/2026, 7 dias úteis, A combinar)"
-            )
+            ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": None})
+            texto, markup = _resumo_gerar(int(doc_id))
+            await query.edit_message_text(texto, reply_markup=markup)
 
         elif acao == "end":
-            _, doc_id, ggv, pgto, escolha = partes
+            _, doc_id, ggv, escolha = partes
             if escolha == "outro":
                 ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": "endereco_entrega"})
                 await query.edit_message_text("✏️ Digite o endereço de entrega:")
                 return
             endereco = ENDERECOS.get(escolha, escolha)
-            condicao  = CONDICOES.get(pgto, ctx.user_data.get("condicao_pgto", pgto))
-            data_ent  = ctx.user_data.get("data_entrega", "")
             atualizar(int(doc_id), endereco_entrega=endereco, status="pronto_pfm")
-            await query.edit_message_text(
-                f"✅ Dados coletados\n\n"
-                f"🏗 {ggv}\n💰 {condicao}\n📅 {data_ent}\n📍 {endereco}",
-                reply_markup=teclado_pfm(doc_id, ggv)
-            )
+            texto, markup = _resumo_gerar(int(doc_id))
+            await query.edit_message_text(texto, reply_markup=markup)
+
+        elif acao == "sel_edit":
+            _, doc_id, tipo, ggv = partes
+            botoes = [
+                [InlineKeyboardButton("👤 Fornecedor",    callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:fornecedor")],
+                [InlineKeyboardButton("🔢 CNPJ/CPF",      callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:cnpj")],
+                [InlineKeyboardButton("💲 Valor total",   callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:valor")],
+                [InlineKeyboardButton("🔑 Chave PIX",     callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:pix")],
+                [InlineKeyboardButton("📦 Itens",         callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:itens")],
+                [InlineKeyboardButton("🏷️ Desconto",     callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:desconto")],
+                [InlineKeyboardButton("💰 Condição pgto", callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:pgto")],
+                [InlineKeyboardButton("📅 Data entrega",  callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:data")],
+                [InlineKeyboardButton("📍 Endereço",      callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:endereco")],
+                [InlineKeyboardButton("🏗 GGV",           callback_data=f"sel_ggv:{doc_id}:{tipo}:{ggv}")],
+                [InlineKeyboardButton("📋 Tipo doc.",     callback_data=f"sel_tipo:{doc_id}:{tipo}:{ggv}")],
+                [InlineKeyboardButton("◀️ Voltar",        callback_data=f"voltar_edit:{doc_id}:{tipo}:{ggv}")],
+            ]
+            await query.edit_message_reply_markup(InlineKeyboardMarkup(botoes))
+
+        elif acao == "edit_campo":
+            _, doc_id, tipo, ggv, campo = partes
+            ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "tipo": tipo})
+
+            if campo == "pgto":
+                ctx.user_data["aguardando"] = None
+                await query.edit_message_text(
+                    "💰 Selecione a condição de pagamento:",
+                    reply_markup=teclado_condicao(doc_id, ggv)
+                )
+            elif campo == "endereco":
+                ctx.user_data["aguardando"] = None
+                await query.edit_message_text(
+                    "📍 Selecione o endereço de entrega:",
+                    reply_markup=teclado_endereco(doc_id, ggv)
+                )
+            elif campo == "itens":
+                ctx.user_data["aguardando"] = "edit_itens"
+                with sqlite3.connect(DB_PATH) as con:
+                    row = con.execute("SELECT dados_claude FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
+                bloco = _bloco_itens(row[0] if row else "")
+                await query.edit_message_text(
+                    f"📦 Itens atuais:\n\n{bloco}\n\n"
+                    "✏️ Digite os novos itens.\n\n"
+                    "Para cálculo automático do total no PFM, use o formato:\n"
+                    "1. Descrição (qtde UN) — R$ valor_total\n\n"
+                    "Exemplo:\n"
+                    "1. Cimento 50kg (10 sc) — R$ 350,00\n"
+                    "2. Areia grossa (5 m³) — R$ 875,00\n\n"
+                    "Formato livre também é aceito, mas sem cálculo automático."
+                )
+            else:
+                aguardando_campo = "data_entrega" if campo == "data" else f"edit_{campo}"
+                ctx.user_data["aguardando"] = aguardando_campo
+                labels = {
+                    "fornecedor": "nome do fornecedor",
+                    "cnpj":       "CNPJ ou CPF",
+                    "valor":      "valor total (ex: R$ 1.500,00)",
+                    "pix":        "chave PIX",
+                    "desconto":   "valor do desconto em R$ (ex: 80 ou 80,00) — ou 0 para remover",
+                    "data":       "data de entrega (ex: 01/08/2026, 7 dias úteis, A combinar)",
+                }
+                campo_doc = {
+                    "fornecedor": "Fornecedor",
+                    "cnpj":       "CNPJ/CPF",
+                    "valor":      "Valor total",
+                    "pix":        "Chave PIX",
+                }
+                with sqlite3.connect(DB_PATH) as con:
+                    row = con.execute(
+                        "SELECT dados_claude, desconto_rs, data_entrega FROM documentos WHERE id=?", (int(doc_id),)
+                    ).fetchone()
+                dados_atuais, desconto_atual, data_atual = row if row else ("", None, None)
+                if campo == "desconto":
+                    atual = f"R$ {_fmt_brl(_parse_brl(re.sub(r'[^\d,.]', '', str(desconto_atual))))}" if desconto_atual else "Não informado"
+                elif campo == "data":
+                    atual = data_atual or "Não informada"
+                else:
+                    atual = _campo(dados_atuais, campo_doc.get(campo, campo))
+                await query.edit_message_text(
+                    f"Valor atual:\n{atual}\n\n✏️ Digite o {labels.get(campo, campo)}:"
+                )
+
+        elif acao == "voltar_edit":
+            _, doc_id, tipo, ggv = partes
+            texto, markup = _resumo_gerar(int(doc_id))
+            await query.edit_message_text(texto, reply_markup=markup)
 
         elif acao == "pfm":
             _, doc_id, ggv = partes
