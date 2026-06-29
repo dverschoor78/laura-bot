@@ -148,6 +148,7 @@ Se [comprovante_pix]:
 - CNPJ/CPF do favorecido:
 - Chave PIX:
 - Instituição financeira:
+- ID da transação: (número da transação Mercado Pago OU ID EndToEnd do Pix — extraia APENAS o código/número, sem texto adicional; ex: 165448957194 ou E10573521...)
 - Identificador / Observação:
 
 Se [extrato_mp]:
@@ -216,6 +217,11 @@ def init_db():
                 criado_em             TEXT DEFAULT (datetime('now','localtime'))
             )
         """)
+        for col in ["valor_pago REAL", "data_pagamento TEXT", "doc_id_comprovante INTEGER", "identificador_comprovante TEXT"]:
+            try:
+                con.execute(f"ALTER TABLE lancamentos ADD COLUMN {col}")
+            except Exception:
+                pass
         con.execute("""
             CREATE TABLE IF NOT EXISTS fornecedores (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -792,14 +798,15 @@ def parse_comprovante(dados_claude: str) -> dict:
     except Exception:
         valor_v = 0.0
     return {
-        "valor_v":    valor_v,
-        "valor_fmt":  _fmt_brl(valor_v) if valor_v > 0 else valor_str,
-        "data":       _campo(dados_claude, "Data do pagamento"),
-        "favorecido": _campo(dados_claude, "Favorecido"),
-        "cnpj":       _campo(dados_claude, "CNPJ/CPF do favorecido"),
-        "chave_pix":  _campo(dados_claude, "Chave PIX"),
-        "instituicao":_campo(dados_claude, "Instituição financeira"),
-        "obs":        _campo(dados_claude, "Identificador / Observação"),
+        "valor_v":      valor_v,
+        "valor_fmt":    _fmt_brl(valor_v) if valor_v > 0 else valor_str,
+        "data":         _campo(dados_claude, "Data do pagamento"),
+        "favorecido":   _campo(dados_claude, "Favorecido"),
+        "cnpj":         _campo(dados_claude, "CNPJ/CPF do favorecido"),
+        "chave_pix":    _campo(dados_claude, "Chave PIX"),
+        "instituicao":  _campo(dados_claude, "Instituição financeira"),
+        "id_transacao": _campo(dados_claude, "ID da transação"),
+        "obs":          _campo(dados_claude, "Identificador / Observação"),
     }
 
 def buscar_candidatos_pix(valor_v: float, favorecido: str, cnpj: str) -> list:
@@ -912,6 +919,16 @@ def teclado_confirmacao(doc_id, tipo, ggv):
             InlineKeyboardButton("✏️ Editar campos",      callback_data=f"sel_edit:{doc_id}:{tipo}:{ggv}"),
         ]
     ])
+
+def teclado_candidatos_pix(doc_id_comp: int, candidatos: list):
+    botoes = []
+    for c in candidatos:
+        botoes.append([InlineKeyboardButton(
+            f"💳 Confirmar {c['pfm_codigo']}",
+            callback_data=f"pix_confirmar:{doc_id_comp}:{c['pfm_codigo']}"
+        )])
+    botoes.append([InlineKeyboardButton("❌ Cancelar", callback_data="pix_cancelar")])
+    return InlineKeyboardMarkup(botoes)
 
 def teclado_tipo_inicial(doc_id):
     return InlineKeyboardMarkup([
@@ -1313,9 +1330,30 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             emoji, label_tipo = TIPOS.get(tipo, ("📄", tipo))
             label_ggv = ggv if ggv != "nao_identificado" else "❓ GGV não identificado"
             if tipo == "comprovante_pix":
-                dados    = parse_comprovante(corpo)
-                candidatos = buscar_candidatos_pix(dados["valor_v"], dados["favorecido"], dados["cnpj"])
-                await query.edit_message_text(mostrar_comprovante_candidatos(dados, candidatos))
+                dados = parse_comprovante(corpo)
+                ident = dados["id_transacao"] if dados["id_transacao"] != "A PREENCHER" else None
+                ja_pago = None
+                if ident:
+                    with sqlite3.connect(DB_PATH) as con:
+                        ja_pago = con.execute(
+                            "SELECT pfm_codigo FROM lancamentos "
+                            "WHERE identificador_comprovante=? AND status='pago' LIMIT 1",
+                            (ident,)
+                        ).fetchone()
+                if ja_pago:
+                    await query.edit_message_text(
+                        f"⚠️ Este comprovante já foi usado.\n\n"
+                        f"Pedido:\n{ja_pago[0]}\n\n"
+                        f"Status:\nPAGO\n\n"
+                        "Não é possível usar o mesmo comprovante para outro lançamento."
+                    )
+                else:
+                    candidatos = buscar_candidatos_pix(dados["valor_v"], dados["favorecido"], dados["cnpj"])
+                    markup     = teclado_candidatos_pix(int(doc_id), candidatos) if candidatos else None
+                    await query.edit_message_text(
+                        mostrar_comprovante_candidatos(dados, candidatos),
+                        reply_markup=markup
+                    )
             elif tipo == "orcamento":
                 await query.edit_message_text(
                     f"{emoji} {label_tipo} | 🏗 {label_ggv}\n\n{corpo}\n\nConfirmar ou ajustar?",
@@ -1329,6 +1367,89 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                         InlineKeyboardButton("❌ Cancelar",  callback_data=f"cancelar:{doc_id}"),
                     ]])
                 )
+
+        elif acao == "pix_confirmar":
+            _, doc_id_comp, pfm_codigo = partes
+            with sqlite3.connect(DB_PATH) as con:
+                comp = con.execute(
+                    "SELECT dados_claude FROM documentos WHERE id=?", (int(doc_id_comp),)
+                ).fetchone()
+                lanc = con.execute(
+                    "SELECT fornecedor, valor, status FROM lancamentos WHERE pfm_codigo=?",
+                    (pfm_codigo,)
+                ).fetchone()
+            if not comp or not lanc:
+                await query.edit_message_text("❌ Dados não encontrados. Operação cancelada.")
+                return
+            dados_comp   = parse_comprovante(comp[0])
+            forn, valor_lanc, status_lanc = lanc
+            status_label = {"a_pagar": "🟡 A PAGAR", "pago": "🟢 PAGO"}.get(status_lanc, status_lanc)
+            valor_lanc_fmt = f"R$ {_fmt_brl(valor_lanc)}" if valor_lanc else "—"
+            texto = (
+                f"⚠️ Confirmar pagamento?\n\n"
+                f"• Comprovante:  R$ {dados_comp['valor_fmt']}  —  {dados_comp['data']}\n"
+                f"• Lançamento:   {pfm_codigo}\n"
+                f"• Fornecedor:   {forn}\n"
+                f"• Valor:        {valor_lanc_fmt}\n"
+                f"• Status atual: {status_label}"
+            )
+            await query.edit_message_text(texto, reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Confirmar pagamento",
+                                     callback_data=f"pix_pagar:{doc_id_comp}:{pfm_codigo}")],
+                [InlineKeyboardButton("↩️ Voltar",
+                                     callback_data="pix_cancelar")],
+            ]))
+
+        elif acao == "pix_pagar":
+            _, doc_id_comp, pfm_codigo = partes
+            with sqlite3.connect(DB_PATH) as con:
+                comp = con.execute(
+                    "SELECT dados_claude FROM documentos WHERE id=?", (int(doc_id_comp),)
+                ).fetchone()
+            if not comp:
+                await query.edit_message_text("❌ Comprovante não encontrado. Operação cancelada.")
+                return
+            dados_comp = parse_comprovante(comp[0])
+            ident_comp = dados_comp["id_transacao"] if dados_comp["id_transacao"] != "A PREENCHER" else None
+            ja_usado = None
+            if ident_comp:
+                with sqlite3.connect(DB_PATH) as con:
+                    ja_usado = con.execute(
+                        "SELECT pfm_codigo FROM lancamentos "
+                        "WHERE identificador_comprovante=? AND status='pago' LIMIT 1",
+                        (ident_comp,)
+                    ).fetchone()
+            if ja_usado:
+                await query.edit_message_text(
+                    f"⚠️ Este comprovante já foi usado para marcar o pedido "
+                    f"{ja_usado[0]} como PAGO.\n"
+                    "Não é possível usar o mesmo comprovante para outro lançamento."
+                )
+                return
+            data_pgto = dados_comp["data"] if dados_comp["data"] != "A PREENCHER" \
+                        else datetime.now().strftime("%d/%m/%Y")
+            with sqlite3.connect(DB_PATH) as con:
+                cur = con.execute(
+                    """UPDATE lancamentos
+                       SET status='pago', valor_pago=?, data_pagamento=?,
+                           doc_id_comprovante=?, identificador_comprovante=?
+                       WHERE pfm_codigo=? AND status='a_pagar'""",
+                    (dados_comp["valor_v"] or None, data_pgto,
+                     int(doc_id_comp), ident_comp, pfm_codigo)
+                )
+                rowcount = cur.rowcount
+            if rowcount == 0:
+                await query.edit_message_text(
+                    "⚠️ Não foi possível marcar como pago.\n"
+                    "O lançamento pode já estar pago, cancelado ou ter sido alterado."
+                )
+                return
+            await query.edit_message_text(
+                f"✅ Pagamento confirmado.\n{pfm_codigo} marcado como 🟢 PAGO."
+            )
+
+        elif acao == "pix_cancelar":
+            await query.edit_message_text("Operação cancelada.")
 
         elif acao == "sel_ggv":
             _, doc_id, tipo, ggv = partes
