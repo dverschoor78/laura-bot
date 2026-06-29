@@ -1274,10 +1274,16 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # GGV blocking — alert antes de responder, depois retorna
     if acao == "ok" and partes[3] == "nao_identificado":
-        await query.answer("Selecione a obra antes de confirmar.", show_alert=True)
+        try:
+            await query.answer("Selecione a obra antes de confirmar.", show_alert=True)
+        except Exception:
+            pass
         return
 
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception:
+        return  # callback expirado (bot reiniciado) — ignora silenciosamente
 
     try:
         if acao == "ok":
