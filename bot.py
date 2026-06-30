@@ -1259,9 +1259,9 @@ def buscar_candidatos_pix(valor_v: float, favorecido: str, cnpj: str) -> list:
 def mostrar_comprovante_candidatos(dados: dict, candidatos: list) -> str:
     """Formata a mensagem de comprovante + candidatos para o Telegram. Sem IO."""
     def _conf(score):
-        if score >= 5: return "✓ exato"
-        if score >= 3: return "≈ próximo"
-        return "?"
+        if score >= 5: return "exato"
+        if score >= 3: return "próximo"
+        return ""
 
     linhas = ["Pagamento identificado.\n"]
     if dados["favorecido"] != "A PREENCHER":
@@ -1281,7 +1281,11 @@ def mostrar_comprovante_candidatos(dados: dict, candidatos: list) -> str:
     linhas.append("Qual pedido este pagamento quita?\n")
     for c in candidatos:
         valor_fmt = f"R$ {_fmt_brl(c['valor_lanc'])}" if c["valor_lanc"] else "—"
-        linhas.append(f"🟡 #{c['pfm_codigo']}   {c['fornecedor']}   {valor_fmt}   {_conf(c['score'])}")
+        conf = _conf(c["score"])
+        linha = f"🟡 #{c['pfm_codigo']} · {c['fornecedor']} · {valor_fmt}"
+        if conf:
+            linha += f" · {conf}"
+        linhas.append(linha)
 
     return "\n".join(linhas)
 
@@ -1323,18 +1327,18 @@ def mostrar_cockpit_obra(obra):
     SEP = "──────────────────────────────"
 
     # Placeholder financeiro — Fiada 5b-1
-    financeiro = "⚪ Sem dados financeiros"
+    financeiro = "⚪ Nenhum lançamento registrado"
 
-    # Contatos com separador · entre nome e fone
-    enc_txt  = f"{enc_nome} · {enc_fone}".strip(" ·") if enc_nome else "Não definido"
-    resp_txt = f"{resp_nome} · {resp_fone}".strip(" ·") if resp_nome else "Não definido"
+    # Contatos com separador · consistente
+    enc_txt  = f"Encarregado · {enc_nome} · {enc_fone}".strip(" ·") if enc_nome else "Encarregado · —"
+    resp_txt = f"Responsável · {resp_nome} · {resp_fone}".strip(" ·") if resp_nome else "Responsável · —"
 
     # Endereço: remove CEP e troca " - " por " · "
     end_curto = re.sub(r"\s+CEP[\s\d\.\-]+$", "", end).replace(" - ", " · ") if end else ""
 
-    contatos = f"Encarregado   {enc_txt}\nResponsável   {resp_txt}"
+    contatos = f"{enc_txt}\n{resp_txt}"
     if end_curto:
-        contatos += f"\nEntrega       {end_curto}"
+        contatos += f"\nEntrega · {end_curto}"
 
     return f"{cabecalho}\n\n{SEP}\n{financeiro}\n{SEP}\n{contatos}"
 
@@ -1346,8 +1350,9 @@ _OBRAS_RE = re.compile(r"^\s*obras?\s*$", re.IGNORECASE)
 
 def mostrar_boas_vindas():
     return (
-        "Obras — acessa a lista de obras\n"
-        "Ajuda — ações e consultas disponíveis"
+        "Por onde quer começar?\n\n"
+        "Obras — todas as obras e pedidos\n"
+        "Ajuda — pedidos de compra, pagamentos e consultas"
     )
 
 def teclado_boas_vindas():
@@ -1360,13 +1365,12 @@ def teclado_boas_vindas():
 def mostrar_ajuda():
     return (
         "No que posso ajudar?\n\n"
-        "<b>Pedido de compra</b>\n"
-        "Para montar um pedido, envie a foto ou arquivo do orçamento.\n\n"
-        "<b>Pagamento</b>\n"
-        "Para registrar um pagamento, envie o comprovante PIX.\n\n"
-        "<b>Consulta</b>\n"
-        "GGV03-009 — pedido de compra\n"
-        "GGV03 — obra · /obras — lista"
+        "<b>Cadastrar pedido de compra</b>\n"
+        "Envie a foto ou arquivo do orçamento.\n\n"
+        "<b>Confirmar pagamento</b>\n"
+        "Envie o comprovante PIX.\n\n"
+        "<b>Consultas diretas</b>\n"
+        "Digite o código da obra (GGV03) ou do pedido (GGV03-009)."
     )
 
 def teclado_ajuda():
@@ -1382,8 +1386,8 @@ def _listar_obras():
 
 def mostrar_lista_obras(obras):
     if not obras:
-        return "Nenhuma obra cadastrada."
-    linhas = ["Obras cadastradas", ""]
+        return "Nenhuma obra cadastrada. Use ➕ Nova obra para começar."
+    linhas = ["Qual obra?", ""]
     for codigo, desc in obras:
         desc = desc or ""
         titulo = desc.split(",")[0].replace(codigo, "").strip() if desc else "Sem descrição"
@@ -1414,16 +1418,17 @@ def _pedidos_obra(ggv):
 def teclado_obra(codigo, pedidos=None):
     botoes = []
     if pedidos:
-        botoes.append([InlineKeyboardButton("📋 Pedidos", callback_data=f"obra_pedidos:{codigo}")])
-    botoes.append([InlineKeyboardButton("✏️ Editar obra", callback_data=f"obra_editar:{codigo}")])
-    botoes.append([InlineKeyboardButton("✖ Fechar",       callback_data=f"obra_fechar:{codigo}")])
+        botoes.append([InlineKeyboardButton("📋 Pedidos",   callback_data=f"obra_pedidos:{codigo}")])
+    botoes.append([InlineKeyboardButton("✏️ Editar obra",   callback_data=f"obra_editar:{codigo}")])
+    botoes.append([InlineKeyboardButton("◀️ Obras",         callback_data="menu_obras")])
+    botoes.append([InlineKeyboardButton("✖ Fechar",         callback_data=f"obra_fechar:{codigo}")])
     return InlineKeyboardMarkup(botoes)
 
 def mostrar_lista_pedidos(codigo, pedidos):
     _ST = {"a_pagar": "🟡", "pago": "🟢", "pendente_revisao": "🔴", "substituido": "⚫"}
     if not pedidos:
-        return f"Pedidos — {codigo}\n\nNenhum pedido registrado."
-    linhas = [f"Pedidos — {codigo}\n"]
+        return f"Nenhum pedido em {codigo}. Envie um orçamento para começar."
+    linhas = [f"Qual pedido? · {codigo}\n"]
     for pfm_codigo, status, fornecedor, valor in pedidos:
         emoji    = _ST.get(status, "⚪")
         forn_cur = (fornecedor or "—")[:20]
@@ -1577,7 +1582,7 @@ def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
 
     historico = []
     if pedido.lanc_criado_em:
-        historico.append((_fmt_data_curta(pedido.lanc_criado_em), "Pedido de Compra gerado"))
+        historico.append((_fmt_data_curta(pedido.lanc_criado_em), "Pedido criado"))
     if pedido.data_pagamento:
         historico.append((pedido.data_pagamento[:5], "Pago"))
     pedido.historico = historico
@@ -1634,24 +1639,26 @@ def mostrar_pedido(pedido: Pedido) -> str:
     hist = []
     for data, evento in pedido.historico:
         hist.append(f"{data}  {evento}")
-    historico = "\n".join(hist) if hist else "(sem eventos registrados)"
+    historico = "\n".join(hist) if hist else "—"
 
     return SEP.join([cabecalho, financeiro, arquivos, historico])
 
 def teclado_pedido(doc_id, pfm_codigo):
+    ggv = pfm_codigo.rsplit("-", 1)[0]
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Revisar",        callback_data=f"pfm_revisar:{doc_id}:{pfm_codigo}")],
         [InlineKeyboardButton("📄 PDF",         callback_data=f"pfm_ver:{doc_id}:{pfm_codigo}")],
+        [InlineKeyboardButton("📎 Orçamento",   callback_data=f"pfm_orc:{doc_id}:{pfm_codigo}")],
         [InlineKeyboardButton("Financeiro",     callback_data=f"pfm_lanc:{doc_id}:{pfm_codigo}")],
-        [InlineKeyboardButton("Histórico",      callback_data=f"pfm_hist:{doc_id}:{pfm_codigo}")],
+        [InlineKeyboardButton("◀️ Pedidos",     callback_data=f"obra_pedidos:{ggv}")],
         [InlineKeyboardButton("✖ Fechar",       callback_data=f"pfm_fechar:{doc_id}")],
     ])
 
 def _tela_categoria(cat, ramo):
     if cat:
-        linha_ramo = f"\n({ramo})" if ramo and ramo != "A PREENCHER" else ""
-        return f"Categoria do lançamento\n\n🟡 Sugestão: {cat.label()}{linha_ramo}"
-    return "Categoria do lançamento\n\nSelecione a categoria:"
+        linha_ramo = f"\n{ramo}" if ramo and ramo != "A PREENCHER" else ""
+        return f"Como classificar este pedido?\n\n{cat.label()}{linha_ramo}"
+    return "Como classificar este pedido?"
 
 def _teclado_selecao_categorias(doc_id, ggv):
     cats = list(CategoriaLancamento)
@@ -1667,8 +1674,8 @@ def _teclado_selecao_categorias(doc_id, ggv):
 def _teclado_categoria(doc_id, ggv, cat):
     if cat:
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Confirmar", callback_data=f"cat_confirmar:{doc_id}:{ggv}:{cat.value}")],
-            [InlineKeyboardButton("Outra categoria", callback_data=f"cat_corrigir:{doc_id}:{ggv}")],
+            [InlineKeyboardButton("✅ Confirmar",   callback_data=f"cat_confirmar:{doc_id}:{ggv}:{cat.value}")],
+            [InlineKeyboardButton("Escolher outra", callback_data=f"cat_corrigir:{doc_id}:{ggv}")],
         ])
     return _teclado_selecao_categorias(doc_id, ggv)
 
@@ -2394,37 +2401,22 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 reply_markup=teclado_pedido(doc_id, pfm_codigo)
             )
 
-        elif acao == "pfm_hist":
+        elif acao == "pfm_orc":
             _, doc_id, pfm_codigo = partes
             with sqlite3.connect(DB_PATH) as con:
-                doc_row  = con.execute(
-                    "SELECT criado_em FROM documentos WHERE id=?", (int(doc_id),)
-                ).fetchone()
-                lanc_row = con.execute(
-                    "SELECT criado_em, data_prevista_entrega, data_pagamento, valor_pago FROM lancamentos WHERE pfm_codigo=?",
-                    (pfm_codigo,)
-                ).fetchone()
-            eventos = []
-            if doc_row and doc_row[0]:
-                eventos.append((_fmt_data_curta(doc_row[0]), "Orçamento recebido"))
-            if lanc_row:
-                lanc_criado, data_ent, data_pgto, valor_pago = lanc_row
-                if lanc_criado:
-                    eventos.append((_fmt_data_curta(lanc_criado), "Pedido de Compra gerado"))
-                if data_ent and data_ent not in ("—", "A PREENCHER"):
-                    eventos.append((data_ent[:5], "Entrega prevista"))
-                if data_pgto:
-                    val_str = f"  ·  R$ {_fmt_brl(valor_pago)}" if valor_pago else ""
-                    eventos.append((data_pgto[:5], f"Pago{val_str}"))
-            if eventos:
-                linhas = "\n".join(f"{d}  {e}" for d, e in eventos)
-                texto_hist = f"Histórico — #{pfm_codigo}\n\n{linhas}"
+                row = con.execute("SELECT caminho FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
+            caminho = row[0] if row else None
+            if not caminho or not Path(caminho).exists():
+                await query.answer("Orçamento original não encontrado.", show_alert=True)
+                return
+            path = Path(caminho)
+            await query.answer()
+            dados = path.read_bytes()
+            ext = path.suffix.lower()
+            if ext in (".jpg", ".jpeg", ".png", ".webp"):
+                await ctx.bot.send_photo(chat_id=query.message.chat_id, photo=dados)
             else:
-                texto_hist = f"Histórico — #{pfm_codigo}\n\n(sem eventos registrados)"
-            await query.edit_message_text(
-                texto_hist,
-                reply_markup=teclado_pedido(doc_id, pfm_codigo)
-            )
+                await ctx.bot.send_document(chat_id=query.message.chat_id, document=dados, filename=path.name)
 
         elif acao == "obra_pedidos":
             codigo  = partes[1]
