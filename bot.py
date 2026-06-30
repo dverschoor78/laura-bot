@@ -1490,7 +1490,7 @@ def teclado_tipo_inicial(doc_id):
         [InlineKeyboardButton("📋 Orçamento / Cotação",  callback_data=f"sel_tipo_inicial:{doc_id}:orcamento")],
         [InlineKeyboardButton("💰 Comprovante PIX",       callback_data=f"sel_tipo_inicial:{doc_id}:comprovante_pix")],
         [InlineKeyboardButton("🏦 Extrato Mercado Pago", callback_data=f"sel_tipo_inicial:{doc_id}:extrato_mp")],
-        [InlineKeyboardButton("🗑 Outro",                 callback_data=f"sel_tipo_inicial:{doc_id}:nao_relacionado")],
+        [InlineKeyboardButton("Não é da obra",            callback_data=f"sel_tipo_inicial:{doc_id}:nao_relacionado")],
     ])
 
 def teclado_condicao(doc_id, tipo, ggv):
@@ -1797,7 +1797,7 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     doc_id = registrar(nome, caminho, hash_arquivo, "pendente", "nao_identificado", "")
 
     await update.message.reply_text(
-        "Documento recebido.\n\nO que você trouxe?",
+        "O que é este documento?",
         reply_markup=teclado_tipo_inicial(doc_id)
     )
 
