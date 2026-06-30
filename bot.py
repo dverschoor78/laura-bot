@@ -18,7 +18,8 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
-from financeiro.lancamento import init_db_financeiro, sugerir_categoria, CategoriaLancamento
+from financeiro.lancamento import (init_db_financeiro, sugerir_categoria, CategoriaLancamento,
+                                   vincular_nfe, buscar_candidatos_nfe)
 
 load_dotenv()
 TOKEN       = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -34,6 +35,7 @@ claude = anthropic.Anthropic(api_key=CLAUDE_KEY)
 TIPOS = {
     "orcamento":        ("📋", "Orçamento"),
     "comprovante_pix":  ("💰", "Comprovante PIX"),
+    "nota_fiscal":      ("🧾", "Nota Fiscal"),
     "extrato_mp":       ("🏦", "Extrato MP"),
     "nao_relacionado":  ("🗑", "Não é da obra"),
 }
@@ -112,6 +114,7 @@ class Pedido:
     doc_criado_em:  Optional[str] = None
     lanc_criado_em: Optional[str] = None
     data_pagamento: Optional[str] = None
+    doc_id_nfe:     Optional[int] = None
 
     # Arquivos — populados por preparar_visualizacao_pedido()
     caminho_orcamento: Optional[str] = None
@@ -127,6 +130,7 @@ Você recebeu um arquivo enviado para um sistema de gestão de obras de constru�
 PASSO 1 — Classifique o documento:
 [orcamento]        — cotação, orçamento, pedido de compra, lista de materiais com preços
 [comprovante_pix]  — comprovante de pagamento PIX ou transferência bancária
+[nota_fiscal]      — Nota Fiscal eletrônica (NF-e), DANFE, NFS-e ou recibo fiscal
 [extrato_mp]       — extrato do Mercado Pago ou extrato bancário
 [nao_relacionado]  — qualquer outro documento não relacionado a obras
 
@@ -165,6 +169,14 @@ Se [comprovante_pix]:
 - ID da transação: (número da transação Mercado Pago OU ID EndToEnd do Pix — extraia APENAS o código/número, sem texto adicional; ex: 165448957194 ou E10573521...)
 - Identificador / Observação:
 
+Se [nota_fiscal]:
+- Número da NF:
+- CNPJ/CPF do emitente:
+- Nome do emitente:
+- Valor total:
+- Data de emissão:
+- Descrição do serviço/produto: (resumo do que foi fornecido)
+
 Se [extrato_mp]:
 - Período:
 - Número de transações identificadas:
@@ -177,7 +189,7 @@ Responda EXATAMENTE neste formato (sem colchetes, sem barra, escolha um valor de
 TIPO:orcamento
 GGV:GGV03
 
-Valores aceitos para TIPO: orcamento, comprovante_pix, extrato_mp, nao_relacionado
+Valores aceitos para TIPO: orcamento, comprovante_pix, nota_fiscal, extrato_mp, nao_relacionado
 Valores aceitos para GGV: GGV00, GGV01, GGV02, GGV03, nao_identificado
 
 Em seguida, os dados extraídos conforme o tipo identificado acima.
@@ -1489,6 +1501,7 @@ def teclado_tipo_inicial(doc_id):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📋 Orçamento / Cotação",  callback_data=f"sel_tipo_inicial:{doc_id}:orcamento")],
         [InlineKeyboardButton("💰 Comprovante PIX",       callback_data=f"sel_tipo_inicial:{doc_id}:comprovante_pix")],
+        [InlineKeyboardButton("🧾 Nota Fiscal",           callback_data=f"sel_tipo_inicial:{doc_id}:nota_fiscal")],
         [InlineKeyboardButton("🏦 Extrato Mercado Pago", callback_data=f"sel_tipo_inicial:{doc_id}:extrato_mp")],
         [InlineKeyboardButton("Não é da obra",            callback_data=f"sel_tipo_inicial:{doc_id}:nao_relacionado")],
     ])
@@ -1535,14 +1548,14 @@ def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
             return None
         doc_id, ggv_db, dados, condicao_pgto, data_entrega, desconto_rs, caminho, doc_criado = doc
         lanc = con.execute(
-            "SELECT fornecedor, valor, data_prevista_entrega, vencimento_pagamento, status, criado_em, data_pagamento "
+            "SELECT fornecedor, valor, data_prevista_entrega, vencimento_pagamento, status, criado_em, data_pagamento, doc_id_nfe "
             "FROM lancamentos WHERE pfm_codigo=?",
             (pfm_codigo,)
         ).fetchone()
 
-    forn_lanc = data_prev_ent = venc = status_raw = lanc_criado = data_pgto = None
+    forn_lanc = data_prev_ent = venc = status_raw = lanc_criado = data_pgto = doc_id_nfe = None
     if lanc:
-        forn_lanc, _, data_prev_ent, venc, status_raw, lanc_criado, data_pgto = lanc
+        forn_lanc, _, data_prev_ent, venc, status_raw, lanc_criado, data_pgto, doc_id_nfe = lanc
 
     try:
         status = StatusPedido(status_raw) if status_raw else StatusPedido.SEM_LANCAMENTO
@@ -1567,6 +1580,7 @@ def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
         doc_criado_em      = doc_criado,
         lanc_criado_em     = lanc_criado,
         data_pagamento     = data_pgto,
+        doc_id_nfe         = doc_id_nfe,
         caminho_orcamento  = caminho,
     )
 
@@ -1605,7 +1619,7 @@ def mostrar_pedido(pedido: Pedido) -> str:
     }
     _STATUS_SHORT = {
         StatusPedido.A_PAGAR:          "Aguardando pagamento",
-        StatusPedido.PAGO:             "Pago",
+        StatusPedido.PAGO:             "Pago · NF-e pendente" if not pedido.doc_id_nfe else "Pago · NF-e vinculada",
         StatusPedido.PENDENTE_REVISAO: "Requer atenção",
         StatusPedido.SUBSTITUIDO:      "Substituído",
         StatusPedido.SEM_LANCAMENTO:   "Sem registro financeiro",
@@ -1683,6 +1697,57 @@ def _teclado_categoria(doc_id, ggv, cat):
             [InlineKeyboardButton("Escolher outra", callback_data=f"cat_corrigir:{doc_id}:{ggv}")],
         ])
     return _teclado_selecao_categorias(doc_id, ggv)
+
+def _parse_nfe(corpo: str) -> dict:
+    """Extrai campos da NF-e do texto retornado pelo Claude."""
+    def _campo_nfe(label):
+        for linha in corpo.splitlines():
+            if linha.strip().startswith(label):
+                return linha.split(":", 1)[1].strip() if ":" in linha else ""
+        return "A PREENCHER"
+    valor_str = _campo_nfe("Valor total")
+    try:
+        valor_v = float(valor_str.replace("R$", "").replace(".", "").replace(",", ".").strip())
+    except Exception:
+        valor_v = None
+    return {
+        "numero":    _campo_nfe("Número da NF"),
+        "cnpj":      _campo_nfe("CNPJ/CPF do emitente"),
+        "emitente":  _campo_nfe("Nome do emitente"),
+        "valor_fmt": valor_str,
+        "valor_v":   valor_v,
+        "data":      _campo_nfe("Data de emissão"),
+        "descricao": _campo_nfe("Descrição do serviço/produto"),
+    }
+
+def _mostrar_nfe(dados: dict, candidatos: list) -> str:
+    linhas = ["NF-e identificada.\n"]
+    if dados["emitente"] != "A PREENCHER":
+        linhas.append(f"{dados['emitente']} — {dados['valor_fmt']}")
+    else:
+        linhas.append(dados["valor_fmt"])
+    if dados["numero"]   != "A PREENCHER": linhas.append(f"NF {dados['numero']}")
+    if dados["data"]     != "A PREENCHER": linhas.append(dados["data"])
+    if dados["descricao"] != "A PREENCHER": linhas.append(dados["descricao"])
+    linhas.append("")
+    if not candidatos:
+        linhas.append("Nenhum pedido pago sem NF-e encontrado para este emitente.")
+        return "\n".join(linhas)
+    linhas.append("A qual pedido vincular esta NF-e?\n")
+    for c in candidatos:
+        valor_fmt = f"R$ {_fmt_brl(c['valor_lanc'])}" if c["valor_lanc"] else "—"
+        linhas.append(f"🟢 #{c['pfm_codigo']} · {c['fornecedor']} · {valor_fmt}")
+    return "\n".join(linhas)
+
+def _teclado_candidatos_nfe(doc_id: int, candidatos: list):
+    botoes = []
+    for c in candidatos:
+        botoes.append([InlineKeyboardButton(
+            f"#{c['pfm_codigo']}",
+            callback_data=f"nfe_confirmar:{doc_id}:{c['pfm_codigo']}"
+        )])
+    botoes.append([InlineKeyboardButton("Nenhum destes", callback_data="nfe_cancelar")])
+    return InlineKeyboardMarkup(botoes)
 
 async def _executar_gerar_pfm(query, ctx, doc_id, ggv, categoria):
     await query.edit_message_text("Gerando Pedido de Compra...")
@@ -2066,6 +2131,13 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                         mostrar_comprovante_candidatos(dados, candidatos),
                         reply_markup=markup
                     )
+            elif tipo == "nota_fiscal":
+                dados_nfe = _parse_nfe(corpo)
+                candidatos = buscar_candidatos_nfe(dados_nfe["cnpj"], dados_nfe["valor_v"], DB_PATH)
+                await query.edit_message_text(
+                    _mostrar_nfe(dados_nfe, candidatos),
+                    reply_markup=_teclado_candidatos_nfe(int(doc_id), candidatos)
+                )
             elif tipo == "orcamento":
                 texto, markup = _resumo_gerar(int(doc_id))
                 await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
@@ -2161,7 +2233,8 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             await query.edit_message_text(
-                f"🟢 Pedido #{pfm_codigo} — pago."
+                f"🟢 Pedido #{pfm_codigo} — pago.\n\n"
+                "Envie a NF-e para fechar este pedido."
             )
 
         elif acao == "pix_cancelar":
@@ -2430,6 +2503,22 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await ctx.bot.send_photo(chat_id=query.message.chat_id, photo=dados)
             else:
                 await ctx.bot.send_document(chat_id=query.message.chat_id, document=dados, filename=path.name)
+
+        elif acao == "nfe_confirmar":
+            _, doc_id_nfe, pfm_codigo = partes
+            ok = vincular_nfe(pfm_codigo, int(doc_id_nfe), DB_PATH)
+            if ok:
+                await query.edit_message_text(
+                    f"🟢 #{pfm_codigo} — NF-e vinculada. Ciclo fechado."
+                )
+            else:
+                await query.edit_message_text(
+                    f"Não foi possível vincular a NF-e ao Pedido #{pfm_codigo}.\n"
+                    "O pedido pode já ter uma NF-e vinculada."
+                )
+
+        elif acao == "nfe_cancelar":
+            await query.edit_message_text("NF-e não vinculada.")
 
         elif acao == "obra_pedidos":
             codigo  = partes[1]

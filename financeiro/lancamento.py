@@ -124,6 +124,7 @@ def init_db_financeiro(db_path):
         "tipo_documento TEXT",
         "fonte_recurso TEXT",
         "conciliado_em TEXT",
+        "doc_id_nfe INTEGER",
     ]
     with sqlite3.connect(db_path) as con:
         for col in novas_colunas:
@@ -131,3 +132,52 @@ def init_db_financeiro(db_path):
                 con.execute(f"ALTER TABLE lancamentos ADD COLUMN {col}")
             except Exception:
                 pass
+
+
+def vincular_nfe(pfm_codigo: str, doc_id_nfe: int, db_path: str) -> bool:
+    """Vincula uma NF-e a um lançamento pago. Retorna True se o vínculo foi criado."""
+    with sqlite3.connect(db_path) as con:
+        cur = con.execute(
+            "UPDATE lancamentos SET doc_id_nfe=? WHERE pfm_codigo=? AND status='pago' AND doc_id_nfe IS NULL",
+            (doc_id_nfe, pfm_codigo)
+        )
+        return cur.rowcount == 1
+
+
+def buscar_pedidos_sem_nfe(ggv: str, db_path: str) -> list:
+    """Retorna lançamentos pagos sem NF-e vinculada para um GGV."""
+    with sqlite3.connect(db_path) as con:
+        return con.execute(
+            """SELECT pfm_codigo, fornecedor, valor
+               FROM lancamentos
+               WHERE ggv=? AND status='pago' AND doc_id_nfe IS NULL
+               ORDER BY pfm_codigo""",
+            (ggv,)
+        ).fetchall()
+
+
+def buscar_candidatos_nfe(cnpj: str, valor: float, db_path: str) -> list:
+    """Encontra pedidos pagos sem NF-e com CNPJ e valor compatíveis."""
+    with sqlite3.connect(db_path) as con:
+        rows = con.execute(
+            """SELECT l.pfm_codigo, l.fornecedor, l.valor, f.cnpj
+               FROM lancamentos l
+               LEFT JOIN fornecedores f ON LOWER(f.nome) = LOWER(l.fornecedor)
+               WHERE l.status='pago' AND l.doc_id_nfe IS NULL""",
+        ).fetchall()
+    candidatos = []
+    for pfm_codigo, fornecedor, valor_lanc, cnpj_forn in rows:
+        score = 0
+        if cnpj and cnpj_forn and cnpj.replace(".", "").replace("/", "").replace("-", "") == \
+                cnpj_forn.replace(".", "").replace("/", "").replace("-", ""):
+            score += 5
+        if valor_lanc and valor:
+            diff = abs(float(valor_lanc) - float(valor)) / max(float(valor), 0.01)
+            if diff < 0.01:
+                score += 3
+            elif diff < 0.05:
+                score += 1
+        if score > 0:
+            candidatos.append({"pfm_codigo": pfm_codigo, "fornecedor": fornecedor,
+                                "valor_lanc": valor_lanc, "score": score})
+    return sorted(candidatos, key=lambda x: x["score"], reverse=True)
