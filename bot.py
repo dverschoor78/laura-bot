@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 import hashlib
 import sqlite3
 import base64
@@ -1836,7 +1837,11 @@ async def _executar_revisao_pfm(query, ctx, doc_id, pfm_codigo_base):
         con.execute("UPDATE documentos SET rev_numero=? WHERE id=?", (rev_num, doc_id))
     rev_codigo = f"{pfm_codigo_base}-R{rev_num:02d}"
     await query.edit_message_text(f"Gerando revisão {rev_codigo}...")
-    gerar_pfm(doc_id, pfm_codigo_override=rev_codigo)
+    caminho_rev, *_ = gerar_pfm(doc_id, pfm_codigo_override=rev_codigo)
+    # Sobrescreve o DOCX principal para manter OneDrive sempre atualizado
+    prefixo = "TESTE-" if TEST_MODE else ""
+    caminho_principal = caminho_rev.parent / f"{prefixo}{pfm_codigo_base}.docx"
+    shutil.copy2(caminho_rev, caminho_principal)
     html      = _gerar_html_pc(doc_id)
     pdf_bytes = await _html_para_pdf(html)
     await ctx.bot.send_document(
