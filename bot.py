@@ -2475,10 +2475,13 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         elif acao == "pfm_revisar":
             _, doc_id, pfm_codigo = partes
-            await query.edit_message_text(
-                f"Revisão do Pedido #{pfm_codigo} ainda não está disponível.",
-                reply_markup=teclado_pedido(doc_id, pfm_codigo)
-            )
+            ctx.user_data["doc_id"] = int(doc_id)
+            ctx.user_data["tipo"]   = "orcamento"
+            texto_resumo, markup = _resumo_gerar(int(doc_id))
+            try:
+                await query.edit_message_text(texto_resumo, reply_markup=markup, parse_mode="HTML")
+            except Exception:
+                await query.answer("Tela de revisão já está aberta.")
 
         elif acao == "pfm_ver":
             _, doc_id, pfm_codigo = partes
