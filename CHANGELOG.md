@@ -10,11 +10,28 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Fiada 6c — Foto de entrega
+1. Testar Fiada 6c em produção (entrega completa: foto, /entrega, edição, exclusão)
 2. Validar PDF do PC 2.0 com orçamento real em produção
 3. Remover DOCX do fluxo principal após validação
-4. Fiada 5b-1 — Extrato da Obra: dados reais no cockpit
-5. Corrigir BD fornecedores (MO Construção CNPJ errado, PRUDENTÓPOLIS split)
+4. Fiada 6b — Recibo como exceção (fornecedor sem NF-e)
+5. Refatorar bot.py — já em 3152 linhas, 50% acima do limite ADR-001
+
+---
+
+## [Fase 6 — Fiada 6c+ — Gestão de Entrega] — 2026-06-30
+
+### Edição, exclusão e anexo de foto durante o fluxo de observação
+
+- Botão `✏️ Editar entrega` no cockpit sempre que entrega estiver registrada
+- Tela de gestão exibe obs atual e se há foto; botões contextuais:
+  - `✏️ Mudar observação` → seletor de obs com ← Voltar; suporta texto livre
+  - `🔄 Trocar foto` / `📎 Anexar foto` → substitui ou adiciona foto sem alterar obs
+  - `🗑 Remover foto` → remove só a foto, mantém obs e data
+  - `🗑 Apagar entrega` → limpa obs, foto e data; cockpit volta ao estado "não entregue"
+  - `← Voltar` → retorna ao cockpit do pedido
+- `📎 Foto / Documento` na tela "Como foi a entrega?" permite anexar antes de confirmar obs
+- Cockpit corrigido: quando há obs E foto, exibe ambos `📦 Foto de entrega` + `✏️ Editar entrega`
+- DB helpers: `_atualizar_foto_entrega`, `_atualizar_obs_entrega`, `_apagar_entrega_db`, `_buscar_estado_entrega`
 
 ---
 

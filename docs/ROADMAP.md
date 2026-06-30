@@ -146,12 +146,16 @@ cadastro como `emite_nf = false` para Laura gerar recibo automaticamente, sem pe
 - Status novo: `pago_com_recibo`
 - Coluna `emite_nf BOOLEAN` adicionada à tabela `fornecedores`
 
-**Fiada 6c — Foto de Entrega** *(planejada)*
+**Fiada 6c — Foto de Entrega + Gestão de Entrega** ✓ *(concluída 2026-06-30)*
 
-- Novo tipo de documento: foto de entrega
-- Vínculo ao pedido via matching ou seleção manual
-- Campo opcional de observação: "entregou só metade", "produto diferente"
-- Status novo: `entregue` na tabela `lancamentos`
+- Novo tipo de documento `foto_entrega` — sem Claude, direto à seleção do pedido
+- 3 rotas: foto enviada, `/entrega`, botão `📦 Entregue` no cockpit
+- Sugestões de observação (Jeito da Laura): completa, parcial, avaria, diferente, outra
+- Qualquer pedido elegível, independente de status financeiro
+- Colunas `doc_id_entrega`, `obs_entrega`, `entregue_em` em `lancamentos`
+- Gestão completa: `✏️ Editar entrega` → mudar obs, trocar/remover foto, apagar entrega
+- `📎 Foto / Documento` na tela de obs para anexar antes de confirmar
+- **Pendente: testar em produção na próxima sessão**
 
 ---
 
@@ -195,11 +199,11 @@ Implementar junto com a Fiada 6b.
 
 ## Próximas Fiadas
 
-1. Fiada 6c — Foto de Entrega (vínculo ao pedido, observação, status `entregue`)
-2. Validar PC 2.0 em produção + remover DOCX do fluxo principal
-3. Corrigir BD fornecedores (MO Construção CNPJ, PRUDENTÓPOLIS split)
-4. Histórico do Pedido — `pfm_hist` (botão removido temporariamente — reimplementar)
-5. `pfm_caminho` como coluna no banco — eliminar reconstrução de path
+1. **Testar Fiada 6c em produção** — entrega completa: foto, /entrega, edição, exclusão
+2. **Refatorar bot.py** — 3152 linhas, 50% acima do limite ADR-001; candidato: extrair `entrega/`
+3. Fiada 6b — Recibo como exceção (fornecedor sem NF-e, coluna `emite_nf` em `fornecedores`)
+4. Validar PC 2.0 em produção + remover DOCX do fluxo principal
+5. Corrigir BD fornecedores (MO Construção CNPJ, PRUDENTÓPOLIS split)
 
 ---
 
@@ -231,9 +235,9 @@ Implementar junto com a Fiada 6b.
   Se o Claude não extrair `ID da transação`, a proteção por identificador não atua.
   Justificativa: afeta apenas comprovantes sem número de transação visível; raro no MP.
 
-- **Baixa — `bot.py` monolítico com ~1705 linhas**
-  Aceitável até ~2000 linhas.
-  Justificativa: monólito é decisão consciente — registrado na ADR-001.
+- **Alta — `bot.py` monolítico com 3152 linhas**
+  50% acima do limite ADR-001 (~2000 linhas). Candidato imediato: extrair domínio `entrega/`.
+  Justificativa para adiamento: Fiada 6c precisava ser concluída antes da refatoração.
 
 ---
 

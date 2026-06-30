@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-06-30
-> Sessão: Fase 6 — Fiada 6a — Recebimento de NF-e + Revisão de Pedido
+> Sessão: Fase 6 — Fiada 6c+ — Gestão completa de entrega (edição, exclusão, foto)
 
 ---
 
@@ -19,7 +19,7 @@
 
 ## Versão Atual
 
-**v0.6.0** — NF-e vinculada + Revisão de Pedido
+**v0.6.1** — Gestão completa de entrega
 
 ---
 
@@ -42,23 +42,33 @@
 - Recebimento e vinculação de NF-e ao pedido pago
 - Revisão do Pedido de Compra com geração de arquivo rev01, rev02...
 - Cockpit do pedido com número da NF-e, botões de comprovante e nota
+- Registro de entrega: foto, /entrega, botão no cockpit, observação com sugestões
+- Edição de entrega: mudar obs, trocar/remover foto, apagar entrega completa
 - Modo teste isolado via `LAURA_ENV=test`
 
 ---
 
 ## Última Fiada Implementada
 
-**Fase 6 — Fiada 6a — Recebimento de NF-e + Revisão de Pedido** *(2026-06-30)*
+**Fase 6 — Fiada 6c+ — Gestão completa de entrega** *(2026-06-30)*
 
-- Novo tipo de documento `nota_fiscal`: extração de número, CNPJ, emitente, valor, data
-- `buscar_candidatos_nfe()`: encontra pedidos pagos sem NF-e, ordena por CNPJ + valor; fallback manual quando sem correspondência forte
-- Vínculo `doc_id_nfe` gravado em `lancamentos`; arquivado em `documentos`
-- Cockpit do pedido: status `Pago · NF-e 490224`, arquivos com `🧾 NF-e`, botões `💰 Comprovante` e `🧾 NF-e` condicionais
-- Histórico: linha de NF-e com data de emissão
-- Revisão PFM: `pfm_revisar` abre revisão de dados → gera `GGV03-005-R01.docx` + sobrescreve `GGV03-005.docx` + envia PDF
-- `gerar_pfm(pfm_codigo_override=...)`: pula numeração e lançamento ao regerar revisão
-- Bugs corrigidos: `ITEM_RE` (unit vs subtotal), `_recalcular_itens()`, desconto zero, PROMPT preferindo EndToEnd PIX
-- Botão "Financeiro" removido do cockpit — informação já disponível no próprio pedido
+- Tela de gestão `✏️ Editar entrega` acessível pelo cockpit quando entrega registrada
+- Mudar observação: seletor de obs com ← Voltar; suporta texto livre
+- Trocar/anexar foto: substitui `doc_id_entrega` sem alterar obs ou data
+- Remover foto: limpa só o documento, mantém obs e `entregue_em`
+- Apagar entrega: zera obs + foto + data; cockpit volta a exibir `📦 Entregue`
+- `📎 Foto / Documento` na tela de obs permite anexar antes de confirmar observação
+- Cockpit: exibe `📦 Foto de entrega` + `✏️ Editar entrega` quando há obs e foto
+
+---
+
+**Fase 6 — Fiada 6c — Foto de Entrega e Registro de Entrega** *(2026-06-30)*
+
+- Novo tipo de documento `foto_entrega` — sem análise Claude, vai direto à seleção do pedido
+- `/entrega`: lista pedidos pendentes → seleciona → observação → grava
+- Botão `📦 Entregue` no cockpit; vira `📦 Foto de entrega` quando foto vinculada
+- Sugestões de observação: Completa · Parcial · Avaria · Produto diferente · Outra
+- Colunas `doc_id_entrega`, `obs_entrega`, `entregue_em` em `lancamentos`
 
 ---
 
@@ -139,9 +149,9 @@
 HTML→PDF implementado via Playwright Chromium. Precisa ser testado em produção com orçamento real.
 O DOCX ainda é gerado em paralelo (salvo na pasta OneDrive). Remoção do Word fica para depois da validação.
 
-**Fase 6 — Fiada 6c — Foto de Entrega** *(próxima)*
+**Fiada 6b — Recibo como Exceção** *(próxima)*
 
-Novo tipo de documento: foto de entrega vinculada ao pedido. Status `entregue` no ciclo.
+Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção registrada com motivo.
 
 ---
 
@@ -156,7 +166,7 @@ Novo tipo de documento: foto de entrega vinculada ao pedido. Status `entregue` n
 
 ## Dívidas Técnicas Conhecidas
 
-- `bot.py` monolítico com ~1800 linhas — aceitável até ~2000 linhas (ADR-001)
+- `bot.py` monolítico com 3152 linhas — 50% acima do limite ADR-001 (~2000); refatoração prioritária na próxima sessão
 - BD fornecedores: MO Construção com CNPJ errado; PRUDENTÓPOLIS com split incorreto
 - `pfm_caminho` não existe como coluna — path reconstruído a cada consulta
 - `gerar_pfm()` acumula responsabilidades: geração Word + gravação no banco + criação de lançamento
@@ -183,8 +193,9 @@ Novo tipo de documento: foto de entrega vinculada ao pedido. Status `entregue` n
 
 ## Objetivo da Próxima Sessão
 
-1. **Fiada 6c — Foto de Entrega** — novo tipo; vínculo ao pedido, campo de observação, status `entregue`
-2. **Validar PC 2.0** — testar PDF com orçamento real em produção; remover DOCX após validação
+1. **Testar Fiada 6c em produção** — registro completo de entrega: foto, /entrega, edição, exclusão
+2. **Refatorar bot.py** — 3152 linhas, 50% acima do limite ADR-001; iniciar extração de domínio `entrega/`
+3. **Validar PC 2.0** — testar PDF com orçamento real; remover DOCX após validação
 
 ---
 

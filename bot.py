@@ -1783,9 +1783,11 @@ def teclado_pedido(doc_id, pfm_codigo, doc_id_nfe=None, doc_id_comprovante=None,
         botoes.append([InlineKeyboardButton("💰 Comprovante", callback_data=f"pfm_comp:{doc_id_comprovante}:{pfm_codigo}")])
     if doc_id_nfe:
         botoes.append([InlineKeyboardButton("🧾 NF-e", callback_data=f"pfm_nfe:{doc_id_nfe}:{pfm_codigo}")])
-    if doc_id_entrega:
-        botoes.append([InlineKeyboardButton("📦 Foto de entrega", callback_data=f"pfm_entrega_foto:{doc_id_entrega}:{pfm_codigo}")])
-    elif not obs_entrega:
+    if obs_entrega:
+        if doc_id_entrega:
+            botoes.append([InlineKeyboardButton("📦 Foto de entrega", callback_data=f"pfm_entrega_foto:{doc_id_entrega}:{pfm_codigo}")])
+        botoes.append([InlineKeyboardButton("✏️ Editar entrega", callback_data=f"entrega_editar:{pfm_codigo}")])
+    else:
         botoes.append([InlineKeyboardButton("📦 Entregue", callback_data=f"pfm_entregue:{doc_id}:{pfm_codigo}")])
     botoes += [
         [InlineKeyboardButton("◀️ Pedidos",   callback_data=f"obra_pedidos:{ggv}")],
@@ -1841,6 +1843,71 @@ def _tela_apos_entrega(pfm_codigo):
                        pedido.doc_id_comprovante, pedido.doc_id_entrega, pedido.obs_entrega)
     )
 
+def _atualizar_foto_entrega(pfm_codigo, doc_id_foto):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute(
+            "UPDATE lancamentos SET doc_id_entrega=? WHERE pfm_codigo=?",
+            (doc_id_foto, pfm_codigo)
+        )
+
+def _atualizar_obs_entrega(pfm_codigo, obs):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute(
+            "UPDATE lancamentos SET obs_entrega=? WHERE pfm_codigo=?",
+            (obs, pfm_codigo)
+        )
+
+def _apagar_entrega_db(pfm_codigo):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute(
+            "UPDATE lancamentos SET doc_id_entrega=NULL, obs_entrega=NULL, entregue_em=NULL "
+            "WHERE pfm_codigo=?", (pfm_codigo,)
+        )
+
+def _buscar_estado_entrega(pfm_codigo):
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT fornecedor, obs_entrega, doc_id_entrega FROM lancamentos WHERE pfm_codigo=?",
+            (pfm_codigo,)
+        ).fetchone()
+    return row if row else (None, None, None)
+
+def _texto_gerir_entrega(pfm_codigo, forn, obs_entrega, doc_id_entrega):
+    foto = "Sim" if doc_id_entrega else "Não"
+    return (
+        f"#{pfm_codigo} — {forn or pfm_codigo}\n\n"
+        f"Entrega registrada\n"
+        f"Observação: {obs_entrega or '—'}\n"
+        f"Foto: {foto}"
+    )
+
+def _teclado_gerir_entrega(pfm_codigo, doc_id_entrega):
+    botoes = [
+        [InlineKeyboardButton("✏️ Mudar observação", callback_data=f"entrega_mudar_obs:{pfm_codigo}")],
+    ]
+    if doc_id_entrega:
+        botoes += [
+            [InlineKeyboardButton("🔄 Trocar foto",  callback_data=f"entrega_trocar_foto:{pfm_codigo}")],
+            [InlineKeyboardButton("🗑 Remover foto", callback_data=f"entrega_remover_foto:{pfm_codigo}")],
+        ]
+    else:
+        botoes.append([InlineKeyboardButton("📎 Anexar foto", callback_data=f"entrega_trocar_foto:{pfm_codigo}")])
+    botoes += [
+        [InlineKeyboardButton("🗑 Apagar entrega", callback_data=f"entrega_apagar:{pfm_codigo}")],
+        [InlineKeyboardButton("← Voltar",          callback_data=f"entrega_voltar:{pfm_codigo}")],
+    ]
+    return InlineKeyboardMarkup(botoes)
+
+def _teclado_mudar_obs(pfm_codigo):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Entrega completa",      callback_data="entrega_editobs:completa")],
+        [InlineKeyboardButton("📦 Entrega parcial",       callback_data="entrega_editobs:parcial")],
+        [InlineKeyboardButton("⚠️ Material com avaria",  callback_data="entrega_editobs:avaria")],
+        [InlineKeyboardButton("🔄 Produto diferente",    callback_data="entrega_editobs:diferente")],
+        [InlineKeyboardButton("✏️ Outra observação",     callback_data="entrega_editobs:outro")],
+        [InlineKeyboardButton("← Voltar",                callback_data=f"entrega_editar:{pfm_codigo}")],
+    ])
+
 def _texto_obs_entrega(pfm_codigo, forn):
     return f"#{pfm_codigo} — {forn or pfm_codigo}\n\nComo foi a entrega?"
 
@@ -1854,8 +1921,10 @@ def _mostrar_pedidos_entrega(pedidos):
         linhas.append(f"{emoji} #{pfm_codigo} · {forn or '—'}" + (f" · {v}" if v else ""))
     return "\n".join(linhas)
 
-def _teclado_obs_com_cancelar():
+def _teclado_obs_com_cancelar(com_foto=False):
     linhas = list(teclado_obs_entrega().inline_keyboard)
+    if not com_foto:
+        linhas.append([InlineKeyboardButton("📎 Foto / Documento", callback_data="entrega_foto_primeiro")])
     linhas.append([InlineKeyboardButton("✖ Cancelar", callback_data="entrega_cancelar")])
     return InlineKeyboardMarkup(linhas)
 
@@ -2103,6 +2172,31 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     doc_id = registrar(nome, caminho, hash_arquivo, "pendente", "nao_identificado", "")
 
+    if ctx.user_data.get("aguardando") == "foto_entrega_obs":
+        ctx.user_data["aguardando"] = None
+        atualizar(doc_id, tipo="foto_entrega")
+        ctx.user_data["entrega_doc_id_foto"] = doc_id
+        pfm_codigo = ctx.user_data.get("entrega_pfm_codigo")
+        forn, _, _ = _buscar_estado_entrega(pfm_codigo) if pfm_codigo else (None, None, None)
+        await update.message.reply_text(
+            _texto_obs_entrega(pfm_codigo, forn),
+            reply_markup=_teclado_obs_com_cancelar(com_foto=True)
+        )
+        return
+
+    if ctx.user_data.get("aguardando") == "foto_entrega_troca":
+        ctx.user_data["aguardando"] = None
+        atualizar(doc_id, tipo="foto_entrega")
+        pfm_codigo = ctx.user_data.pop("entrega_pfm_codigo", None)
+        if pfm_codigo:
+            _atualizar_foto_entrega(pfm_codigo, doc_id)
+        texto, markup = _tela_apos_entrega(pfm_codigo)
+        if texto:
+            await update.message.reply_text(texto, reply_markup=markup)
+        else:
+            await update.message.reply_text("Foto atualizada.")
+        return
+
     await update.message.reply_text(
         "O que é este documento?",
         reply_markup=teclado_tipo_inicial(doc_id)
@@ -2193,6 +2287,20 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             _salvar_entrega_db(pfm_codigo, doc_id_foto, obs)
             texto_ped, markup = _tela_apos_entrega(pfm_codigo)
             await update.message.reply_text(texto_ped or "Entrega registrada.", reply_markup=markup)
+        else:
+            await update.message.reply_text("Pedido não encontrado.")
+
+    elif aguardando == "edit_obs_entrega_texto":
+        obs = texto.strip()
+        pfm_codigo = ctx.user_data.pop("entrega_pfm_codigo", None)
+        ctx.user_data["aguardando"] = None
+        if pfm_codigo:
+            _atualizar_obs_entrega(pfm_codigo, obs)
+            forn, obs_ent, doc_id_ent = _buscar_estado_entrega(pfm_codigo)
+            await update.message.reply_text(
+                _texto_gerir_entrega(pfm_codigo, forn, obs_ent, doc_id_ent),
+                reply_markup=_teclado_gerir_entrega(pfm_codigo, doc_id_ent)
+            )
         else:
             await update.message.reply_text("Pedido não encontrado.")
 
@@ -2839,6 +2947,83 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 mostrar_boas_vindas(),
                 reply_markup=teclado_boas_vindas()
             )
+
+        elif acao == "entrega_foto_primeiro":
+            ctx.user_data["aguardando"] = "foto_entrega_obs"
+            await query.edit_message_text("Envie a foto ou documento da entrega:")
+
+        elif acao == "entrega_editar":
+            pfm_codigo = partes[1]
+            forn, obs_ent, doc_id_ent = _buscar_estado_entrega(pfm_codigo)
+            await query.edit_message_text(
+                _texto_gerir_entrega(pfm_codigo, forn, obs_ent, doc_id_ent),
+                reply_markup=_teclado_gerir_entrega(pfm_codigo, doc_id_ent)
+            )
+
+        elif acao == "entrega_mudar_obs":
+            pfm_codigo = partes[1]
+            ctx.user_data["entrega_pfm_codigo"] = pfm_codigo
+            _, obs_atual, _ = _buscar_estado_entrega(pfm_codigo)
+            await query.edit_message_text(
+                f"#{pfm_codigo} — Mudar observação\n\nAtual: {obs_atual or '—'}",
+                reply_markup=_teclado_mudar_obs(pfm_codigo)
+            )
+
+        elif acao == "entrega_editobs":
+            chave = partes[1]
+            pfm_codigo = ctx.user_data.get("entrega_pfm_codigo")
+            if not pfm_codigo:
+                await query.answer("Sessão expirada. Abra o pedido novamente.", show_alert=True)
+                return
+            OBS_MAP_EDIT = {
+                "completa":  "Entrega completa",
+                "parcial":   "Entrega parcial — aguardando restante",
+                "avaria":    "Material com avaria",
+                "diferente": "Produto diferente do pedido",
+            }
+            if chave == "outro":
+                ctx.user_data["aguardando"] = "edit_obs_entrega_texto"
+                await query.edit_message_text("Descreva a observação:")
+                return
+            obs = OBS_MAP_EDIT.get(chave, chave)
+            _atualizar_obs_entrega(pfm_codigo, obs)
+            forn, obs_ent, doc_id_ent = _buscar_estado_entrega(pfm_codigo)
+            await query.edit_message_text(
+                _texto_gerir_entrega(pfm_codigo, forn, obs_ent, doc_id_ent),
+                reply_markup=_teclado_gerir_entrega(pfm_codigo, doc_id_ent)
+            )
+
+        elif acao == "entrega_trocar_foto":
+            pfm_codigo = partes[1]
+            ctx.user_data["aguardando"] = "foto_entrega_troca"
+            ctx.user_data["entrega_pfm_codigo"] = pfm_codigo
+            await query.edit_message_text("Envie a nova foto ou documento:")
+
+        elif acao == "entrega_remover_foto":
+            pfm_codigo = partes[1]
+            _atualizar_foto_entrega(pfm_codigo, None)
+            forn, obs_ent, _ = _buscar_estado_entrega(pfm_codigo)
+            await query.edit_message_text(
+                _texto_gerir_entrega(pfm_codigo, forn, obs_ent, None),
+                reply_markup=_teclado_gerir_entrega(pfm_codigo, None)
+            )
+
+        elif acao == "entrega_apagar":
+            pfm_codigo = partes[1]
+            _apagar_entrega_db(pfm_codigo)
+            texto, markup = _tela_apos_entrega(pfm_codigo)
+            if texto:
+                await query.edit_message_text(texto, reply_markup=markup)
+            else:
+                await query.edit_message_text("Entrega apagada.")
+
+        elif acao == "entrega_voltar":
+            pfm_codigo = partes[1]
+            texto, markup = _tela_apos_entrega(pfm_codigo)
+            if texto:
+                await query.edit_message_text(texto, reply_markup=markup)
+            else:
+                await query.edit_message_text("Pedido não encontrado.")
 
         elif acao == "nfe_confirmar":
             _, doc_id_nfe, pfm_codigo = partes
