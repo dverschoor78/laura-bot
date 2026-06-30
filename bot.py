@@ -430,6 +430,8 @@ def _resumo_gerar(doc_id):
     fornecedor = _v(_campo(dados, "Fornecedor")) or "Fornecedor não identificado"
     cnpj       = _v(_campo(dados, "CNPJ/CPF"))
     pix        = _v(_campo(dados, "Chave PIX"))
+    vendedor   = _v(_campo(dados, "Vendedor"))
+    vend_fone  = _v(_campo(dados, "Telefone do vendedor"))
     cond       = _v(condicao) or _v(_campo(dados, "Condição de pagamento"))
     entrega    = _v(data_ent) or _v(_campo(dados, "Prazo de entrega"))
     validade   = _v(_campo(dados, "Validade da proposta"))
@@ -450,6 +452,11 @@ def _resumo_gerar(doc_id):
     linhas.append(_esc_html(fornecedor))
     if cnpj: linhas.append(f"CNPJ  {_esc_html(cnpj)}")
     if pix:  linhas.append(f"PIX   {_esc_html(pix)}")
+    if vendedor:
+        cont = _esc_html(vendedor)
+        if vend_fone:
+            cont += f"  {_esc_html(vend_fone)}"
+        linhas.append(f"Contato   {cont}")
     linhas.append(SEP)
 
     # Bloco 3 — Itens + Total
@@ -2064,6 +2071,25 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         texto_resumo, markup = _resumo_gerar(doc_id)
         await update.message.reply_text(texto_resumo, reply_markup=markup, parse_mode="HTML")
 
+    elif aguardando == "edit_contato":
+        m_fone = re.search(r'\s+([\d][\d\s\(\)\-\.]{5,})\s*$', texto)
+        if m_fone:
+            nome_v = texto[:m_fone.start()].strip()
+            fone_v = m_fone.group(1).strip()
+        else:
+            nome_v = texto.strip()
+            fone_v = ""
+        with sqlite3.connect(DB_PATH) as con:
+            row = con.execute("SELECT dados_claude FROM documentos WHERE id=?", (doc_id,)).fetchone()
+        if row:
+            novos_dados = _substituir_campo(row[0], "Vendedor", nome_v)
+            if fone_v:
+                novos_dados = _substituir_campo(novos_dados, "Telefone do vendedor", fone_v)
+            atualizar(doc_id, dados_claude=novos_dados)
+        ctx.user_data["aguardando"] = None
+        texto_resumo, markup = _resumo_gerar(doc_id)
+        await update.message.reply_text(texto_resumo, reply_markup=markup, parse_mode="HTML")
+
     elif aguardando in ("edit_fornecedor", "edit_cnpj", "edit_valor", "edit_pix", "edit_itens"):
         campo_map = {
             "edit_fornecedor": "Fornecedor",
@@ -2418,8 +2444,9 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("📅 Data entrega",  callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:data")],
                 [InlineKeyboardButton("📍 Endereço",      callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:endereco")],
                 [InlineKeyboardButton("📅 Vencimento pgto", callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:vencimento")],
-                [InlineKeyboardButton("👷 Encarregado",    callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:encarregado")],
-                [InlineKeyboardButton("🏗 GGV",            callback_data=f"sel_ggv:{doc_id}:{tipo}:{ggv}")],
+                [InlineKeyboardButton("👷 Encarregado",     callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:encarregado")],
+                [InlineKeyboardButton("📞 Contato vendedor", callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:contato")],
+                [InlineKeyboardButton("🏗 GGV",             callback_data=f"sel_ggv:{doc_id}:{tipo}:{ggv}")],
                 [InlineKeyboardButton("📋 Tipo doc.",      callback_data=f"sel_tipo:{doc_id}:{tipo}:{ggv}")],
                 [InlineKeyboardButton("◀️ Voltar",         callback_data=f"voltar_edit:{doc_id}:{tipo}:{ggv}")],
             ]
@@ -2456,6 +2483,19 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 atual = (row[0] if row and row[0] else None) or buscar_obra(ggv).get("encarregado_nome", "Não definido")
                 await query.edit_message_text(
                     f"Atual: {atual}\n\nNovo encarregado:"
+                )
+            elif campo == "contato":
+                ctx.user_data["aguardando"] = "edit_contato"
+                with sqlite3.connect(DB_PATH) as con:
+                    row = con.execute("SELECT dados_claude FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
+                dados_atuais = row[0] if row else ""
+                nome_v = _campo(dados_atuais, "Vendedor")
+                fone_v = _campo(dados_atuais, "Telefone do vendedor")
+                if nome_v == "A PREENCHER": nome_v = "Não informado"
+                if fone_v == "A PREENCHER": fone_v = ""
+                atual = f"{nome_v}  {fone_v}".strip() if fone_v else nome_v
+                await query.edit_message_text(
+                    f"Atual: {atual}\n\nNome e telefone do vendedor (ex: Flávio 42 99912-7781):"
                 )
             elif campo == "itens":
                 ctx.user_data["aguardando"] = "edit_itens"

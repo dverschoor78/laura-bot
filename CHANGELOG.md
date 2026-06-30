@@ -18,6 +18,14 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Fiada 6a+ — Contato vendedor na tela de extração] — 2026-06-30
+
+- Bloco Fornecedor da tela de validação exibe `Contato   Flávio  42 99912-7781` quando extraído
+- Menu "Corrigir dados" ganha botão `📞 Contato vendedor` — edita nome e telefone em uma linha
+- Parser separa telefone (dígitos no final) do nome automaticamente
+
+---
+
 ## [Fase 6 — Fiada 6a — Recebimento de NF-e + Revisão de Pedido] — 2026-06-30
 
 ### Ciclo documental completo: PIX → NF-e vinculada
