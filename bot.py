@@ -1584,7 +1584,12 @@ def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
     if pedido.lanc_criado_em:
         historico.append((_fmt_data_curta(pedido.lanc_criado_em), "Pedido criado"))
     if pedido.data_pagamento:
-        historico.append((pedido.data_pagamento[:5], "Pago"))
+        dt = pedido.data_pagamento
+        if len(dt) >= 5 and dt[2:3] == "/":
+            data_fmt = dt[:5]          # "25/06/2026" → "25/06"
+        else:
+            data_fmt = _fmt_data_curta(dt)  # ISO "2026-06-25..." → "25/06"
+        historico.append((data_fmt, "Pago"))
     pedido.historico = historico
 
     return pedido
@@ -2129,8 +2134,16 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     "Cada comprovante pode ser usado apenas uma vez."
                 )
                 return
-            data_pgto = dados_comp["data"] if dados_comp["data"] != "A PREENCHER" \
+            _MESES = {"janeiro":"01","fevereiro":"02","março":"03","abril":"04",
+                      "maio":"05","junho":"06","julho":"07","agosto":"08",
+                      "setembro":"09","outubro":"10","novembro":"11","dezembro":"12"}
+            _data_raw = dados_comp["data"] if dados_comp["data"] != "A PREENCHER" \
                         else datetime.now().strftime("%d/%m/%Y")
+            data_pgto = _data_raw
+            for nome, num in _MESES.items():
+                if nome in _data_raw.lower():
+                    data_pgto = re.sub(nome, num, _data_raw, flags=re.IGNORECASE)
+                    break
             with sqlite3.connect(DB_PATH) as con:
                 cur = con.execute(
                     """UPDATE lancamentos
