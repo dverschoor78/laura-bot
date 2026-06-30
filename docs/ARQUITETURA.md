@@ -50,6 +50,8 @@ Telegram ──────► bot.py ──────► Claude API (haiku-4-
 | `ggv` | GGV identificado: GGV00–GGV03 ou nao_identificado |
 | `dados_claude` | Texto bruto retornado pelo Claude; campos extraídos via `_campo()` na leitura |
 | `condicao_pgto`, `data_entrega`, `endereco_entrega`, `desconto_rs` | Dados coletados durante o fluxo de confirmação |
+| `vencimento_pgto` | Data/condição de vencimento — editável pelo usuário |
+| `encarregado` | Encarregado por documento — sobrescreve padrão do dict `GGV_ENCARREGADO` |
 | `pfm_numero` | Número sequencial por GGV (ex: 9 → GGV03-009) |
 | `status` | Ciclo de vida: recebido → confirmado → pfm_gerado → cancelado |
 
