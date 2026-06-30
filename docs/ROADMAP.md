@@ -20,10 +20,7 @@
 - Tela de categoria antes de gerar o pedido: sugestão com confirmação ou grade de seleção
 - Lançamento gravado inclui `categoria`; exibida na mensagem pós-PFM e na tela Financeiro
 
-**Fiada 5b-1 — Extrato da Obra** *(planejada)*
-
-- `financeiro/lancamento.py`: `extrato_obra()`, `totais_obra()`, `composicao_categorias()`
-- Cockpit da obra exibe bloco financeiro ao digitar código de GGV
+**Fiada 5b-1 — Extrato da Obra** *(adiada — depende do ciclo documental completo da Fase 6)*
 
 **Fiada 5c-1 — Lançamentos Manuais** *(planejada)*
 
