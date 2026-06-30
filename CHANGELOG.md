@@ -21,7 +21,7 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Sprint de Experiência — Navegação e Identidade] — 2026-06-30
 
 - Boas-vindas: saudação ou texto não reconhecido abre menu com descrição de cada opção e 3 botões em linhas individuais
-- Ajuda (`/help`, botão ❓): texto pessoal — "No que posso ajudar?" — guia o usuário por cada ação disponível
+- Ajuda (`/help`, botão ❓): texto pessoal com cabeçalhos em negrito — "No que posso ajudar?" — guia o usuário por Pedido de compra, Pagamento e Consulta
 - `/obras` registrado como comando Telegram; lista obras com título curto de cada GGV
 - Lista de pedidos da obra: tela própria via "📋 Pedidos", cada pedido com emoji de status e valor
 - Navegação direta: botão de pedido na lista abre cockpit do pedido

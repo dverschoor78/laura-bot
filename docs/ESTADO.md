@@ -55,7 +55,7 @@
 **Sprint de Experiência — Navegação e Identidade** *(2026-06-30)*
 
 - Boas-vindas: saudação ou texto desconhecido → "Obras — ... / Ajuda — ..." + 3 botões em linhas individuais
-- Ajuda (`/help`): texto pessoal e guiado — "No que posso ajudar?" — no estilo da identidade do produto
+- Ajuda (`/help`): texto pessoal e guiado com cabeçalhos em negrito (HTML) — "No que posso ajudar?"
 - `/obras` registrado como comando; lista de obras com descrição curta de cada GGV
 - Lista de pedidos da obra: tela própria via "📋 Pedidos", navegação direta ao cockpit do pedido
 - Cockpit da obra: botão "✖ Fechar" adicionado; estrutura preparada para bloco financeiro (Fiada 5b-1)

@@ -1360,10 +1360,13 @@ def teclado_boas_vindas():
 def mostrar_ajuda():
     return (
         "No que posso ajudar?\n\n"
-        "Para montar um pedido de compra, basta enviar a foto ou arquivo do orçamento.\n\n"
-        "Para acessar uma obra, use /obras ou digite o código — GGV03.\n\n"
-        "Se souber o número do pedido, pode digitar direto — GGV03-009.\n\n"
-        "Para registrar um pagamento, envie o comprovante PIX."
+        "<b>Pedido de compra</b>\n"
+        "Para montar um pedido, envie a foto ou arquivo do orçamento.\n\n"
+        "<b>Pagamento</b>\n"
+        "Para registrar um pagamento, envie o comprovante PIX.\n\n"
+        "<b>Consulta</b>\n"
+        "GGV03-009 — pedido de compra\n"
+        "GGV03 — obra · /obras — lista"
     )
 
 def teclado_ajuda():
@@ -1716,7 +1719,8 @@ async def ajuda(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text(
         mostrar_ajuda(),
-        reply_markup=teclado_ajuda()
+        reply_markup=teclado_ajuda(),
+        parse_mode="HTML"
     )
 
 async def comando_desconhecido(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -2498,7 +2502,8 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         elif acao == "menu_ajuda":
             await query.edit_message_text(
                 mostrar_ajuda(),
-                reply_markup=teclado_ajuda()
+                reply_markup=teclado_ajuda(),
+                parse_mode="HTML"
             )
 
         elif acao == "menu_nova_obra":
