@@ -10,11 +10,34 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Testar Fiada 6c em produção (entrega completa: foto, /entrega, edição, exclusão)
-2. Validar PDF do PC 2.0 com orçamento real em produção
-3. Remover DOCX do fluxo principal após validação
-4. Fiada 6b — Recibo como exceção (fornecedor sem NF-e)
-5. Refatorar bot.py — já em 3152 linhas, 50% acima do limite ADR-001
+1. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
+2. Fiada 6b — Recibo como exceção (fornecedor sem NF-e)
+3. Validar PDF do PC 2.0 com orçamento real em produção
+4. Remover DOCX do fluxo principal após validação
+
+---
+
+## [Fase 6 — Fiada 6c++ — Múltiplas fotos de entrega + navegação] — 2026-06-30
+
+### Entrega com N fotos, cada uma com legenda obrigatória
+
+- Tabela `entrega_fotos`: substitui o vínculo único `doc_id_entrega` — um pedido pode ter várias fotos
+- Legenda obrigatória ao anexar qualquer foto ou documento de entrega
+- Tela "👀 Ver arquivos" lista as fotos por legenda; ícone 📷 para foto, 📄 para PDF
+- Remoção de foto individual (lista por legenda), sem afetar as demais
+- Rótulo "N arquivos" sempre recalculado do banco — singular/plural correto após edições
+
+### Navegação e polimento de UI
+
+- `← Voltar` adicionado aos submenus Ajuda e Obras, retornando ao menu inicial ("Por onde quer começar?")
+- Botão de adicionar foto renomeado para "📎 Adicionar foto ou arquivo" (reflete que PDF também é aceito)
+- Ícone do botão "Apagar entrega" trocado para `❌`, diferenciado de "🗑 Remover arquivo"
+
+### Decisão arquitetural
+
+- **ADR-003 registrada**: extração do domínio entrega de `bot.py` (3277 linhas) avaliada e adiada —
+  dados de entrega ainda acoplados a `lancamentos` (Financeiro) e `documentos` (Pedido); feature sem
+  uso real em produção. Gatilho de revisão explícito em `docs/decisoes/ADR-003-extracao-entrega-adiada.md`
 
 ---
 

@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-06-30
-> Sessão: Fase 6 — Fiada 6c+ — Gestão completa de entrega (edição, exclusão, foto)
+> Sessão: Fase 6 — Fiada 6c++ — Múltiplas fotos de entrega, navegação + ADR-003
 
 ---
 
@@ -19,7 +19,7 @@
 
 ## Versão Atual
 
-**v0.6.1** — Gestão completa de entrega
+**v0.6.2** — Entrega com múltiplas fotos e ADR-003
 
 ---
 
@@ -44,11 +44,28 @@
 - Cockpit do pedido com número da NF-e, botões de comprovante e nota
 - Registro de entrega: foto, /entrega, botão no cockpit, observação com sugestões
 - Edição de entrega: mudar obs, trocar/remover foto, apagar entrega completa
+- Entrega com múltiplas fotos por pedido, cada uma com legenda obrigatória
+- Galeria de arquivos da entrega: visualizar (ícone por tipo) e remover individualmente
+- Navegação padronizada: `← Voltar` e `✖ Fechar` em todos os menus, incluindo Ajuda e Obras
 - Modo teste isolado via `LAURA_ENV=test`
 
 ---
 
 ## Última Fiada Implementada
+
+**Fase 6 — Fiada 6c++ — Múltiplas fotos de entrega + navegação** *(2026-06-30)*
+
+- Tabela `entrega_fotos`: suporta N fotos por pedido, cada uma com legenda própria
+- Legenda obrigatória ao anexar qualquer foto ou documento de entrega
+- Tela "👀 Ver arquivos" lista as fotos por legenda; ícone 📷 para foto, 📄 para PDF
+- Remoção de foto individual (lista por legenda), sem afetar as demais
+- Singular/plural corrigido e recalculado sempre do banco ("1 arquivo" / "N arquivos")
+- `← Voltar` adicionado aos submenus Ajuda e Obras, retornando ao menu inicial
+- Ícone do botão "Apagar entrega" trocado para `❌` (diferenciado de "Remover arquivo" `🗑`)
+- Coluna legada `lancamentos.doc_id_entrega` parou de ser lida/escrita (substituída por `entrega_fotos`)
+- **ADR-003 registrada:** avaliada e adiada a extração do domínio entrega de `bot.py` — ver `docs/decisoes/ADR-003-extracao-entrega-adiada.md`
+
+---
 
 **Fase 6 — Fiada 6c+ — Gestão completa de entrega** *(2026-06-30)*
 
@@ -166,7 +183,7 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Dívidas Técnicas Conhecidas
 
-- `bot.py` monolítico com 3152 linhas — 50% acima do limite ADR-001 (~2000); refatoração prioritária na próxima sessão
+- `bot.py` monolítico com 3277 linhas — acima do limite ADR-001 (2.500–3.000); extração do domínio entrega avaliada e **adiada por decisão** (ADR-003), com gatilho de revisão explícito — não é mais "refatoração prioritária", é "aguardando gatilho"
 - BD fornecedores: MO Construção com CNPJ errado; PRUDENTÓPOLIS com split incorreto
 - `pfm_caminho` não existe como coluna — path reconstruído a cada consulta
 - `gerar_pfm()` acumula responsabilidades: geração Word + gravação no banco + criação de lançamento
@@ -177,6 +194,11 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 ---
 
 ## Decisões Recentes
+
+- **ADR-003 (2026-06-30)** — Extração do domínio entrega de `bot.py` avaliada e **adiada**. Motivo: os
+  dados de entrega não são independentes hoje (amarrados a `lancamentos`, do domínio Financeiro, e a
+  `documentos`, do domínio Pedido), e a funcionalidade tem zero horas de uso real em produção. Plano de
+  extração completo e gatilho de revisão registrados em `docs/decisoes/ADR-003-extracao-entrega-adiada.md`.
 
 - **Obra vs. GGV (2026-06-29)** — "Obra" é o conceito; "GGV03" é o código da obra; "#GGV03-009"
   é o identificador público do Pedido de Compra. Interface usa "Obra GGV03"; banco mantém coluna
@@ -193,8 +215,9 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Objetivo da Próxima Sessão
 
-1. **Testar Fiada 6c em produção** — registro completo de entrega: foto, /entrega, edição, exclusão
-2. **Refatorar bot.py** — 3152 linhas, 50% acima do limite ADR-001; iniciar extração de domínio `entrega/`
+1. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
+   no dia a dia antes de qualquer nova decisão sobre extração (ver gatilho da ADR-003)
+2. **Fiada 6b — Recibo como exceção** — fornecedor sem NF-e, coluna `emite_nf` em `fornecedores`
 3. **Validar PC 2.0** — testar PDF com orçamento real; remover DOCX após validação
 
 ---

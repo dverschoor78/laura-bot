@@ -1,6 +1,6 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-06-30 (Fiada 6a concluída)
+> Atualizado em: 2026-06-30 (Fiada 6c++ concluída; ADR-003 registrada)
 
 ---
 
@@ -152,10 +152,13 @@ cadastro como `emite_nf = false` para Laura gerar recibo automaticamente, sem pe
 - 3 rotas: foto enviada, `/entrega`, botão `📦 Entregue` no cockpit
 - Sugestões de observação (Jeito da Laura): completa, parcial, avaria, diferente, outra
 - Qualquer pedido elegível, independente de status financeiro
-- Colunas `doc_id_entrega`, `obs_entrega`, `entregue_em` em `lancamentos`
+- Colunas `obs_entrega`, `entregue_em` em `lancamentos`
 - Gestão completa: `✏️ Editar entrega` → mudar obs, trocar/remover foto, apagar entrega
 - `📎 Foto / Documento` na tela de obs para anexar antes de confirmar
-- **Pendente: testar em produção na próxima sessão**
+- Tabela `entrega_fotos`: múltiplas fotos por pedido, cada uma com legenda obrigatória
+- Galeria "👀 Ver arquivos" (ícone por tipo) + remoção individual por foto
+- Navegação padronizada `← Voltar`/`✖ Fechar` em todos os menus
+- **ADR-003 registrada:** extração do domínio entrega de `bot.py` avaliada e adiada — ver `docs/decisoes/ADR-003-extracao-entrega-adiada.md`
 
 ---
 
@@ -199,11 +202,10 @@ Implementar junto com a Fiada 6b.
 
 ## Próximas Fiadas
 
-1. **Testar Fiada 6c em produção** — entrega completa: foto, /entrega, edição, exclusão
-2. **Refatorar bot.py** — 3152 linhas, 50% acima do limite ADR-001; candidato: extrair `entrega/`
-3. Fiada 6b — Recibo como exceção (fornecedor sem NF-e, coluna `emite_nf` em `fornecedores`)
-4. Validar PC 2.0 em produção + remover DOCX do fluxo principal
-5. Corrigir BD fornecedores (MO Construção CNPJ, PRUDENTÓPOLIS split)
+1. **Usar entrega em produção real** — deixar o fluxo rodar no dia a dia antes de revisitar extração (gatilho na ADR-003)
+2. Fiada 6b — Recibo como exceção (fornecedor sem NF-e, coluna `emite_nf` em `fornecedores`)
+3. Validar PC 2.0 em produção + remover DOCX do fluxo principal
+4. Corrigir BD fornecedores (MO Construção CNPJ, PRUDENTÓPOLIS split)
 
 ---
 
@@ -235,9 +237,11 @@ Implementar junto com a Fiada 6b.
   Se o Claude não extrair `ID da transação`, a proteção por identificador não atua.
   Justificativa: afeta apenas comprovantes sem número de transação visível; raro no MP.
 
-- **Alta — `bot.py` monolítico com 3152 linhas**
-  50% acima do limite ADR-001 (~2000 linhas). Candidato imediato: extrair domínio `entrega/`.
-  Justificativa para adiamento: Fiada 6c precisava ser concluída antes da refatoração.
+- **Média — `bot.py` monolítico com 3277 linhas**
+  Acima do limite ADR-001 (2.500–3.000 linhas). Extração do domínio `entrega/` avaliada e
+  **adiada por decisão** (ADR-003) — os dados de entrega ainda não são independentes
+  (acoplados a `lancamentos` e `documentos`) e a feature tem zero horas de produção real.
+  Gatilho de revisão explícito em `docs/decisoes/ADR-003-extracao-entrega-adiada.md`.
 
 ---
 

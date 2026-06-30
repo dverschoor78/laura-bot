@@ -121,7 +121,7 @@ class Pedido:
     nfe_data:              Optional[str] = None
     doc_id_comprovante:    Optional[int] = None
     identificador_comprovante: Optional[str] = None
-    doc_id_entrega:        Optional[int] = None
+    qtd_fotos_entrega:     int = 0
     obs_entrega:           Optional[str] = None
     entregue_em:           Optional[str] = None
 
@@ -286,6 +286,15 @@ def init_db():
                 con.execute(f"ALTER TABLE lancamentos ADD COLUMN {col}")
             except Exception:
                 pass
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS entrega_fotos (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                pfm_codigo  TEXT NOT NULL,
+                doc_id      INTEGER NOT NULL,
+                legenda     TEXT,
+                criado_em   TEXT DEFAULT (datetime('now','localtime'))
+            )
+        """)
         con.execute("""
             CREATE TABLE IF NOT EXISTS obras (
                 codigo            TEXT PRIMARY KEY,
@@ -1460,6 +1469,7 @@ def mostrar_ajuda():
 
 def teclado_ajuda():
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("← Voltar",  callback_data="menu_inicio")],
         [InlineKeyboardButton("✖ Fechar", callback_data="obras_fechar")],
     ])
 
@@ -1490,6 +1500,7 @@ def teclado_lista_obras(obras):
     if row:
         botoes.append(row)
     botoes.append([InlineKeyboardButton("➕ Nova obra",  callback_data="menu_nova_obra")])
+    botoes.append([InlineKeyboardButton("← Voltar",      callback_data="menu_inicio")])
     botoes.append([InlineKeyboardButton("✖ Fechar",     callback_data="obras_fechar")])
     return InlineKeyboardMarkup(botoes)
 
@@ -1624,15 +1635,18 @@ def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
         lanc = con.execute(
             "SELECT fornecedor, valor, data_prevista_entrega, vencimento_pagamento, status, criado_em, "
             "data_pagamento, doc_id_nfe, doc_id_comprovante, identificador_comprovante, "
-            "doc_id_entrega, obs_entrega, entregue_em "
+            "obs_entrega, entregue_em "
             "FROM lancamentos WHERE pfm_codigo=?",
             (pfm_codigo,)
         ).fetchone()
+        qtd_fotos = con.execute(
+            "SELECT COUNT(*) FROM entrega_fotos WHERE pfm_codigo=?", (pfm_codigo,)
+        ).fetchone()[0]
 
     forn_lanc = data_prev_ent = venc = status_raw = lanc_criado = data_pgto = None
-    doc_id_nfe = doc_id_comp = ident_comp = doc_id_ent = obs_ent = entregue_em = None
+    doc_id_nfe = doc_id_comp = ident_comp = obs_ent = entregue_em = None
     if lanc:
-        forn_lanc, _, data_prev_ent, venc, status_raw, lanc_criado, data_pgto, doc_id_nfe, doc_id_comp, ident_comp, doc_id_ent, obs_ent, entregue_em = lanc
+        forn_lanc, _, data_prev_ent, venc, status_raw, lanc_criado, data_pgto, doc_id_nfe, doc_id_comp, ident_comp, obs_ent, entregue_em = lanc
 
     try:
         status = StatusPedido(status_raw) if status_raw else StatusPedido.SEM_LANCAMENTO
@@ -1660,7 +1674,7 @@ def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
         doc_id_nfe                = doc_id_nfe,
         doc_id_comprovante        = doc_id_comp,
         identificador_comprovante = ident_comp,
-        doc_id_entrega            = doc_id_ent,
+        qtd_fotos_entrega         = qtd_fotos,
         obs_entrega               = obs_ent,
         entregue_em               = entregue_em,
         caminho_orcamento         = caminho,
@@ -1760,8 +1774,8 @@ def mostrar_pedido(pedido: Pedido) -> str:
     if pedido.doc_id_nfe:
         nfe_label = f"🧾 NF-e {pedido.nfe_numero}" if pedido.nfe_numero else "🧾 NF-e"
         arq.append(nfe_label)
-    if pedido.doc_id_entrega:
-        arq.append("📦 Foto de entrega")
+    if pedido.qtd_fotos_entrega:
+        arq.append(f"📦 {_rotulo_qtd_arquivos(pedido.qtd_fotos_entrega)} da entrega")
     arquivos = "\n".join(arq) if arq else "Nenhum arquivo disponível"
 
     hist = []
@@ -1772,7 +1786,7 @@ def mostrar_pedido(pedido: Pedido) -> str:
     return SEP.join([cabecalho, financeiro, arquivos, historico])
 
 def teclado_pedido(doc_id, pfm_codigo, doc_id_nfe=None, doc_id_comprovante=None,
-                   doc_id_entrega=None, obs_entrega=None):
+                   qtd_fotos_entrega=0, obs_entrega=None):
     ggv = pfm_codigo.rsplit("-", 1)[0]
     botoes = [
         [InlineKeyboardButton("Revisar",      callback_data=f"pfm_revisar:{doc_id}:{pfm_codigo}")],
@@ -1784,8 +1798,11 @@ def teclado_pedido(doc_id, pfm_codigo, doc_id_nfe=None, doc_id_comprovante=None,
     if doc_id_nfe:
         botoes.append([InlineKeyboardButton("🧾 NF-e", callback_data=f"pfm_nfe:{doc_id_nfe}:{pfm_codigo}")])
     if obs_entrega:
-        if doc_id_entrega:
-            botoes.append([InlineKeyboardButton("📦 Foto de entrega", callback_data=f"pfm_entrega_foto:{doc_id_entrega}:{pfm_codigo}")])
+        if qtd_fotos_entrega:
+            botoes.append([InlineKeyboardButton(
+                f"📦 Ver {_rotulo_qtd_arquivos(qtd_fotos_entrega)} da entrega",
+                callback_data=f"entrega_ver_fotos:{pfm_codigo}"
+            )])
         botoes.append([InlineKeyboardButton("✏️ Editar entrega", callback_data=f"entrega_editar:{pfm_codigo}")])
     else:
         botoes.append([InlineKeyboardButton("📦 Entregue", callback_data=f"pfm_entregue:{doc_id}:{pfm_codigo}")])
@@ -1799,7 +1816,7 @@ def buscar_pedidos_sem_entrega():
     with sqlite3.connect(DB_PATH) as con:
         return con.execute(
             "SELECT pfm_codigo, fornecedor, valor, status FROM lancamentos "
-            "WHERE doc_id_entrega IS NULL AND obs_entrega IS NULL "
+            "WHERE obs_entrega IS NULL "
             "ORDER BY pfm_codigo DESC"
         ).fetchall()
 
@@ -1824,12 +1841,12 @@ def teclado_obs_entrega():
         [InlineKeyboardButton("✏️ Outra observação",     callback_data="entrega_obs:outro")],
     ])
 
-def _salvar_entrega_db(pfm_codigo, doc_id_foto, obs):
+def _salvar_entrega_db(pfm_codigo, obs):
     with sqlite3.connect(DB_PATH) as con:
         con.execute(
-            "UPDATE lancamentos SET doc_id_entrega=?, obs_entrega=?, "
+            "UPDATE lancamentos SET obs_entrega=?, "
             "entregue_em=datetime('now','localtime') WHERE pfm_codigo=?",
-            (doc_id_foto, obs, pfm_codigo)
+            (obs, pfm_codigo)
         )
 
 def _tela_apos_entrega(pfm_codigo):
@@ -1840,15 +1857,32 @@ def _tela_apos_entrega(pfm_codigo):
     return (
         mostrar_pedido(pedido),
         teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe,
-                       pedido.doc_id_comprovante, pedido.doc_id_entrega, pedido.obs_entrega)
+                       pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega)
     )
 
-def _atualizar_foto_entrega(pfm_codigo, doc_id_foto):
+def _adicionar_foto_entrega(pfm_codigo, doc_id_foto, legenda):
     with sqlite3.connect(DB_PATH) as con:
         con.execute(
-            "UPDATE lancamentos SET doc_id_entrega=? WHERE pfm_codigo=?",
-            (doc_id_foto, pfm_codigo)
+            "INSERT INTO entrega_fotos (pfm_codigo, doc_id, legenda) VALUES (?,?,?)",
+            (pfm_codigo, doc_id_foto, legenda)
         )
+
+def _listar_fotos_entrega(pfm_codigo):
+    with sqlite3.connect(DB_PATH) as con:
+        return con.execute(
+            "SELECT ef.id, ef.doc_id, ef.legenda, d.caminho FROM entrega_fotos ef "
+            "JOIN documentos d ON d.id = ef.doc_id WHERE ef.pfm_codigo=? ORDER BY ef.id",
+            (pfm_codigo,)
+        ).fetchall()
+
+def _icone_arquivo_entrega(caminho):
+    if caminho and Path(caminho).suffix.lower() == ".pdf":
+        return "📄"
+    return "📷"
+
+def _apagar_foto_entrega(foto_id):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("DELETE FROM entrega_fotos WHERE id=?", (foto_id,))
 
 def _atualizar_obs_entrega(pfm_codigo, obs):
     with sqlite3.connect(DB_PATH) as con:
@@ -1860,40 +1894,49 @@ def _atualizar_obs_entrega(pfm_codigo, obs):
 def _apagar_entrega_db(pfm_codigo):
     with sqlite3.connect(DB_PATH) as con:
         con.execute(
-            "UPDATE lancamentos SET doc_id_entrega=NULL, obs_entrega=NULL, entregue_em=NULL "
+            "UPDATE lancamentos SET obs_entrega=NULL, entregue_em=NULL "
             "WHERE pfm_codigo=?", (pfm_codigo,)
         )
+        con.execute("DELETE FROM entrega_fotos WHERE pfm_codigo=?", (pfm_codigo,))
 
 def _buscar_estado_entrega(pfm_codigo):
     with sqlite3.connect(DB_PATH) as con:
         row = con.execute(
-            "SELECT fornecedor, obs_entrega, doc_id_entrega FROM lancamentos WHERE pfm_codigo=?",
+            "SELECT fornecedor, obs_entrega FROM lancamentos WHERE pfm_codigo=?",
             (pfm_codigo,)
         ).fetchone()
-    return row if row else (None, None, None)
+        qtd_fotos = con.execute(
+            "SELECT COUNT(*) FROM entrega_fotos WHERE pfm_codigo=?", (pfm_codigo,)
+        ).fetchone()[0]
+    forn, obs = row if row else (None, None)
+    return forn, obs, qtd_fotos
 
-def _texto_gerir_entrega(pfm_codigo, forn, obs_entrega, doc_id_entrega):
-    foto = "Sim" if doc_id_entrega else "Não"
+def _rotulo_qtd_arquivos(qtd):
+    if qtd == 0:
+        return "nenhuma"
+    if qtd == 1:
+        return "1 arquivo"
+    return f"{qtd} arquivos"
+
+def _texto_gerir_entrega(pfm_codigo, forn, obs_entrega, qtd_fotos):
     return (
         f"#{pfm_codigo} — {forn or pfm_codigo}\n\n"
         f"Entrega registrada\n"
         f"Observação: {obs_entrega or '—'}\n"
-        f"Foto: {foto}"
+        f"Arquivos: {_rotulo_qtd_arquivos(qtd_fotos)}"
     )
 
-def _teclado_gerir_entrega(pfm_codigo, doc_id_entrega):
+def _teclado_gerir_entrega(pfm_codigo, qtd_fotos):
     botoes = [
         [InlineKeyboardButton("✏️ Mudar observação", callback_data=f"entrega_mudar_obs:{pfm_codigo}")],
     ]
-    if doc_id_entrega:
-        botoes += [
-            [InlineKeyboardButton("🔄 Trocar foto",  callback_data=f"entrega_trocar_foto:{pfm_codigo}")],
-            [InlineKeyboardButton("🗑 Remover foto", callback_data=f"entrega_remover_foto:{pfm_codigo}")],
-        ]
-    else:
-        botoes.append([InlineKeyboardButton("📎 Anexar foto", callback_data=f"entrega_trocar_foto:{pfm_codigo}")])
+    if qtd_fotos:
+        botoes.append([InlineKeyboardButton(f"👀 Ver {_rotulo_qtd_arquivos(qtd_fotos)}", callback_data=f"entrega_ver_fotos:{pfm_codigo}")])
+    botoes.append([InlineKeyboardButton("📎 Adicionar foto ou arquivo", callback_data=f"entrega_trocar_foto:{pfm_codigo}")])
+    if qtd_fotos:
+        botoes.append([InlineKeyboardButton("🗑 Remover arquivo", callback_data=f"entrega_remover_foto:{pfm_codigo}")])
     botoes += [
-        [InlineKeyboardButton("🗑 Apagar entrega", callback_data=f"entrega_apagar:{pfm_codigo}")],
+        [InlineKeyboardButton("❌ Apagar entrega", callback_data=f"entrega_apagar:{pfm_codigo}")],
         [InlineKeyboardButton("← Voltar",          callback_data=f"entrega_voltar:{pfm_codigo}")],
     ]
     return InlineKeyboardMarkup(botoes)
@@ -2173,28 +2216,17 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     doc_id = registrar(nome, caminho, hash_arquivo, "pendente", "nao_identificado", "")
 
     if ctx.user_data.get("aguardando") == "foto_entrega_obs":
-        ctx.user_data["aguardando"] = None
+        ctx.user_data["aguardando"] = "entrega_legenda_inicial"
         atualizar(doc_id, tipo="foto_entrega")
         ctx.user_data["entrega_doc_id_foto"] = doc_id
-        pfm_codigo = ctx.user_data.get("entrega_pfm_codigo")
-        forn, _, _ = _buscar_estado_entrega(pfm_codigo) if pfm_codigo else (None, None, None)
-        await update.message.reply_text(
-            _texto_obs_entrega(pfm_codigo, forn),
-            reply_markup=_teclado_obs_com_cancelar(com_foto=True)
-        )
+        await update.message.reply_text("Legenda do arquivo (ex: nota fiscal, caixa avariada):")
         return
 
     if ctx.user_data.get("aguardando") == "foto_entrega_troca":
-        ctx.user_data["aguardando"] = None
+        ctx.user_data["aguardando"] = "entrega_legenda_add"
         atualizar(doc_id, tipo="foto_entrega")
-        pfm_codigo = ctx.user_data.pop("entrega_pfm_codigo", None)
-        if pfm_codigo:
-            _atualizar_foto_entrega(pfm_codigo, doc_id)
-        texto, markup = _tela_apos_entrega(pfm_codigo)
-        if texto:
-            await update.message.reply_text(texto, reply_markup=markup)
-        else:
-            await update.message.reply_text("Foto atualizada.")
+        ctx.user_data["entrega_doc_id_foto"] = doc_id
+        await update.message.reply_text("Legenda do arquivo (ex: nota fiscal, caixa avariada):")
         return
 
     await update.message.reply_text(
@@ -2242,7 +2274,7 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 preparar_visualizacao_pedido(pedido)
                 await update.message.reply_text(
                     mostrar_pedido(pedido),
-                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.doc_id_entrega, pedido.obs_entrega)
+                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega)
                 )
             else:
                 await update.message.reply_text(f"Pedido {pfm_codigo} não encontrado.")
@@ -2282,9 +2314,12 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         obs = texto.strip()
         pfm_codigo = ctx.user_data.pop("entrega_pfm_codigo", None)
         doc_id_foto = ctx.user_data.pop("entrega_doc_id_foto", None)
+        legenda_foto = ctx.user_data.pop("entrega_legenda_foto", None)
         ctx.user_data["aguardando"] = None
         if pfm_codigo:
-            _salvar_entrega_db(pfm_codigo, doc_id_foto, obs)
+            _salvar_entrega_db(pfm_codigo, obs)
+            if doc_id_foto:
+                _adicionar_foto_entrega(pfm_codigo, doc_id_foto, legenda_foto)
             texto_ped, markup = _tela_apos_entrega(pfm_codigo)
             await update.message.reply_text(texto_ped or "Entrega registrada.", reply_markup=markup)
         else:
@@ -2296,10 +2331,36 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.user_data["aguardando"] = None
         if pfm_codigo:
             _atualizar_obs_entrega(pfm_codigo, obs)
-            forn, obs_ent, doc_id_ent = _buscar_estado_entrega(pfm_codigo)
+            forn, obs_ent, qtd_fotos = _buscar_estado_entrega(pfm_codigo)
             await update.message.reply_text(
-                _texto_gerir_entrega(pfm_codigo, forn, obs_ent, doc_id_ent),
-                reply_markup=_teclado_gerir_entrega(pfm_codigo, doc_id_ent)
+                _texto_gerir_entrega(pfm_codigo, forn, obs_ent, qtd_fotos),
+                reply_markup=_teclado_gerir_entrega(pfm_codigo, qtd_fotos)
+            )
+        else:
+            await update.message.reply_text("Pedido não encontrado.")
+
+    elif aguardando == "entrega_legenda_inicial":
+        legenda = texto.strip()
+        ctx.user_data["entrega_legenda_foto"] = legenda
+        ctx.user_data["aguardando"] = None
+        pfm_codigo = ctx.user_data.get("entrega_pfm_codigo")
+        forn, _, _ = _buscar_estado_entrega(pfm_codigo) if pfm_codigo else (None, None, None)
+        await update.message.reply_text(
+            _texto_obs_entrega(pfm_codigo, forn),
+            reply_markup=_teclado_obs_com_cancelar(com_foto=True)
+        )
+
+    elif aguardando == "entrega_legenda_add":
+        legenda = texto.strip()
+        pfm_codigo = ctx.user_data.pop("entrega_pfm_codigo", None)
+        doc_id_foto = ctx.user_data.pop("entrega_doc_id_foto", None)
+        ctx.user_data["aguardando"] = None
+        if pfm_codigo and doc_id_foto:
+            _adicionar_foto_entrega(pfm_codigo, doc_id_foto, legenda)
+            forn, obs_ent, qtd_fotos = _buscar_estado_entrega(pfm_codigo)
+            await update.message.reply_text(
+                _texto_gerir_entrega(pfm_codigo, forn, obs_ent, qtd_fotos),
+                reply_markup=_teclado_gerir_entrega(pfm_codigo, qtd_fotos)
             )
         else:
             await update.message.reply_text("Pedido não encontrado.")
@@ -2874,12 +2935,12 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             else:
                 await ctx.bot.send_document(chat_id=query.message.chat_id, document=dados, filename=path.name)
 
-        elif acao in ("pfm_nfe", "pfm_comp", "pfm_entrega_foto"):
+        elif acao in ("pfm_nfe", "pfm_comp"):
             _, doc_id_arquivo, pfm_codigo = partes
             with sqlite3.connect(DB_PATH) as con:
                 row = con.execute("SELECT caminho FROM documentos WHERE id=?", (int(doc_id_arquivo),)).fetchone()
             caminho = row[0] if row else None
-            label = {"pfm_nfe": "NF-e", "pfm_comp": "comprovante", "pfm_entrega_foto": "foto de entrega"}.get(acao, acao)
+            label = {"pfm_nfe": "NF-e", "pfm_comp": "comprovante"}.get(acao, acao)
             if not caminho or not Path(caminho).exists():
                 await query.answer(f"Arquivo de {label} não encontrado.", show_alert=True)
                 return
@@ -2930,10 +2991,13 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             obs = OBS_MAP.get(chave, chave)
             pfm_codigo = ctx.user_data.pop("entrega_pfm_codigo", None)
             doc_id_foto = ctx.user_data.pop("entrega_doc_id_foto", None)
+            legenda_foto = ctx.user_data.pop("entrega_legenda_foto", None)
             if not pfm_codigo:
                 await query.answer("Pedido não encontrado. Tente novamente.", show_alert=True)
                 return
-            _salvar_entrega_db(pfm_codigo, doc_id_foto, obs)
+            _salvar_entrega_db(pfm_codigo, obs)
+            if doc_id_foto:
+                _adicionar_foto_entrega(pfm_codigo, doc_id_foto, legenda_foto)
             texto, markup = _tela_apos_entrega(pfm_codigo)
             if texto:
                 await query.edit_message_text(texto, reply_markup=markup)
@@ -2943,6 +3007,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         elif acao == "entrega_cancelar":
             ctx.user_data.pop("entrega_pfm_codigo", None)
             ctx.user_data.pop("entrega_doc_id_foto", None)
+            ctx.user_data.pop("entrega_legenda_foto", None)
             await query.edit_message_text(
                 mostrar_boas_vindas(),
                 reply_markup=teclado_boas_vindas()
@@ -2954,10 +3019,10 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         elif acao == "entrega_editar":
             pfm_codigo = partes[1]
-            forn, obs_ent, doc_id_ent = _buscar_estado_entrega(pfm_codigo)
+            forn, obs_ent, qtd_fotos = _buscar_estado_entrega(pfm_codigo)
             await query.edit_message_text(
-                _texto_gerir_entrega(pfm_codigo, forn, obs_ent, doc_id_ent),
-                reply_markup=_teclado_gerir_entrega(pfm_codigo, doc_id_ent)
+                _texto_gerir_entrega(pfm_codigo, forn, obs_ent, qtd_fotos),
+                reply_markup=_teclado_gerir_entrega(pfm_codigo, qtd_fotos)
             )
 
         elif acao == "entrega_mudar_obs":
@@ -2987,25 +3052,79 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 return
             obs = OBS_MAP_EDIT.get(chave, chave)
             _atualizar_obs_entrega(pfm_codigo, obs)
-            forn, obs_ent, doc_id_ent = _buscar_estado_entrega(pfm_codigo)
+            forn, obs_ent, qtd_fotos = _buscar_estado_entrega(pfm_codigo)
             await query.edit_message_text(
-                _texto_gerir_entrega(pfm_codigo, forn, obs_ent, doc_id_ent),
-                reply_markup=_teclado_gerir_entrega(pfm_codigo, doc_id_ent)
+                _texto_gerir_entrega(pfm_codigo, forn, obs_ent, qtd_fotos),
+                reply_markup=_teclado_gerir_entrega(pfm_codigo, qtd_fotos)
             )
 
         elif acao == "entrega_trocar_foto":
             pfm_codigo = partes[1]
             ctx.user_data["aguardando"] = "foto_entrega_troca"
             ctx.user_data["entrega_pfm_codigo"] = pfm_codigo
-            await query.edit_message_text("Envie a nova foto ou documento:")
+            await query.edit_message_text("Envie a foto ou documento da entrega:")
+
+        elif acao == "entrega_ver_fotos":
+            pfm_codigo = partes[1]
+            fotos = _listar_fotos_entrega(pfm_codigo)
+            if not fotos:
+                await query.answer("Nenhuma foto registrada.", show_alert=True)
+                return
+            botoes = []
+            for foto_id, _doc_id_foto, legenda, caminho in fotos:
+                rotulo = (legenda or "Sem legenda")[:40]
+                icone = _icone_arquivo_entrega(caminho)
+                botoes.append([InlineKeyboardButton(f"{icone} {rotulo}", callback_data=f"entrega_foto_ver:{foto_id}:{pfm_codigo}")])
+            botoes.append([InlineKeyboardButton("← Voltar", callback_data=f"entrega_editar:{pfm_codigo}")])
+            await query.edit_message_text(
+                f"#{pfm_codigo} — Arquivos da entrega ({len(fotos)})",
+                reply_markup=InlineKeyboardMarkup(botoes)
+            )
+
+        elif acao == "entrega_foto_ver":
+            _, foto_id, pfm_codigo = partes
+            with sqlite3.connect(DB_PATH) as con:
+                row = con.execute(
+                    "SELECT ef.legenda, d.caminho FROM entrega_fotos ef "
+                    "JOIN documentos d ON d.id = ef.doc_id WHERE ef.id=?",
+                    (int(foto_id),)
+                ).fetchone()
+            if not row or not row[1] or not Path(row[1]).exists():
+                await query.answer("Foto não encontrada.", show_alert=True)
+                return
+            legenda, caminho = row
+            await query.answer()
+            path = Path(caminho)
+            dados = path.read_bytes()
+            ext = path.suffix.lower()
+            if ext in (".jpg", ".jpeg", ".png", ".webp"):
+                await ctx.bot.send_photo(chat_id=query.message.chat_id, photo=dados, caption=legenda or None)
+            else:
+                await ctx.bot.send_document(chat_id=query.message.chat_id, document=dados, filename=path.name, caption=legenda or None)
 
         elif acao == "entrega_remover_foto":
             pfm_codigo = partes[1]
-            _atualizar_foto_entrega(pfm_codigo, None)
-            forn, obs_ent, _ = _buscar_estado_entrega(pfm_codigo)
+            fotos = _listar_fotos_entrega(pfm_codigo)
+            if not fotos:
+                await query.answer("Nenhuma foto registrada.", show_alert=True)
+                return
+            botoes = []
+            for foto_id, _doc_id_foto, legenda, _caminho in fotos:
+                rotulo = (legenda or "Sem legenda")[:40]
+                botoes.append([InlineKeyboardButton(f"🗑 {rotulo}", callback_data=f"entrega_foto_apagar:{foto_id}:{pfm_codigo}")])
+            botoes.append([InlineKeyboardButton("← Voltar", callback_data=f"entrega_editar:{pfm_codigo}")])
             await query.edit_message_text(
-                _texto_gerir_entrega(pfm_codigo, forn, obs_ent, None),
-                reply_markup=_teclado_gerir_entrega(pfm_codigo, None)
+                f"#{pfm_codigo} — Remover qual arquivo?",
+                reply_markup=InlineKeyboardMarkup(botoes)
+            )
+
+        elif acao == "entrega_foto_apagar":
+            _, foto_id, pfm_codigo = partes
+            _apagar_foto_entrega(int(foto_id))
+            forn, obs_ent, qtd_fotos = _buscar_estado_entrega(pfm_codigo)
+            await query.edit_message_text(
+                _texto_gerir_entrega(pfm_codigo, forn, obs_ent, qtd_fotos),
+                reply_markup=_teclado_gerir_entrega(pfm_codigo, qtd_fotos)
             )
 
         elif acao == "entrega_apagar":
@@ -3056,7 +3175,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 preparar_visualizacao_pedido(pedido)
                 await query.edit_message_text(
                     mostrar_pedido(pedido),
-                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.doc_id_entrega, pedido.obs_entrega)
+                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega)
                 )
             else:
                 await query.answer(f"Pedido {pfm_codigo} não encontrado.", show_alert=True)
@@ -3106,6 +3225,12 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         elif acao == "obras_fechar":
             await query.edit_message_text("Fechado.")
+
+        elif acao == "menu_inicio":
+            await query.edit_message_text(
+                mostrar_boas_vindas(),
+                reply_markup=teclado_boas_vindas()
+            )
 
         elif acao == "menu_obras":
             obras = _listar_obras()

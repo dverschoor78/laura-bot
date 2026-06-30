@@ -1,6 +1,6 @@
 # Arquitetura do Projeto Laura
 
-> Versão: 2026-06-30 — reflete o estado real do sistema
+> Versão: 2026-06-30 — reflete o estado real do sistema (pós ADR-003)
 
 ---
 
@@ -71,6 +71,22 @@ Relação: um documento origina um lançamento. `pfm_codigo` é a chave de cruza
 
 ---
 
+**`entrega_fotos`** — fotos/documentos de entrega vinculados a um pedido (Fase 6, Fiada 6c++)
+
+| Campo | Propósito |
+|---|---|
+| `id` | Chave primária |
+| `pfm_codigo` | Pedido ao qual a foto pertence — sem FK explícita com `lancamentos` |
+| `doc_id` | Referência lógica a `documentos.id` — sem FK explícita |
+| `legenda` | Obrigatória ao anexar; identifica a foto na galeria ("👀 Ver arquivos") |
+| `criado_em` | Timestamp de inserção |
+
+Um pedido pode ter N fotos. O estado "entrega registrada" continua em `lancamentos.obs_entrega`
+(não nesta tabela) — ver `docs/decisoes/ADR-003-extracao-entrega-adiada.md` para a discussão
+sobre por que esse acoplamento entre tabelas de domínios diferentes ainda existe.
+
+---
+
 **`fornecedores`** — cadastro importado dos PFMs do GGV01
 
 Campos relevantes: `nome`, `razao_social`, `cnpj`, `cpf`, `chave_pix`, `email`,
@@ -137,7 +153,7 @@ Dennis digita o código (ex: GGV03-009)
 
 ## 5. Estrutura do bot.py
 
-Referências para navegação no arquivo (1418 linhas):
+Referências para navegação no arquivo (3277 linhas):
 
 | Bloco | Referência | O que faz |
 |---|---|---|
@@ -156,11 +172,13 @@ Referências para navegação no arquivo (1418 linhas):
 
 ## 6. Limitações Conhecidas
 
-- **Monólito** — toda a lógica está em `bot.py`. Aceitável hoje; dificulta testes
-  automatizados e manutenção em longa escala.
+- **Monólito** — toda a lógica está em `bot.py`. Gatilho de revisão da ADR-001 (2.500–3.000
+  linhas) já foi atingido; extração do domínio entrega avaliada e adiada por decisão (ADR-003),
+  com gatilho de revisão próprio. Ver `docs/decisoes/ADR-003-extracao-entrega-adiada.md`.
 
-- **`responder_botao()` é dispatcher único** — função de ~280 linhas que trata todas
-  as ações de botões inline. Ponto de maior acoplamento do sistema.
+- **`responder_botao()` é dispatcher único** — função de ~800 linhas que trata todas
+  as ações de botões inline do sistema inteiro (PFM, PIX, NF-e, entrega, obras). Ponto de
+  maior acoplamento do sistema; mapeado em detalhe na ADR-003.
 
 - **`gerar_pfm()` acumula responsabilidades** — gera o Word, grava no banco e cria
   o lançamento na mesma função. Dificulta testes e extensão futura.
@@ -178,8 +196,10 @@ Referências para navegação no arquivo (1418 linhas):
 
 ---
 
-## 7. Próxima Decisão Arquitetural
+## 7. Decisões Arquiteturais Registradas
 
-**ADR-001** formalizará a decisão de manter o monólito em `bot.py`.
-O documento definirá a condição de revisão dessa decisão
-(volume de código, necessidade de testes, novas fases do produto).
+- **ADR-001** — manter o monólito em `bot.py`, com gatilhos de revisão explícitos (já atingidos)
+- **ADR-002** — domínio Financeiro nasce modular em `financeiro/`; reserva `app/` para extração futura
+- **ADR-003** — extração do domínio entrega de `bot.py` avaliada e adiada, com gatilho de revisão próprio
+
+Ver `docs/decisoes/` para o texto completo de cada uma.
