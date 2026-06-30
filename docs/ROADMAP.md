@@ -111,6 +111,24 @@ Mostra todos os PFMs de um GGV com status financeiro e totalizadores.
 
 > Princípio: todo pagamento confirmado precisa de um documento fiscal vinculado — NF-e ou recibo. Sem exceção.
 
+### Decisão de produto — 2026-06-30
+
+**NF-e é obrigação, não opção.**
+
+Todos os fornecedores devem emitir NF-e. O recibo é exceção restrita a casos onde
+o fornecedor legalmente não pode emitir (autônomos informais, prestadores muito pequenos).
+
+Motivação: **Regime Especial de Tributação (RET)** — exige que todos os custos da
+incorporação tenham respaldo fiscal para apuração correta do tributo.
+
+Exceções devem ser documentadas: qual fornecedor, qual pedido, por quê não tem NF.
+Isso protege o RET em auditoria — não é descuido, é exceção registrada.
+
+Fornecedores habituais sem NF (ex: Sabiá, MO Construção) devem ser marcados no
+cadastro como `emite_nf = false` para Laura gerar recibo automaticamente, sem perguntar.
+
+---
+
 **Fiada 6a — Recebimento de NF-e** *(planejada)*
 
 - Novo tipo de documento: NF-e (XML SEFAZ, PDF DANFE, foto do DANFE)
@@ -118,14 +136,16 @@ Mostra todos os PFMs de um GGV com status financeiro e totalizadores.
 - Matching com pedido em aberto (mesmo fornecedor + valor próximo)
 - Vínculo `doc_id_nfe` na tabela `lancamentos`
 - Status novo: `pago_com_nf` — fechamento completo do ciclo
+- Após PIX confirmado: "Envie a NF-e para fechar este pedido." — NF-e é o caminho principal
 
-**Fiada 6b — Geração de Recibo para Prestadores sem NF** *(planejada)*
+**Fiada 6b — Recibo como Exceção** *(planejada)*
 
-- Após PIX confirmado, Laura verifica se existe NF-e vinculada
-- Se não: "Este pedido ainda não tem nota fiscal. Envie a NF-e ou gere um recibo."
-  - [📄 Gerar recibo]  [Aguardar NF-e]
+- Recibo só é gerado quando fornecedor está marcado como `emite_nf = false` no cadastro
+  OU quando usuário declara explicitamente que NF-e não será emitida
+- Exceção registrada: motivo + pedido + fornecedor — rastreável para fins de RET
 - Recibo gerado em PDF via Playwright: serviço (do orçamento) + pagamento (do PIX) + partes
 - Status novo: `pago_com_recibo`
+- Coluna `emite_nf BOOLEAN` adicionada à tabela `fornecedores`
 
 **Fiada 6c — Foto de Entrega** *(planejada)*
 
