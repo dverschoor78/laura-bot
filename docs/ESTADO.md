@@ -178,10 +178,8 @@ O DOCX ainda é gerado em paralelo (salvo na pasta OneDrive). Remoção do Word 
 
 ## Objetivo da Próxima Sessão
 
-1. **Testar fluxo completo** em `LAURA_ENV=test` — orçamento → categoria → PFM → comprovante → pago → cockpits → menus
-2. **Validar PC 2.0** — testar PDF com orçamento real; validar layout, fonte, dados
-3. **Fiada 5b-1 — Extrato da Obra** — substituir `⚪ Sem dados financeiros` no cockpit com dados reais
-4. **Remover DOCX do fluxo principal** — após validação do PDF
+1. **Fiada 6a — Recebimento de NF-e** — novo tipo de documento; extração, matching e vínculo ao pedido
+2. **Validar PC 2.0** — testar PDF com orçamento real em produção; remover DOCX após validação
 
 ---
 
