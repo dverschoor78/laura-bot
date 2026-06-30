@@ -10,11 +10,47 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Testar fluxo completo em `LAURA_ENV=test`
+1. Fiada 6c — Foto de entrega
 2. Validar PDF do PC 2.0 com orçamento real em produção
 3. Remover DOCX do fluxo principal após validação
 4. Fiada 5b-1 — Extrato da Obra: dados reais no cockpit
 5. Corrigir BD fornecedores (MO Construção CNPJ errado, PRUDENTÓPOLIS split)
+
+---
+
+## [Fase 6 — Fiada 6a — Recebimento de NF-e + Revisão de Pedido] — 2026-06-30
+
+### Ciclo documental completo: PIX → NF-e vinculada
+
+A partir desta fiada, todo pedido pago tem um destino fiscal: a NF-e vinculada.
+O cockpit do pedido exibe o número da nota; o botão abre o arquivo original.
+
+**Recebimento de NF-e:**
+- Novo tipo de documento `nota_fiscal` no seletor inicial
+- PROMPT de extração: Número da NF, CNPJ/CPF emitente, Nome emitente, Valor total, Data de emissão
+- `buscar_candidatos_nfe()`: busca pedidos pagos sem NF-e vinculada, ordena por score (CNPJ + valor)
+- Correspondência forte (score > 0): vinculação com confirmação; sem correspondência: seleção manual
+- Vínculo gravado em `lancamentos.doc_id_nfe`; NF-e arquivada em `documentos`
+
+**Cockpit do pedido enriquecido:**
+- Status: `🟢 Pago · NF-e 490224` quando nota vinculada; `🟢 Pago · NF-e pendente` quando não
+- Arquivos: `💰 Comprov. pagamento` e `🧾 NF-e 490224` na seção de arquivos
+- Botões condicionais: `💰 Comprovante` e `🧾 NF-e` — aparecem apenas quando vinculados
+- Histórico: linha `25/06 · Pago pix E10573521...` + linha `30/06 · NF-e 490224`
+- Botão "Financeiro" removido — informações integradas ao cockpit principal
+
+**Revisão do Pedido de Compra:**
+- `pfm_revisar` abre tela de revisão completa dos dados antes de regerar
+- Confirmar na revisão gera `GGV03-005-R01.docx` (arquivo com revisão)
+- `GGV03-005.docx` no OneDrive é sempre sobrescrito com o conteúdo mais recente
+- PDF do PC 2.0 enviado no chat a cada revisão; lançamento financeiro mantido inalterado
+- `rev_numero` em `documentos` rastreia quantas revisões foram feitas
+
+**Bugs corrigidos:**
+- `ITEM_RE`: captura preço unitário separado do subtotal (formato `R$ 12,00 cada = R$ 144,00`)
+- `_recalcular_itens()`: ao salvar edição de itens, recalcula `total = qtde × unit` e atualiza "Valor total"
+- `edit_desconto`: desconto zero não era salvo (caía no valor original do banco)
+- PROMPT de comprovante: prefere ID EndToEnd PIX (`E10573521...`) ao número MP
 
 ---
 

@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-06-30
-> Sessão: Sprint de Experiência — Jeito da Laura
+> Sessão: Fase 6 — Fiada 6a — Recebimento de NF-e + Revisão de Pedido
 
 ---
 
@@ -10,7 +10,7 @@
 🟡 Amarelo
 
 - Fundação concluída.
-- Ciclo financeiro completo: orçamento → PFM → A PAGAR → comprovante PIX → PAGO.
+- Ciclo documental completo: orçamento → PFM → A PAGAR → PIX → PAGO → NF-e vinculada.
 - PC 2.0 (PDF) implementado mas ainda não validado em produção — DOCX continua funcionando.
 - Modo teste operacional e isolado de produção.
 - Módulo Financeiro: fundação criada (`financeiro/`). Sem funcionalidade nova ainda.
@@ -19,7 +19,7 @@
 
 ## Versão Atual
 
-**v0.5.0** — Marcar como PAGO
+**v0.6.0** — NF-e vinculada + Revisão de Pedido
 
 ---
 
@@ -39,32 +39,33 @@
 - Confirmação de pagamento com botões por candidato
 - Marcação de lançamento como PAGO com gravação de valor, data e identificador
 - Proteção contra duplo pagamento e reutilização do mesmo comprovante
+- Recebimento e vinculação de NF-e ao pedido pago
+- Revisão do Pedido de Compra com geração de arquivo rev01, rev02...
+- Cockpit do pedido com número da NF-e, botões de comprovante e nota
 - Modo teste isolado via `LAURA_ENV=test`
-
----
-
-## Funcionalidades Iniciadas
-
-- **Revisão da PFM** — botão existe, ação não implementada
-- **Histórico do pedido** — botão existe, ação não implementada
 
 ---
 
 ## Última Fiada Implementada
 
+**Fase 6 — Fiada 6a — Recebimento de NF-e + Revisão de Pedido** *(2026-06-30)*
+
+- Novo tipo de documento `nota_fiscal`: extração de número, CNPJ, emitente, valor, data
+- `buscar_candidatos_nfe()`: encontra pedidos pagos sem NF-e, ordena por CNPJ + valor; fallback manual quando sem correspondência forte
+- Vínculo `doc_id_nfe` gravado em `lancamentos`; arquivado em `documentos`
+- Cockpit do pedido: status `Pago · NF-e 490224`, arquivos com `🧾 NF-e`, botões `💰 Comprovante` e `🧾 NF-e` condicionais
+- Histórico: linha de NF-e com data de emissão
+- Revisão PFM: `pfm_revisar` abre revisão de dados → gera `GGV03-005-R01.docx` + sobrescreve `GGV03-005.docx` + envia PDF
+- `gerar_pfm(pfm_codigo_override=...)`: pula numeração e lançamento ao regerar revisão
+- Bugs corrigidos: `ITEM_RE` (unit vs subtotal), `_recalcular_itens()`, desconto zero, PROMPT preferindo EndToEnd PIX
+- Botão "Financeiro" removido do cockpit — informação já disponível no próprio pedido
+
+---
+
 **Sprint de Experiência — Jeito da Laura** *(2026-06-30)*
 
 - **Jeito da Laura** formalizado em `IDENTIDADE_DO_PRODUTO.md` e `PROCESSO.md` como princípio de comunicação assertiva; gatilho: "Esta mensagem resolve alguma coisa?"
-- Revisão completa de todos os menus pelo Jeito da Laura:
-  - Boas-vindas: "Por onde quer começar?" com descrições concretas de cada opção
-  - Ajuda: headers assertivos com negrito HTML — Cadastrar pedido de compra / Confirmar pagamento / Consultas diretas
-  - Lista de obras: "Qual obra?" + estado vazio orientado à ação
-  - Cockpit da obra: "Nenhum lançamento registrado" + separador · nos contatos + botão ◀️ Obras
-  - Lista de pedidos: "Qual pedido? · GGV03" + estado vazio com próximo passo
-  - Cockpit do pedido: botão 📎 Orçamento envia arquivo original + botão ◀️ Pedidos + "Pedido criado" no histórico
-  - Comprovante PIX: separador · + "exato"/"próximo" em português, sem símbolos de sistema
-  - Categoria: "Como classificar este pedido?" sem 🟡 fora do Sistema de Status
-  - Tipo de documento: "O que é este documento?" + "Não é da obra"
+- Revisão completa de todos os menus pelo Jeito da Laura
 
 ---
 
@@ -138,6 +139,10 @@
 HTML→PDF implementado via Playwright Chromium. Precisa ser testado em produção com orçamento real.
 O DOCX ainda é gerado em paralelo (salvo na pasta OneDrive). Remoção do Word fica para depois da validação.
 
+**Fase 6 — Fiada 6c — Foto de Entrega** *(próxima)*
+
+Novo tipo de documento: foto de entrega vinculada ao pedido. Status `entregue` no ciclo.
+
 ---
 
 ## Marcos do Produto
@@ -151,7 +156,7 @@ O DOCX ainda é gerado em paralelo (salvo na pasta OneDrive). Remoção do Word 
 
 ## Dívidas Técnicas Conhecidas
 
-- `bot.py` monolítico com ~1705 linhas — aceitável até ~2000 linhas (ADR-001)
+- `bot.py` monolítico com ~1800 linhas — aceitável até ~2000 linhas (ADR-001)
 - BD fornecedores: MO Construção com CNPJ errado; PRUDENTÓPOLIS com split incorreto
 - `pfm_caminho` não existe como coluna — path reconstruído a cada consulta
 - `gerar_pfm()` acumula responsabilidades: geração Word + gravação no banco + criação de lançamento
@@ -178,7 +183,7 @@ O DOCX ainda é gerado em paralelo (salvo na pasta OneDrive). Remoção do Word 
 
 ## Objetivo da Próxima Sessão
 
-1. **Fiada 6a — Recebimento de NF-e** — novo tipo de documento; extração, matching e vínculo ao pedido
+1. **Fiada 6c — Foto de Entrega** — novo tipo; vínculo ao pedido, campo de observação, status `entregue`
 2. **Validar PC 2.0** — testar PDF com orçamento real em produção; remover DOCX após validação
 
 ---

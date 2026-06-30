@@ -171,7 +171,7 @@ Se [comprovante_pix]:
 - CNPJ/CPF do favorecido:
 - Chave PIX:
 - Instituição financeira:
-- ID da transação: (número da transação Mercado Pago OU ID EndToEnd do Pix — extraia APENAS o código/número, sem texto adicional; ex: 165448957194 ou E10573521...)
+- ID da transação: (prefira o ID EndToEnd do Pix — começa com "E", ex: E10573521202506... — se não estiver visível, use o número da transação do Mercado Pago; extraia APENAS o código, sem texto adicional)
 - Identificador / Observação:
 
 Se [nota_fiscal]:
@@ -1755,7 +1755,6 @@ def teclado_pedido(doc_id, pfm_codigo, doc_id_nfe=None, doc_id_comprovante=None)
     if doc_id_nfe:
         botoes.append([InlineKeyboardButton("🧾 NF-e", callback_data=f"pfm_nfe:{doc_id_nfe}:{pfm_codigo}")])
     botoes += [
-        [InlineKeyboardButton("Financeiro",   callback_data=f"pfm_lanc:{doc_id}:{pfm_codigo}")],
         [InlineKeyboardButton("◀️ Pedidos",   callback_data=f"obra_pedidos:{ggv}")],
         [InlineKeyboardButton("✖ Fechar",     callback_data=f"pfm_fechar:{doc_id}")],
     ]
@@ -2569,48 +2568,6 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 document=pdf_bytes,
                 filename=f"{pfm_codigo}.pdf",
                 caption=f"📄 {pfm_codigo}"
-            )
-
-        elif acao == "pfm_lanc":
-            _, doc_id, pfm_codigo = partes
-            with sqlite3.connect(DB_PATH) as con:
-                row = con.execute(
-                    "SELECT fornecedor, valor, data_prevista_entrega, vencimento_pagamento, status, criado_em, categoria "
-                    "FROM lancamentos WHERE pfm_codigo=?",
-                    (pfm_codigo,)
-                ).fetchone()
-            if not row:
-                await query.edit_message_text(
-                    f"Nenhum registro financeiro para o Pedido #{pfm_codigo}.",
-                    reply_markup=teclado_pedido(doc_id, pfm_codigo)
-                )
-                return
-            forn, valor, data_ent, venc, status_lanc, criado, cat_val = row
-            valor_fmt = f"R$ {_fmt_brl(valor)}" if valor else "Não informado"
-            status_labels = {
-                "a_pagar":          "🟡 Aguardando pagamento",
-                "pago":             "🟢 Pago",
-                "substituido":      "⚫ Substituído",
-                "pendente_revisao": "🔴 Requer atenção",
-            }
-            status_fmt = status_labels.get(status_lanc, status_lanc)
-            try:
-                cat_label = CategoriaLancamento(cat_val).label() if cat_val else "Não classificado"
-            except ValueError:
-                cat_label = cat_val
-            texto_lanc = (
-                f"Financeiro — Pedido #{pfm_codigo}\n\n"
-                f"Fornecedor: {forn or 'Não informado'}\n"
-                f"Valor: {valor_fmt}\n"
-                f"Categoria: {cat_label}\n"
-                f"Entrega prevista: {data_ent or 'Não informada'}\n"
-                f"Vencimento: {venc or 'Não definido'}\n"
-                f"Status: {status_fmt}\n"
-                f"Registrado: {criado}"
-            )
-            await query.edit_message_text(
-                texto_lanc,
-                reply_markup=teclado_pedido(doc_id, pfm_codigo)
             )
 
         elif acao == "pfm_orc":

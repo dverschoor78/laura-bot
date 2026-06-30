@@ -1,6 +1,6 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-06-30
+> Atualizado em: 2026-06-30 (Fiada 6a concluída)
 
 ---
 
@@ -129,14 +129,13 @@ cadastro como `emite_nf = false` para Laura gerar recibo automaticamente, sem pe
 
 ---
 
-**Fiada 6a — Recebimento de NF-e** *(planejada)*
+**Fiada 6a — Recebimento de NF-e** ✓ *(concluída 2026-06-30)*
 
-- Novo tipo de documento: NF-e (XML SEFAZ, PDF DANFE, foto do DANFE)
-- Extração: número da nota, valor, CNPJ emitente, data de emissão
-- Matching com pedido em aberto (mesmo fornecedor + valor próximo)
-- Vínculo `doc_id_nfe` na tabela `lancamentos`
-- Status novo: `pago_com_nf` — fechamento completo do ciclo
-- Após PIX confirmado: "Envie a NF-e para fechar este pedido." — NF-e é o caminho principal
+- Novo tipo de documento `nota_fiscal`: extração de número, CNPJ, emitente, valor, data
+- `buscar_candidatos_nfe()`: pedidos pagos sem NF-e; ordenado por CNPJ + valor próximo
+- Vínculo `doc_id_nfe` em `lancamentos`; cockpit exibe número + botão de acesso
+- Revisão do Pedido de Compra implementada: `pfm_revisar` → rev01, rev02...
+- PROMPT de comprovante: prefere EndToEnd PIX (`E10573521...`) ao número MP
 
 **Fiada 6b — Recibo como Exceção** *(planejada)*
 
@@ -196,10 +195,11 @@ Implementar junto com a Fiada 6b.
 
 ## Próximas Fiadas
 
-1. Revisão do Pedido de Compra — `pfm_revisar` (botão existe, ação pendente)
-2. Histórico do Pedido — `pfm_hist` (botão removido temporariamente — reimplementar)
+1. Fiada 6c — Foto de Entrega (vínculo ao pedido, observação, status `entregue`)
+2. Validar PC 2.0 em produção + remover DOCX do fluxo principal
 3. Corrigir BD fornecedores (MO Construção CNPJ, PRUDENTÓPOLIS split)
-4. `pfm_caminho` como coluna no banco — eliminar reconstrução de path
+4. Histórico do Pedido — `pfm_hist` (botão removido temporariamente — reimplementar)
+5. `pfm_caminho` como coluna no banco — eliminar reconstrução de path
 
 ---
 
