@@ -115,9 +115,11 @@ class Pedido:
     doc_criado_em:  Optional[str] = None
     lanc_criado_em: Optional[str] = None
     data_pagamento: Optional[str] = None
-    doc_id_nfe:     Optional[int] = None
-    nfe_numero:     Optional[str] = None
-    nfe_data:       Optional[str] = None
+    doc_id_nfe:            Optional[int] = None
+    nfe_numero:            Optional[str] = None
+    nfe_data:              Optional[str] = None
+    doc_id_comprovante:    Optional[int] = None
+    identificador_comprovante: Optional[str] = None
 
     # Arquivos — populados por preparar_visualizacao_pedido()
     caminho_orcamento: Optional[str] = None
@@ -1602,14 +1604,16 @@ def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
             return None
         doc_id, ggv_db, dados, condicao_pgto, data_entrega, desconto_rs, caminho, doc_criado = doc
         lanc = con.execute(
-            "SELECT fornecedor, valor, data_prevista_entrega, vencimento_pagamento, status, criado_em, data_pagamento, doc_id_nfe "
+            "SELECT fornecedor, valor, data_prevista_entrega, vencimento_pagamento, status, criado_em, "
+            "data_pagamento, doc_id_nfe, doc_id_comprovante, identificador_comprovante "
             "FROM lancamentos WHERE pfm_codigo=?",
             (pfm_codigo,)
         ).fetchone()
 
-    forn_lanc = data_prev_ent = venc = status_raw = lanc_criado = data_pgto = doc_id_nfe = None
+    forn_lanc = data_prev_ent = venc = status_raw = lanc_criado = data_pgto = None
+    doc_id_nfe = doc_id_comp = ident_comp = None
     if lanc:
-        forn_lanc, _, data_prev_ent, venc, status_raw, lanc_criado, data_pgto, doc_id_nfe = lanc
+        forn_lanc, _, data_prev_ent, venc, status_raw, lanc_criado, data_pgto, doc_id_nfe, doc_id_comp, ident_comp = lanc
 
     try:
         status = StatusPedido(status_raw) if status_raw else StatusPedido.SEM_LANCAMENTO
@@ -1634,8 +1638,10 @@ def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
         doc_criado_em      = doc_criado,
         lanc_criado_em     = lanc_criado,
         data_pagamento     = data_pgto,
-        doc_id_nfe         = doc_id_nfe,
-        caminho_orcamento  = caminho,
+        doc_id_nfe                = doc_id_nfe,
+        doc_id_comprovante        = doc_id_comp,
+        identificador_comprovante = ident_comp,
+        caminho_orcamento         = caminho,
     )
 
 def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
@@ -1666,7 +1672,11 @@ def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
             data_fmt = dt[:5]
         else:
             data_fmt = _fmt_data_curta(dt)
-        historico.append((data_fmt, "Pago"))
+        pago_label = "Pago"
+        if pedido.identificador_comprovante:
+            cod = pedido.identificador_comprovante[:12]
+            pago_label = f"Pago · {cod}"
+        historico.append((data_fmt, pago_label))
     if pedido.doc_id_nfe:
         nfe_label = f"NF-e {pedido.nfe_numero}" if pedido.nfe_numero else "NF-e"
         historico.append((pedido.nfe_data or "", nfe_label))
@@ -1719,6 +1729,8 @@ def mostrar_pedido(pedido: Pedido) -> str:
         arq.append("📎 Orçamento original")
     if pedido.caminho_docx:
         arq.append("📄 Pedido de Compra")
+    if pedido.doc_id_comprovante:
+        arq.append("💰 Comprov. pagamento")
     if pedido.doc_id_nfe:
         nfe_label = f"🧾 NF-e {pedido.nfe_numero}" if pedido.nfe_numero else "🧾 NF-e"
         arq.append(nfe_label)
@@ -1731,13 +1743,15 @@ def mostrar_pedido(pedido: Pedido) -> str:
 
     return SEP.join([cabecalho, financeiro, arquivos, historico])
 
-def teclado_pedido(doc_id, pfm_codigo, doc_id_nfe=None):
+def teclado_pedido(doc_id, pfm_codigo, doc_id_nfe=None, doc_id_comprovante=None):
     ggv = pfm_codigo.rsplit("-", 1)[0]
     botoes = [
         [InlineKeyboardButton("Revisar",      callback_data=f"pfm_revisar:{doc_id}:{pfm_codigo}")],
         [InlineKeyboardButton("📄 PDF",       callback_data=f"pfm_ver:{doc_id}:{pfm_codigo}")],
         [InlineKeyboardButton("📎 Orçamento", callback_data=f"pfm_orc:{doc_id}:{pfm_codigo}")],
     ]
+    if doc_id_comprovante:
+        botoes.append([InlineKeyboardButton("💰 Comprovante", callback_data=f"pfm_comp:{doc_id_comprovante}:{pfm_codigo}")])
     if doc_id_nfe:
         botoes.append([InlineKeyboardButton("🧾 NF-e", callback_data=f"pfm_nfe:{doc_id_nfe}:{pfm_codigo}")])
     botoes += [
@@ -2015,7 +2029,7 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 preparar_visualizacao_pedido(pedido)
                 await update.message.reply_text(
                     mostrar_pedido(pedido),
-                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe)
+                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante)
                 )
             else:
                 await update.message.reply_text(f"Pedido {pfm_codigo} não encontrado.")
@@ -2616,13 +2630,14 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             else:
                 await ctx.bot.send_document(chat_id=query.message.chat_id, document=dados, filename=path.name)
 
-        elif acao == "pfm_nfe":
-            _, doc_id_nfe, pfm_codigo = partes
+        elif acao in ("pfm_nfe", "pfm_comp"):
+            _, doc_id_arquivo, pfm_codigo = partes
             with sqlite3.connect(DB_PATH) as con:
-                row = con.execute("SELECT caminho FROM documentos WHERE id=?", (int(doc_id_nfe),)).fetchone()
+                row = con.execute("SELECT caminho FROM documentos WHERE id=?", (int(doc_id_arquivo),)).fetchone()
             caminho = row[0] if row else None
+            label = "NF-e" if acao == "pfm_nfe" else "comprovante"
             if not caminho or not Path(caminho).exists():
-                await query.answer("Arquivo da NF-e não encontrado.", show_alert=True)
+                await query.answer(f"Arquivo do {label} não encontrado.", show_alert=True)
                 return
             path = Path(caminho)
             await query.answer()
@@ -2664,7 +2679,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 preparar_visualizacao_pedido(pedido)
                 await query.edit_message_text(
                     mostrar_pedido(pedido),
-                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe)
+                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante)
                 )
             else:
                 await query.answer(f"Pedido {pfm_codigo} não encontrado.", show_alert=True)
