@@ -259,4 +259,4 @@ o extrato é processado para conciliação (funcionalidade futura).
 
 *Responsável: Dennis Verschoor + Claude*
 *Última revisão: 2026-06-29*
-*Próxima revisão: ao final da Fase 1 de implementação ou quando surgir novo termo relevante*
+*Próxima revisão: ao final da Fase 2 de implementação (Estrutura) ou quando surgir novo termo relevante*

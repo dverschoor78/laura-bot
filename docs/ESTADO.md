@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-06-29
-> Sessão: Sprint de Experiência — Fase 1 (Voz)
+> Sessão: Sprint de Experiência — Fase 2 (Estrutura)
 
 ---
 
@@ -67,7 +67,11 @@
 
 ## Em Andamento
 
-Nada. Sprint de Produto encerrada limpa.
+**Sprint de Experiência — Fase 2 (Estrutura)**
+
+Tela de validação do orçamento redesenhada e commitada.
+Pendente nesta fase: saldo do GGV na tela de pedido criado e saldo restante
+da obra na confirmação de pagamento.
 
 ---
 
@@ -76,6 +80,7 @@ Nada. Sprint de Produto encerrada limpa.
 - **v0.1–0.3** — Fundação de engenharia: arquitetura, processo, documentação
 - **v0.4–0.5** — Ciclo financeiro completo: orçamento → pedido → a pagar → pago
 - **Sprint de Produto (2026-06-29)** — Identidade definida: quem a Laura é, o que ela promete, como ela fala
+- **Sprint de Experiência Fase 2 (2026-06-29)** — Tela de validação do orçamento redesenhada; processo de desenvolvimento formalizado com Sessão de Produto e etapa 2.5
 
 ---
 
@@ -103,9 +108,9 @@ Nada. Sprint de Produto encerrada limpa.
 
 ## Objetivo da Próxima Sessão
 
-**Fase 2 — Estrutura** — reorganizar o conteúdo das telas principais: extração com
-fornecedor e valor em destaque, tela de pedido criado com saldo do GGV, tela de
-pagamento confirmado com saldo restante, erros com próximo passo sempre informado.
+**Fase 2 — Conclusão** — completar os itens restantes da Fase 2:
+saldo do GGV na tela de pedido criado; saldo restante da obra na confirmação de pagamento.
+Em seguida, iniciar **Fase 3 — Navegação**: Cockpit da Obra, cartão de fornecedor, /pendentes.
 
 ---
 

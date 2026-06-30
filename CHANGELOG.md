@@ -10,12 +10,62 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Fase 2 — Estrutura: reorganizar conteúdo das telas principais
+1. Fase 2 (pendente): saldo do GGV na tela de pedido criado; saldo restante na confirmação de pagamento
 2. Fase 3 — Navegação: Cockpit da Obra, cartão de fornecedor, /pendentes melhorado
 3. Fase 4 — Pedido de Compra: novo layout DOCX + PDF via LibreOffice headless
 4. Revisão do Pedido de Compra — botão existe, ação pendente
 5. Histórico do Pedido — botão existe, ação pendente
 6. Corrigir BD fornecedores (MO Construção CNPJ errado, PRUDENTÓPOLIS split)
+
+---
+
+## [Housekeeping Documental] — 2026-06-29
+
+### Marco de maturidade: engenharia → produto
+
+Nenhum código alterado. Alinhamento dos documentos de processo e produto.
+
+- `docs/PROCESSO.md` refatorado: dois tipos de sessão (Engenharia e Produto) com
+  ordens de leitura distintas; etapa 2.5 — Validação da Identidade adicionada entre
+  Planejamento e Implementação; "Quando NÃO desenvolver" ampliado com critério de
+  identidade; preamble "A pergunta que abre tudo" registra a inversão identidade → implementação
+- `docs/IDENTIDADE_DO_PRODUTO.md`: aprovação registrada; `docs/GLOSSARIO.md` adicionado
+  à tabela de relações; seção "Marco de Maturidade" adicionada; `docs/PROCESSO.md`
+  referenciado como repositório da etapa 2.5
+- `docs/GLOSSARIO.md`: próxima revisão atualizada para Fase 2
+- `docs/ROADMAP.md`: Fase 2 movida de "Próxima Fiada" para "Em Andamento" com
+  detalhamento do que foi implementado e do que ainda está pendente
+
+---
+
+## [Sprint de Experiência — Fase 2] — 2026-06-29
+
+### Estrutura — tela de validação do orçamento
+
+Tela `_resumo_gerar` redesenhada como preview completo do Pedido de Compra.
+Nenhuma regra de negócio alterada. Nenhum dado perdido.
+
+**Layout aprovado (6 blocos):**
+1. Obra (identificada ou não)
+2. Fornecedor + CNPJ + PIX
+3. Itens (lista completa) + Total bruto
+4. Valor final (negrito) + Desconto (se houver) + Condição de pagamento + Vencimento
+5. Logística: entrega, endereço, validade, contato (Dennis + encarregado da obra)
+6. Observações (sempre exibido — "não informado" quando vazio)
+
+**Implementações:**
+- `teclado_orcamento()` unificado — substitui `teclado_confirmacao` + `teclado_gerar`;
+  bloqueia geração se obra não identificada; botão "Conferir itens" removido
+  (itens visíveis diretamente no layout)
+- Botão Voltar em `sel_ggv`, `teclado_condicao`, `teclado_endereco`
+- Campos `vencimento_pgto` e `encarregado` no banco (via `ALTER TABLE` seguro),
+  na tela de validação e nos botões de correção
+- `GGV_ENCARREGADO` dict — padrão por obra, substituível por documento
+- `DELTAD["ie"] = "Isento"` adicionado para uso futuro no Pedido de Compra
+- `parse_mode="HTML"` em todas as chamadas do resumo — `parse_mode="Markdown"`
+  causava `TimedOut` quando itens extraídos pelo Claude continham `**` não balanceados;
+  `_esc_html()` adicionada para escapar dados externos
+- `"Obra GGV03"` como label em vez de `"GGV03"` isolado
 
 ---
 

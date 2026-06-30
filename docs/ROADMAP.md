@@ -4,29 +4,26 @@
 
 ---
 
-## Próxima Fiada
+## Em Andamento
 
-**Fase 2 — Estrutura**
+**Fase 2 — Estrutura** *(Sprint de Experiência)*
 
-Objetivo: reorganizar o conteúdo das telas principais para dar destaque ao que importa.
-Nenhuma lógica alterada — apenas organização e hierarquia da informação.
+Tela de validação do orçamento redesenhada com layout em 6 blocos orientado pela
+sequência mental do engenheiro civil: Obra → Fornecedor → Itens → Valor → Condições → Logística.
 
-Escopo:
-- Tela de extração: fornecedor e valor em destaque na primeira linha (acima dos dados brutos)
-- Tela de pedido criado: incluir saldo atualizado do GGV após geração
-- Tela de pagamento confirmado: incluir saldo restante da obra
-- Cartão do pedido: histórico resumido (criado em, pago em) diretamente visível
-- Mensagens de erro: sempre com próximo passo explícito — nunca terminam em ponto final sozinho
+Implementado nesta fase:
+- `_resumo_gerar()` reescrita com layout aprovado e parse_mode HTML
+- `teclado_orcamento()` unificado — condicionado ao estado da obra
+- Campos `vencimento_pgto` e `encarregado` adicionados ao banco e à interface
+- `GGV_ENCARREGADO` dict — padrão por obra, substituível por documento
+- Botão "Conferir itens" removido — itens visíveis diretamente na tela de validação
+- `DELTAD["ie"] = "Isento"` adicionado para uso no Pedido de Compra
+- Botões Voltar em `sel_ggv`, `teclado_condicao`, `teclado_endereco`
 
-Motivo: a voz está correta (Fase 1 concluída). O próximo passo é organizar o conteúdo
-para que o mais importante apareça primeiro.
-
-Critério de aceite: receber um orçamento e ver fornecedor + valor antes de qualquer
-outra informação extraída.
-
-Tamanho esperado: Pequeno — nenhum dado novo, apenas reorganização de exibição.
-
-Referências: `docs/GLOSSARIO.md`, `docs/IDENTIDADE_DO_PRODUTO.md`
+Pendente nesta fase:
+- Saldo do GGV na tela de pedido criado
+- Saldo restante da obra na tela de pagamento confirmado
+- Cartão do pedido com histórico resumido
 
 ---
 

@@ -4,20 +4,60 @@
 
 ---
 
-## 1. Abertura da sessão
+## A pergunta que abre tudo
 
-Leia nesta ordem antes de qualquer alteração:
+Antes de qualquer implementação que o usuário verá, responda:
 
+> **"Isso parece com a Laura?"**
+
+Se a resposta não for imediata, releia `docs/IDENTIDADE_DO_PRODUTO.md` antes de continuar.
+Só depois: *"como implementamos?"*
+
+Essa inversão — identidade antes de implementação — é a marca de maturidade do projeto.
+A engenharia continua rigorosa. Mas toda decisão de interface, mensagem, navegação
+ou experiência começa por aqui.
+
+---
+
+## 1. Abertura da Sessão
+
+Antes de qualquer alteração, identifique o tipo da fiada e leia os documentos
+na ordem correspondente.
+
+### Sessão de Engenharia
+
+Use quando a fiada envolver arquitetura, banco de dados, IA, integrações,
+performance ou infraestrutura.
+
+Leia nesta ordem:
 1. `docs/ESTADO.md` — onde o projeto está agora
 2. `docs/ROADMAP.md` — o que vem a seguir
 3. `docs/CONSTITUICAO.md` — se for a primeira sessão ou após longa pausa
-4. `docs/ARQUITETURA.md` — quando a tarefa envolver estrutura ou banco
+4. `docs/ARQUITETURA.md` — obrigatório quando envolve estrutura ou banco
 5. `docs/decisoes/` — ADR relacionada, se existir
+
+### Sessão de Produto
+
+Use quando a fiada envolver UX, Telegram, interface, mensagens, Design System,
+documento, PDF, navegação ou experiência do usuário.
+
+Leia nesta ordem:
+1. `docs/IDENTIDADE_DO_PRODUTO.md` — quem é a Laura e o que ela promete
+2. `docs/GLOSSARIO.md` — como Laura fala e os termos aprovados
+3. `docs/ESTADO.md` — onde o projeto está agora
+4. `docs/ROADMAP.md` — o que vem a seguir
+5. `docs/PROCESSO.md` — este documento
+6. `docs/ARQUITETURA.md` — apenas quando necessário
+
+**Antes de escrever uma linha de código que o usuário verá, lembre quem é a Laura.
+Só depois pense em implementação.**
+
+---
 
 Confirmar o entendimento antes de propor qualquer código.
 
-Se durante a leitura forem encontradas inconsistências entre os documentos de
-engenharia, interromper a implementação e corrigir primeiro a documentação.
+Se durante a leitura forem encontradas inconsistências entre os documentos,
+interromper a implementação e corrigir primeiro a documentação.
 
 ---
 
@@ -29,6 +69,23 @@ engenharia, interromper a implementação e corrigir primeiro a documentação.
 - [ ] Obter aprovação de Dennis antes de começar
 
 **Nenhum código antes da aprovação do planejamento.**
+
+---
+
+## 2.5. Validação da Identidade
+
+*Aplica-se a toda fiada que produza algo visível ao usuário.*
+
+Antes de implementar, responder internamente:
+
+1. Esta mudança reforça a promessa da Laura?
+2. Ela reduz ou aumenta a carga cognitiva do usuário?
+3. O usuário entende a próxima decisão em menos de três segundos?
+4. Laura está ajudando a decidir ou apenas mostrando dados?
+5. Esta solução respeita a `IDENTIDADE_DO_PRODUTO.md`?
+
+**Se alguma resposta for negativa, interromper a implementação e replanejar.**
+Não existe velocidade de entrega que justifique comprometer a identidade do produto.
 
 ---
 
@@ -83,11 +140,12 @@ Antes do commit:
 
 ## 8. Quando NÃO desenvolver
 
-Se durante o planejamento ocorrer qualquer um dos seguintes:
+Se durante o planejamento ou a implementação ocorrer qualquer um dos seguintes:
 
 - A fiada está grande demais para ser compreendida, testada e revertida
 - O problema ainda não está suficientemente compreendido
 - Existe uma decisão arquitetural pendente que afetará a implementação
+- A validação de identidade (2.5) gerou respostas negativas sem resolução clara
 
 **→ Encerre a sessão com planejamento. Não com código.**
 

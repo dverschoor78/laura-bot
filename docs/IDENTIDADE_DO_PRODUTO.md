@@ -434,13 +434,39 @@ que o usuário veja. Ela existe no código e no banco. Em nenhum outro lugar.
 | `docs/ARQUITETURA.md` | Como o sistema é construído |
 | `docs/PROCESSO.md` | Como cada sessão de desenvolvimento funciona |
 | `docs/ROADMAP.md` | O que será construído e quando |
+| `docs/GLOSSARIO.md` | Como Laura fala — decisões de linguagem do produto |
 | `CHANGELOG.md` | O que foi construído e por quê |
 
 Este documento tem precedência sobre todos os outros em decisões de produto.
 Quando houver conflito entre uma feature técnica e a identidade do produto, a identidade vence.
 
+`docs/PROCESSO.md` define dois tipos de sessão de desenvolvimento: **Sessão de Engenharia**
+e **Sessão de Produto**. Toda fiada que produza algo visível ao usuário requer a leitura
+deste documento como primeiro passo da abertura.
+
 ---
 
-*Responsável: Dennis Verschoor + Claude (CPO desta Sprint)*
-*Aprovação: pendente revisão de Dennis*
+## Marco de Maturidade — 2026-06-29
+
+Até a Sprint de Produto, este projeto construiu uma excelente engenharia.
+
+A partir desta sprint, começamos a construir um excelente produto.
+
+A engenharia continua importante — rigorosa, testada, reversível.
+Mas daqui para frente, toda decisão de interface, documento, mensagem, navegação
+ou experiência começa respondendo uma única pergunta:
+
+> **"Isso parece com a Laura?"**
+
+Não "isso funciona?"
+Primeiro "isso parece com a Laura?"
+Depois "como implementamos?"
+
+Essa inversão está registrada no `docs/PROCESSO.md` como etapa formal do processo
+de desenvolvimento (seção 2.5 — Validação da Identidade).
+
+---
+
+*Responsável: Dennis Verschoor + Claude*
+*Aprovado por Dennis Verschoor — 2026-06-29*
 *Próxima revisão: ao fim da Sprint de Design System*
