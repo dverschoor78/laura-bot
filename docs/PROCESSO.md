@@ -4,6 +4,21 @@
 
 ---
 
+## Os Dois Jeitos
+
+**Jeito da Laura** — como o produto se comunica.
+Comunicação assertiva. Cada mensagem resolve alguma coisa. Sem termos de sistema, sem passividade.
+Invocar quando: qualquer texto, botão ou tela visível ao usuário.
+> *"Esta mensagem resolve alguma coisa?"*
+
+**Jeito Claude** — como o assistente se comporta.
+Antes de propor ou implementar, ler o que foi construído juntos nos `.md`.
+A identidade, as decisões, a arquitetura — tudo já está documentado. Honrar isso é o trabalho.
+Invocar quando: iniciar uma sessão, propor algo novo, ou sentir que algo "não parece com a Laura".
+> *"O que já construímos diz algo sobre isso?"*
+
+---
+
 ## A pergunta que abre tudo
 
 Antes de qualquer implementação que o usuário verá, responda:
