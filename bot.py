@@ -1338,6 +1338,69 @@ def mostrar_cockpit_obra(obra):
 
     return f"{cabecalho}\n\n{SEP}\n{financeiro}\n{SEP}\n{contatos}"
 
+_SAUDACOES_RE = re.compile(
+    r"^\s*(oi|olá|ola|bom\s*dia|boa\s*tarde|boa\s*noite|hey|e\s*a[íi]|hello|hi|tudo\s*bem|tudo\s*bom)\W*$",
+    re.IGNORECASE
+)
+_OBRAS_RE = re.compile(r"^\s*obras?\s*$", re.IGNORECASE)
+
+def mostrar_boas_vindas():
+    return (
+        "Obras — acessa a lista de obras\n"
+        "Ajuda — ações e consultas disponíveis"
+    )
+
+def teclado_boas_vindas():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 Obras",  callback_data="menu_obras")],
+        [InlineKeyboardButton("❓ Ajuda",  callback_data="menu_ajuda")],
+        [InlineKeyboardButton("✖ Fechar", callback_data="obras_fechar")],
+    ])
+
+def mostrar_ajuda():
+    return (
+        "No que posso ajudar?\n\n"
+        "Para montar um pedido de compra, basta enviar a foto ou arquivo do orçamento.\n\n"
+        "Para acessar uma obra, use /obras ou digite o código — GGV03.\n\n"
+        "Se souber o número do pedido, pode digitar direto — GGV03-009.\n\n"
+        "Para registrar um pagamento, envie o comprovante PIX."
+    )
+
+def teclado_ajuda():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✖ Fechar", callback_data="obras_fechar")],
+    ])
+
+def _listar_obras():
+    with sqlite3.connect(DB_PATH) as con:
+        return con.execute(
+            "SELECT codigo, descricao FROM obras WHERE ativa=1 ORDER BY codigo"
+        ).fetchall()
+
+def mostrar_lista_obras(obras):
+    if not obras:
+        return "Nenhuma obra cadastrada."
+    linhas = ["Obras cadastradas", ""]
+    for codigo, desc in obras:
+        desc = desc or ""
+        titulo = desc.split(",")[0].replace(codigo, "").strip() if desc else "Sem descrição"
+        linhas.append(f"{codigo} — {titulo}")
+    return "\n".join(linhas)
+
+def teclado_lista_obras(obras):
+    botoes = []
+    row = []
+    for codigo, _ in obras:
+        row.append(InlineKeyboardButton(codigo, callback_data=f"obra_ver:{codigo}"))
+        if len(row) == 2:
+            botoes.append(row)
+            row = []
+    if row:
+        botoes.append(row)
+    botoes.append([InlineKeyboardButton("➕ Nova obra",  callback_data="menu_nova_obra")])
+    botoes.append([InlineKeyboardButton("✖ Fechar",     callback_data="obras_fechar")])
+    return InlineKeyboardMarkup(botoes)
+
 def _pedidos_obra(ggv):
     with sqlite3.connect(DB_PATH) as con:
         return con.execute(
@@ -1652,17 +1715,26 @@ async def ajuda(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != DONO_ID:
         return
     await update.message.reply_text(
-        "O que você pode enviar:\n\n"
-        "Foto ou PDF — orçamento, comprovante PIX ou outro documento\n\n"
-        "GGV03-009 — consulta um pedido de compra\n"
-        "GGV03 — abre o cockpit da obra\n\n"
-        "/nova_obra — cadastrar uma obra nova"
+        mostrar_ajuda(),
+        reply_markup=teclado_ajuda()
     )
 
 async def comando_desconhecido(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != DONO_ID:
         return
-    await update.message.reply_text("Comando não reconhecido. /help para ver o que eu faço.")
+    await update.message.reply_text(
+        mostrar_boas_vindas(),
+        reply_markup=teclado_boas_vindas()
+    )
+
+async def obras_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != DONO_ID:
+        return
+    obras = _listar_obras()
+    await update.message.reply_text(
+        mostrar_lista_obras(obras),
+        reply_markup=teclado_lista_obras(obras)
+    )
 
 async def nova_obra(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != DONO_ID:
@@ -1725,6 +1797,19 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     texto      = update.message.text.strip()
 
     if not aguardando:
+        if _SAUDACOES_RE.match(texto):
+            await update.message.reply_text(
+                mostrar_boas_vindas(),
+                reply_markup=teclado_boas_vindas()
+            )
+            return
+        if _OBRAS_RE.match(texto):
+            obras = _listar_obras()
+            await update.message.reply_text(
+                mostrar_lista_obras(obras),
+                reply_markup=teclado_lista_obras(obras)
+            )
+            return
         m_obra = GGV_CODIGO_RE.match(texto)
         if m_obra:
             codigo = m_obra.group(1).upper()
@@ -1750,7 +1835,10 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             else:
                 await update.message.reply_text(f"Pedido {pfm_codigo} não encontrado.")
         else:
-            await update.message.reply_text("Não entendi. /help para ver o que eu faço.")
+            await update.message.reply_text(
+                mostrar_boas_vindas(),
+                reply_markup=teclado_boas_vindas()
+            )
         return
 
     doc_id = ctx.user_data.get("doc_id")
@@ -2397,6 +2485,26 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         elif acao == "obra_fechar":
             await query.edit_message_text("Fechado.")
 
+        elif acao == "obras_fechar":
+            await query.edit_message_text("Fechado.")
+
+        elif acao == "menu_obras":
+            obras = _listar_obras()
+            await query.edit_message_text(
+                mostrar_lista_obras(obras),
+                reply_markup=teclado_lista_obras(obras)
+            )
+
+        elif acao == "menu_ajuda":
+            await query.edit_message_text(
+                mostrar_ajuda(),
+                reply_markup=teclado_ajuda()
+            )
+
+        elif acao == "menu_nova_obra":
+            await query.edit_message_text("Código da nova obra (ex: GGV04):")
+            ctx.user_data["aguardando"] = "nova_obra_codigo"
+
     except Exception as e:
         await ctx.bot.send_message(chat_id=DONO_ID, text=f"Erro inesperado — tente novamente.\n{e}")
 
@@ -2404,14 +2512,16 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def _post_init(app):
     await app.bot.set_my_commands([
-        BotCommand("help",      "O que eu faço"),
-        BotCommand("nova_obra", "Cadastrar uma obra nova"),
+        BotCommand("help",      "Ações e consultas disponíveis"),
+        BotCommand("obras",     "Lista de obras"),
+        BotCommand("nova_obra", "Cadastrar obra nova"),
     ])
 
 init_db()
 app = Application.builder().token(TOKEN).post_init(_post_init).build()
 app.add_handler(CommandHandler("start",     start))
 app.add_handler(CommandHandler("help",      ajuda))
+app.add_handler(CommandHandler("obras",     obras_cmd))
 app.add_handler(CommandHandler("nova_obra", nova_obra))
 app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, receber_arquivo))
 app.add_handler(CallbackQueryHandler(responder_botao))

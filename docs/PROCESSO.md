@@ -121,6 +121,7 @@ Antes do commit:
 - [ ] Revisar nomes (funções, variáveis, constantes)
 - [ ] Verificar imports desnecessários
 - [ ] Confirmar que a documentação continua coerente com o código
+- [ ] Se a fiada introduz uma nova ação acessível pelo usuário, atualizar `mostrar_ajuda()` em `bot.py` com uma linha descritiva no estilo: "Para X, basta Y."
 
 ---
 
