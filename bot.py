@@ -1989,7 +1989,7 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             v = _parse_brl(re.sub(r"[^\d,.]", "", texto))
         except Exception:
             v = 0.0
-        atualizar(doc_id, desconto_rs=f"{v:.2f}" if v > 0 else None)
+        atualizar(doc_id, desconto_rs=f"{v:.2f}")
         ctx.user_data["aguardando"] = None
         texto_resumo, markup = _resumo_gerar(doc_id)
         await update.message.reply_text(texto_resumo, reply_markup=markup, parse_mode="HTML")
