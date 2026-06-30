@@ -302,7 +302,7 @@ def _dados_display(dados):
     linhas = [l for l in dados.split('\n') if not _CAMPOS_RESUMO_RE.match(l)]
     return '\n'.join(linhas).strip()
 
-def _resumo_gerar(doc_id, cta="Confirmar para gerar o Pedido de Compra."):
+def _resumo_gerar(doc_id):
     with sqlite3.connect(DB_PATH) as con:
         row = con.execute(
             "SELECT dados_claude, tipo, ggv, condicao_pgto, data_entrega, desconto_rs FROM documentos WHERE id=?",
@@ -315,8 +315,10 @@ def _resumo_gerar(doc_id, cta="Confirmar para gerar o Pedido de Compra."):
     label_ggv = ggv if ggv != "nao_identificado" else "Obra não identificada"
 
     fornecedor = _campo(dados, "Fornecedor") or "Fornecedor não identificado"
-    cnpj       = _campo(dados, "CNPJ/CPF")
-    pix        = _campo(dados, "Chave PIX")
+    _cnpj = _campo(dados, "CNPJ/CPF")
+    _pix  = _campo(dados, "Chave PIX")
+    cnpj  = None if _cnpj == "A PREENCHER" else _cnpj
+    pix   = None if _pix  == "A PREENCHER" else _pix
     condicao   = condicao or _campo(dados, "Condição de pagamento") or ""
     data_ent   = data_ent  or _campo(dados, "Prazo de entrega") or ""
     n_itens    = sum(1 for l in dados.splitlines() if re.match(r"^\d+\.", l.strip()))
@@ -352,8 +354,10 @@ def _resumo_gerar(doc_id, cta="Confirmar para gerar o Pedido de Compra."):
         if pix:  linhas.append(f"PIX    {pix}")
         linhas.append(SEP)
 
-    linhas.append(cta)
-    return "\n".join(linhas), teclado_gerar(doc_id, tipo, ggv)
+    if ggv == "nao_identificado":
+        linhas.append("Defina a obra antes de gerar o Pedido de Compra.")
+
+    return "\n".join(linhas), teclado_orcamento(doc_id, tipo, ggv)
 
 _FORN_COLS = ["nome", "razao_social", "cnpj", "cpf", "chave_pix", "email",
               "whatsapp", "logradouro", "numero", "bairro", "cidade", "uf", "cep"]
@@ -927,20 +931,19 @@ def parse_resposta(texto):
             corpo.append(linha)
     return tipo, ggv, "\n".join(corpo).strip()
 
-def teclado_confirmacao(doc_id, tipo, ggv):
-    label_ggv = ggv if ggv != "nao_identificado" else "❓ Obra"
+def teclado_orcamento(doc_id, tipo, ggv):
+    if ggv == "nao_identificado":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📍 Definir obra",    callback_data=f"sel_ggv:{doc_id}:{tipo}:{ggv}")],
+            [InlineKeyboardButton("📦 Conferir itens",  callback_data=f"ver_itens:{doc_id}:{tipo}:{ggv}")],
+            [InlineKeyboardButton("✏️ Corrigir dados",  callback_data=f"sel_edit:{doc_id}:{tipo}:{ggv}")],
+            [InlineKeyboardButton("Cancelar",           callback_data=f"cancelar:{doc_id}")],
+        ])
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ Confirmar",          callback_data=f"ok:{doc_id}:{tipo}:{ggv}"),
-            InlineKeyboardButton("Tipo",                  callback_data=f"sel_tipo:{doc_id}:{tipo}:{ggv}"),
-        ],
-        [
-            InlineKeyboardButton(f"Obra: {label_ggv}",   callback_data=f"sel_ggv:{doc_id}:{tipo}:{ggv}"),
-            InlineKeyboardButton("Cancelar",              callback_data=f"cancelar:{doc_id}"),
-        ],
-        [
-            InlineKeyboardButton("✏️ Corrigir campos",   callback_data=f"sel_edit:{doc_id}:{tipo}:{ggv}"),
-        ]
+        [InlineKeyboardButton("✅ Gerar Pedido de Compra", callback_data=f"pfm:{doc_id}:{ggv}")],
+        [InlineKeyboardButton("📦 Conferir itens",          callback_data=f"ver_itens:{doc_id}:{tipo}:{ggv}")],
+        [InlineKeyboardButton("✏️ Corrigir dados",          callback_data=f"sel_edit:{doc_id}:{tipo}:{ggv}")],
+        [InlineKeyboardButton("Cancelar",                   callback_data=f"cancelar:{doc_id}")],
     ])
 
 def teclado_candidatos_pix(doc_id_comp: int, candidatos: list):
@@ -961,14 +964,15 @@ def teclado_tipo_inicial(doc_id):
         [InlineKeyboardButton("🗑 Outro",                 callback_data=f"sel_tipo_inicial:{doc_id}:nao_relacionado")],
     ])
 
-def teclado_condicao(doc_id, ggv):
+def teclado_condicao(doc_id, tipo, ggv):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💰 PIX à vista",                   callback_data=f"pgto:{doc_id}:{ggv}:pix_avista")],
         [InlineKeyboardButton("💰 PIX 50% entrada + 50% entrega", callback_data=f"pgto:{doc_id}:{ggv}:pix_50_50")],
         [InlineKeyboardButton("✏️ Outro (digitar)",                callback_data=f"pgto:{doc_id}:{ggv}:outro")],
+        [InlineKeyboardButton("◀️ Voltar",                        callback_data=f"voltar_edit:{doc_id}:{tipo}:{ggv}")],
     ])
 
-def teclado_endereco(doc_id, ggv):
+def teclado_endereco(doc_id, tipo, ggv):
     chave_obra = f"obra_{ggv}"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(f"🏗 Obra ({ggv})",    callback_data=f"end:{doc_id}:{ggv}:{chave_obra}")],
@@ -976,6 +980,7 @@ def teclado_endereco(doc_id, ggv):
         [InlineKeyboardButton("🏢 Escritório",       callback_data=f"end:{doc_id}:{ggv}:escritorio")],
         [InlineKeyboardButton("🌳 Chácara",          callback_data=f"end:{doc_id}:{ggv}:chacara")],
         [InlineKeyboardButton("✏️ Outro (digitar)",  callback_data=f"end:{doc_id}:{ggv}:outro")],
+        [InlineKeyboardButton("◀️ Voltar",           callback_data=f"voltar_edit:{doc_id}:{tipo}:{ggv}")],
     ])
 
 def _fmt_data_curta(dt_str):
@@ -1113,12 +1118,6 @@ def teclado_pedido(doc_id, pfm_codigo):
         [InlineKeyboardButton("✖ Fechar",       callback_data=f"pfm_fechar:{doc_id}")],
     ])
 
-def teclado_gerar(doc_id, tipo, ggv):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Gerar Pedido de Compra", callback_data=f"pfm:{doc_id}:{ggv}")],
-        [InlineKeyboardButton("✏️ Corrigir campos",        callback_data=f"sel_edit:{doc_id}:{tipo}:{ggv}")],
-        [InlineKeyboardButton("Cancelar",                  callback_data=f"cancelar:{doc_id}")],
-    ])
 
 # ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -1321,11 +1320,8 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 texto, markup = _resumo_gerar(int(doc_id))
                 await query.edit_message_text(texto, reply_markup=markup)
             else:
-                texto_resumo, _ = _resumo_gerar(int(doc_id), "Tipo corrigido. Confirmar?")
-                await query.edit_message_text(
-                    texto_resumo,
-                    reply_markup=teclado_confirmacao(int(doc_id), novo_tipo, ggv)
-                )
+                texto, markup = _resumo_gerar(int(doc_id))
+                await query.edit_message_text(texto, reply_markup=markup)
 
         elif acao == "sel_tipo_inicial":
             _, doc_id, tipo = partes
@@ -1380,11 +1376,8 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                         reply_markup=markup
                     )
             elif tipo == "orcamento":
-                texto_resumo, _ = _resumo_gerar(int(doc_id), "Confirmar ou corrigir?")
-                await query.edit_message_text(
-                    texto_resumo,
-                    reply_markup=teclado_confirmacao(int(doc_id), tipo, ggv)
-                )
+                texto, markup = _resumo_gerar(int(doc_id))
+                await query.edit_message_text(texto, reply_markup=markup)
             else:
                 await query.edit_message_text(
                     f"{label_tipo}\n\n{corpo}\n\nConfirmar ou cancelar?",
@@ -1480,6 +1473,8 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             botoes = [[InlineKeyboardButton(g, callback_data=f"set_ggv:{doc_id}:{tipo}:{g}")] for g in GGVS]
             botoes.append([InlineKeyboardButton("❓ Não identificado",
                                                 callback_data=f"set_ggv:{doc_id}:{tipo}:nao_identificado")])
+            botoes.append([InlineKeyboardButton("◀️ Voltar",
+                                                callback_data=f"voltar_edit:{doc_id}:{tipo}:{ggv}")])
             await query.edit_message_reply_markup(InlineKeyboardMarkup(botoes))
 
         elif acao == "set_ggv":
@@ -1491,11 +1486,8 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 texto, markup = _resumo_gerar(int(doc_id))
                 await query.edit_message_text(texto, reply_markup=markup)
             else:
-                texto_resumo, _ = _resumo_gerar(int(doc_id), "Obra corrigida. Confirmar?")
-                await query.edit_message_text(
-                    texto_resumo,
-                    reply_markup=teclado_confirmacao(int(doc_id), tipo, novo_ggv)
-                )
+                texto, markup = _resumo_gerar(int(doc_id))
+                await query.edit_message_text(texto, reply_markup=markup)
 
         elif acao == "pgto":
             _, doc_id, ggv, escolha = partes
@@ -1546,13 +1538,13 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ctx.user_data["aguardando"] = None
                 await query.edit_message_text(
                     "Condição de pagamento:",
-                    reply_markup=teclado_condicao(doc_id, ggv)
+                    reply_markup=teclado_condicao(doc_id, tipo, ggv)
                 )
             elif campo == "endereco":
                 ctx.user_data["aguardando"] = None
                 await query.edit_message_text(
                     "Endereço de entrega:",
-                    reply_markup=teclado_endereco(doc_id, ggv)
+                    reply_markup=teclado_endereco(doc_id, tipo, ggv)
                 )
             elif campo == "itens":
                 ctx.user_data["aguardando"] = "edit_itens"
@@ -1603,8 +1595,21 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             texto, markup = _resumo_gerar(int(doc_id))
             await query.edit_message_text(texto, reply_markup=markup)
 
+        elif acao == "ver_itens":
+            _, doc_id, tipo, ggv = partes
+            with sqlite3.connect(DB_PATH) as con:
+                row = con.execute("SELECT dados_claude FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
+            bloco = _bloco_itens(row[0] if row else "")
+            await query.edit_message_text(
+                bloco,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("◀️ Voltar ao resumo", callback_data=f"voltar_edit:{doc_id}:{tipo}:{ggv}")]
+                ])
+            )
+
         elif acao == "pfm":
             _, doc_id, ggv = partes
+            atualizar(int(doc_id), status="confirmado")
             await query.edit_message_text("Gerando Pedido de Compra...")
             caminho, codigo, fornecedor, valor_v, lanc_status, ja_existia = gerar_pfm(int(doc_id))
             with open(caminho, "rb") as f:
