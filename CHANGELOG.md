@@ -18,6 +18,16 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Sprint de Experiência — Jeito da Laura] — 2026-06-30
+
+- **Jeito da Laura** nomeado e formalizado como princípio de comunicação assertiva do produto
+- Revisão completa de todos os menus: boas-vindas, ajuda, lista de obras, cockpit da obra, lista de pedidos, cockpit do pedido, comprovante PIX, categoria do lançamento, tipo de documento
+- Botão 📎 Orçamento no cockpit do pedido envia o arquivo original diretamente no chat
+- Botão ◀️ Pedidos no cockpit do pedido; botão ◀️ Obras no cockpit da obra
+- Histórico removido como tela separada (pendente reimplementação)
+
+---
+
 ## [Sprint de Experiência — Navegação e Identidade] — 2026-06-30
 
 - Boas-vindas: saudação ou texto não reconhecido abre menu com descrição de cada opção e 3 botões em linhas individuais

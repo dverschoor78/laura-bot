@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-06-30
-> Sessão: Sprint de Experiência — Navegação e Identidade
+> Sessão: Sprint de Experiência — Jeito da Laura
 
 ---
 
@@ -52,15 +52,19 @@
 
 ## Última Fiada Implementada
 
-**Sprint de Experiência — Navegação e Identidade** *(2026-06-30)*
+**Sprint de Experiência — Jeito da Laura** *(2026-06-30)*
 
-- Boas-vindas: saudação ou texto desconhecido → "Obras — ... / Ajuda — ..." + 3 botões em linhas individuais
-- Ajuda (`/help`): texto pessoal e guiado com cabeçalhos em negrito (HTML) — "No que posso ajudar?"
-- `/obras` registrado como comando; lista de obras com descrição curta de cada GGV
-- Lista de pedidos da obra: tela própria via "📋 Pedidos", navegação direta ao cockpit do pedido
-- Cockpit da obra: botão "✖ Fechar" adicionado; estrutura preparada para bloco financeiro (Fiada 5b-1)
-- Botões em linhas individuais em todos os menus para máxima largura no Telegram
-- PROCESSO.md: housekeeping passa a exigir atualização de `mostrar_ajuda()` a cada nova ação
+- **Jeito da Laura** formalizado em `IDENTIDADE_DO_PRODUTO.md` e `PROCESSO.md` como princípio de comunicação assertiva; gatilho: "Esta mensagem resolve alguma coisa?"
+- Revisão completa de todos os menus pelo Jeito da Laura:
+  - Boas-vindas: "Por onde quer começar?" com descrições concretas de cada opção
+  - Ajuda: headers assertivos com negrito HTML — Cadastrar pedido de compra / Confirmar pagamento / Consultas diretas
+  - Lista de obras: "Qual obra?" + estado vazio orientado à ação
+  - Cockpit da obra: "Nenhum lançamento registrado" + separador · nos contatos + botão ◀️ Obras
+  - Lista de pedidos: "Qual pedido? · GGV03" + estado vazio com próximo passo
+  - Cockpit do pedido: botão 📎 Orçamento envia arquivo original + botão ◀️ Pedidos + "Pedido criado" no histórico
+  - Comprovante PIX: separador · + "exato"/"próximo" em português, sem símbolos de sistema
+  - Categoria: "Como classificar este pedido?" sem 🟡 fora do Sistema de Status
+  - Tipo de documento: "O que é este documento?" + "Não é da obra"
 
 ---
 
