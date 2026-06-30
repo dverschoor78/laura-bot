@@ -1,6 +1,6 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-06-29
+> Atualizado em: 2026-06-30
 
 ---
 
@@ -110,10 +110,77 @@ Mostra todos os PFMs de um GGV com status financeiro e totalizadores.
 
 ---
 
+## Fase 6 — Documentos de Fechamento
+
+> Princípio: todo pagamento confirmado precisa de um documento fiscal vinculado — NF-e ou recibo. Sem exceção.
+
+**Fiada 6a — Recebimento de NF-e** *(planejada)*
+
+- Novo tipo de documento: NF-e (XML SEFAZ, PDF DANFE, foto do DANFE)
+- Extração: número da nota, valor, CNPJ emitente, data de emissão
+- Matching com pedido em aberto (mesmo fornecedor + valor próximo)
+- Vínculo `doc_id_nfe` na tabela `lancamentos`
+- Status novo: `pago_com_nf` — fechamento completo do ciclo
+
+**Fiada 6b — Geração de Recibo para Prestadores sem NF** *(planejada)*
+
+- Após PIX confirmado, Laura verifica se existe NF-e vinculada
+- Se não: "Este pedido ainda não tem nota fiscal. Envie a NF-e ou gere um recibo."
+  - [📄 Gerar recibo]  [Aguardar NF-e]
+- Recibo gerado em PDF via Playwright: serviço (do orçamento) + pagamento (do PIX) + partes
+- Status novo: `pago_com_recibo`
+
+**Fiada 6c — Foto de Entrega** *(planejada)*
+
+- Novo tipo de documento: foto de entrega
+- Vínculo ao pedido via matching ou seleção manual
+- Campo opcional de observação: "entregou só metade", "produto diferente"
+- Status novo: `entregue` na tabela `lancamentos`
+
+---
+
+### Casos a tratar durante a implementação da Fase 6
+
+Identificados em 2026-06-30 antes de iniciar qualquer fiada.
+Cada um deve ser endereçado na fiada correspondente — não deixar para depois.
+
+**1. Divergência de valor NF ≠ PIX**
+Desconto negociado, frete separado ou arredondamento podem gerar diferença.
+Laura deve alertar e permitir aceitar com observação ou bloquear o vínculo.
+
+**2. Entregas parciais — múltiplas NF por pedido**
+Um pedido pode ter três entregas e três NF-e diferentes.
+O modelo atual é 1 pedido → 1 NF. Precisa suportar N NF por pedido antes de fechar o status.
+
+**3. Fluxo inverso — entrega antes do PIX**
+Material chega com crédito no fornecedor; NF-e chega antes do pagamento.
+Laura precisa aceitar NF → aguardar PIX, além do fluxo padrão PIX → aguardar NF.
+
+**4. Dados do prestador para o recibo**
+O recibo precisa de CPF, nome completo e endereço do autônomo.
+O cadastro de fornecedores tem CNPJ e nome comercial — incompleto para pessoa física.
+Definir quais campos coletar no cadastro antes de gerar o primeiro recibo.
+
+**5. Limitação fiscal do recibo gerado**
+O recibo gerado por Laura tem valor como controle interno.
+Para serviços com obrigação de NFS-e municipal (ISS acima de certo valor), pode não satisfazer
+obrigação fiscal. Comunicar essa limitação ao usuário no momento da geração.
+
+**6. Formatos de NF-e**
+XML da SEFAZ (estruturado, preferencial), PDF do DANFE, foto do DANFE impresso.
+Priorizar XML — mais rico e sem necessidade de OCR. Foto é fallback de última instância.
+
+**7. Alerta proativo de NF pendente**
+Laura monitora pedidos com status `pago` sem NF vinculada há N dias e alerta:
+"GGV03-009 · Sabiá · pago há 7 dias sem nota fiscal."
+Implementar junto com a Fiada 6b.
+
+---
+
 ## Próximas Fiadas
 
 1. Revisão do Pedido de Compra — `pfm_revisar` (botão existe, ação pendente)
-2. Histórico do Pedido — `pfm_hist` (botão existe, ação pendente)
+2. Histórico do Pedido — `pfm_hist` (botão removido temporariamente — reimplementar)
 3. Corrigir BD fornecedores (MO Construção CNPJ, PRUDENTÓPOLIS split)
 4. `pfm_caminho` como coluna no banco — eliminar reconstrução de path
 
