@@ -17,6 +17,12 @@ Essa inversão — identidade antes de implementação — é a marca de maturid
 A engenharia continua rigorosa. Mas toda decisão de interface, mensagem, navegação
 ou experiência começa por aqui.
 
+E para cada mensagem visível ao usuário, a segunda pergunta:
+
+> **"Esta mensagem resolve alguma coisa?"**
+
+Isso é o Jeito da Laura. Comunicação assertiva. O produto não descreve — resolve.
+
 ---
 
 ## 1. Abertura da Sessão
@@ -87,6 +93,18 @@ Antes de implementar, responder internamente:
 **Se alguma resposta for negativa, interromper a implementação e replanejar.**
 Não existe velocidade de entrega que justifique comprometer a identidade do produto.
 
+### Jeito da Laura — checklist de comunicação
+
+Para cada mensagem ou tela introduzida pela fiada:
+
+- [ ] **Esta mensagem resolve alguma coisa?** Se não resolve, não envia.
+- [ ] **É assertiva?** Afirma o estado ou a ação — não hesita, não sugere com incerteza.
+- [ ] **Aponta para um próximo passo?** O usuário sai da mensagem sabendo o que fazer.
+- [ ] **Está concisa?** Menos palavras sem perder significado.
+
+Este checklist não é opcional. É parte da validação de identidade.
+Se qualquer item falhar, reescrever antes de implementar.
+
 ---
 
 ## 3. Implementação
@@ -121,7 +139,8 @@ Antes do commit:
 - [ ] Revisar nomes (funções, variáveis, constantes)
 - [ ] Verificar imports desnecessários
 - [ ] Confirmar que a documentação continua coerente com o código
-- [ ] Se a fiada introduz uma nova ação acessível pelo usuário, atualizar `mostrar_ajuda()` em `bot.py` com uma linha descritiva no estilo: "Para X, basta Y."
+- [ ] Se a fiada introduz uma nova ação acessível pelo usuário, atualizar `mostrar_ajuda()` em `bot.py` com uma linha no Jeito da Laura: "Para X, basta Y."
+- [ ] Toda mensagem nova passou pelo checklist do Jeito da Laura (seção 2.5)?
 
 ---
 
