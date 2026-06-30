@@ -18,7 +18,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
-from financeiro.lancamento import init_db_financeiro
+from financeiro.lancamento import init_db_financeiro, sugerir_categoria, CategoriaLancamento
 
 load_dotenv()
 TOKEN       = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -355,17 +355,18 @@ def atualizar(doc_id, **campos):
     with sqlite3.connect(DB_PATH) as con:
         con.execute(f"UPDATE documentos SET {sets} WHERE id=?", (*campos.values(), doc_id))
 
-def registrar_lancamento(doc_id, pfm_codigo, ggv, fornecedor, valor_v, data_entrega):
+def registrar_lancamento(doc_id, pfm_codigo, ggv, fornecedor, valor_v, data_entrega, categoria=None):
     """Insere lançamento A PAGAR. Idempotente: se pfm_codigo já existe, retorna o existente."""
     forn_ok  = fornecedor and fornecedor != "A PREENCHER"
     valor_ok = valor_v and valor_v > 0
     status   = "a_pagar" if (forn_ok and valor_ok) else "pendente_revisao"
+    cat_val  = categoria.value if categoria else None
     with sqlite3.connect(DB_PATH) as con:
         cur = con.execute(
             """INSERT OR IGNORE INTO lancamentos
-               (doc_id, pfm_codigo, ggv, fornecedor, valor, data_prevista_entrega, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (doc_id, pfm_codigo, ggv, fornecedor, valor_v, data_entrega, status)
+               (doc_id, pfm_codigo, ggv, fornecedor, valor, data_prevista_entrega, status, categoria)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (doc_id, pfm_codigo, ggv, fornecedor, valor_v, data_entrega, status, cat_val)
         )
         ja_existia = cur.rowcount == 0
         if ja_existia:
@@ -931,7 +932,7 @@ async def _html_para_pdf(html_str: str) -> bytes:
         await browser.close()
         return pdf
 
-def gerar_pfm(doc_id):
+def gerar_pfm(doc_id, categoria=None):
     with sqlite3.connect(DB_PATH) as con:
         row = con.execute(
             "SELECT ggv, dados_claude, condicao_pgto, data_entrega, endereco_entrega, desconto_rs FROM documentos WHERE id=?",
@@ -1177,7 +1178,7 @@ def gerar_pfm(doc_id):
     doc.save(caminho)
 
     lanc_status, ja_existia = registrar_lancamento(
-        doc_id, pfm_codigo, ggv, fornecedor, total_final_v, data_entrega_db
+        doc_id, pfm_codigo, ggv, fornecedor, total_final_v, data_entrega_db, categoria
     )
     return caminho, pfm_codigo, fornecedor, total_final_v, lanc_status, ja_existia
 
@@ -1513,6 +1514,57 @@ def teclado_pedido(doc_id, pfm_codigo):
         [InlineKeyboardButton("✖ Fechar",       callback_data=f"pfm_fechar:{doc_id}")],
     ])
 
+def _tela_categoria(cat, ramo):
+    if cat:
+        linha_ramo = f"\n({ramo})" if ramo and ramo != "A PREENCHER" else ""
+        return f"Categoria do lançamento\n\n🟡 Sugestão: {cat.label()}{linha_ramo}"
+    return "Categoria do lançamento\n\nSelecione a categoria:"
+
+def _teclado_selecao_categorias(doc_id, ggv):
+    cats = list(CategoriaLancamento)
+    botoes = []
+    for i in range(0, len(cats), 2):
+        linha = [
+            InlineKeyboardButton(c.label(), callback_data=f"cat_sel:{doc_id}:{ggv}:{c.value}")
+            for c in cats[i:i+2]
+        ]
+        botoes.append(linha)
+    return InlineKeyboardMarkup(botoes)
+
+def _teclado_categoria(doc_id, ggv, cat):
+    if cat:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Confirmar", callback_data=f"cat_confirmar:{doc_id}:{ggv}:{cat.value}")],
+            [InlineKeyboardButton("Outra categoria", callback_data=f"cat_corrigir:{doc_id}:{ggv}")],
+        ])
+    return _teclado_selecao_categorias(doc_id, ggv)
+
+async def _executar_gerar_pfm(query, ctx, doc_id, ggv, categoria):
+    await query.edit_message_text("Gerando Pedido de Compra...")
+    caminho, codigo, fornecedor, valor_v, lanc_status, ja_existia = gerar_pfm(doc_id, categoria)
+    html      = _gerar_html_pc(doc_id)
+    pdf_bytes = await _html_para_pdf(html)
+    await ctx.bot.send_document(
+        chat_id=DONO_ID,
+        document=pdf_bytes,
+        filename=f"{codigo}.pdf",
+        caption=f"Pedido #{codigo}"
+    )
+    if ja_existia:
+        lanc_msg = f"Pedido #{codigo} já tinha registro financeiro."
+    elif lanc_status == "pendente_revisao":
+        lanc_msg = (
+            f"🔴 Pedido #{codigo} requer atenção.\n"
+            f"Fornecedor ou valor ausente — verifique antes de pagar."
+        )
+    else:
+        cat_linha = f"\n{categoria.label()}" if categoria else ""
+        lanc_msg = (
+            f"🟡 {codigo} — aguardando pagamento\n\n"
+            f"{fornecedor} — R$ {_fmt_brl(valor_v)}{cat_linha}"
+        )
+    await ctx.bot.send_message(chat_id=DONO_ID, text=lanc_msg)
+
 
 # ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -1823,7 +1875,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 dados = parse_comprovante(corpo)
                 ident = dados["id_transacao"] if dados["id_transacao"] != "A PREENCHER" else None
                 ja_pago = None
-                if ident:
+                if ident and not TEST_MODE:
                     with sqlite3.connect(DB_PATH) as con:
                         ja_pago = con.execute(
                             "SELECT pfm_codigo FROM lancamentos "
@@ -1898,7 +1950,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             dados_comp = parse_comprovante(comp[0])
             ident_comp = dados_comp["id_transacao"] if dados_comp["id_transacao"] != "A PREENCHER" else None
             ja_usado = None
-            if ident_comp:
+            if ident_comp and not TEST_MODE:
                 with sqlite3.connect(DB_PATH) as con:
                     ja_usado = con.execute(
                         "SELECT pfm_codigo FROM lancamentos "
@@ -2100,29 +2152,27 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         elif acao == "pfm":
             _, doc_id, ggv = partes
             atualizar(int(doc_id), status="confirmado")
-            await query.edit_message_text("Gerando Pedido de Compra...")
-            caminho, codigo, fornecedor, valor_v, lanc_status, ja_existia = gerar_pfm(int(doc_id))
-            html    = _gerar_html_pc(int(doc_id))
-            pdf_bytes = await _html_para_pdf(html)
-            await ctx.bot.send_document(
-                chat_id=DONO_ID,
-                document=pdf_bytes,
-                filename=f"{codigo}.pdf",
-                caption=f"Pedido #{codigo}"
+            ramo = _campo(_dados_doc(int(doc_id)), "Ramo de atividade")
+            cat  = sugerir_categoria(ramo)
+            await query.edit_message_text(
+                _tela_categoria(cat, ramo),
+                reply_markup=_teclado_categoria(int(doc_id), ggv, cat)
             )
-            if ja_existia:
-                lanc_msg = f"Pedido #{codigo} já tinha registro financeiro."
-            elif lanc_status == "pendente_revisao":
-                lanc_msg = (
-                    f"🔴 Pedido #{codigo} requer atenção.\n"
-                    f"Fornecedor ou valor ausente — verifique antes de pagar."
-                )
-            else:
-                lanc_msg = (
-                    f"🟡 {codigo} — aguardando pagamento\n\n"
-                    f"{fornecedor} — R$ {_fmt_brl(valor_v)}"
-                )
-            await ctx.bot.send_message(chat_id=DONO_ID, text=lanc_msg)
+
+        elif acao == "cat_confirmar":
+            _, doc_id, ggv, cat_val = partes
+            await _executar_gerar_pfm(query, ctx, int(doc_id), ggv, CategoriaLancamento(cat_val))
+
+        elif acao == "cat_corrigir":
+            _, doc_id, ggv = partes
+            await query.edit_message_text(
+                "Selecione a categoria:",
+                reply_markup=_teclado_selecao_categorias(int(doc_id), ggv)
+            )
+
+        elif acao == "cat_sel":
+            _, doc_id, ggv, cat_val = partes
+            await _executar_gerar_pfm(query, ctx, int(doc_id), ggv, CategoriaLancamento(cat_val))
 
         elif acao == "pfm_revisar":
             _, doc_id, pfm_codigo = partes
@@ -2160,7 +2210,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             _, doc_id, pfm_codigo = partes
             with sqlite3.connect(DB_PATH) as con:
                 row = con.execute(
-                    "SELECT fornecedor, valor, data_prevista_entrega, vencimento_pagamento, status, criado_em "
+                    "SELECT fornecedor, valor, data_prevista_entrega, vencimento_pagamento, status, criado_em, categoria "
                     "FROM lancamentos WHERE pfm_codigo=?",
                     (pfm_codigo,)
                 ).fetchone()
@@ -2170,7 +2220,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     reply_markup=teclado_pedido(doc_id, pfm_codigo)
                 )
                 return
-            forn, valor, data_ent, venc, status_lanc, criado = row
+            forn, valor, data_ent, venc, status_lanc, criado, cat_val = row
             valor_fmt = f"R$ {_fmt_brl(valor)}" if valor else "Não informado"
             status_labels = {
                 "a_pagar":          "🟡 Aguardando pagamento",
@@ -2179,10 +2229,15 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "pendente_revisao": "🔴 Requer atenção",
             }
             status_fmt = status_labels.get(status_lanc, status_lanc)
+            try:
+                cat_label = CategoriaLancamento(cat_val).label() if cat_val else "Não classificado"
+            except ValueError:
+                cat_label = cat_val
             texto_lanc = (
                 f"Financeiro — Pedido #{pfm_codigo}\n\n"
                 f"Fornecedor: {forn or 'Não informado'}\n"
                 f"Valor: {valor_fmt}\n"
+                f"Categoria: {cat_label}\n"
                 f"Entrega prevista: {data_ent or 'Não informada'}\n"
                 f"Vencimento: {venc or 'Não definido'}\n"
                 f"Status: {status_fmt}\n"
