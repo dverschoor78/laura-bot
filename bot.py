@@ -117,6 +117,7 @@ class Pedido:
     data_pagamento: Optional[str] = None
     doc_id_nfe:     Optional[int] = None
     nfe_numero:     Optional[str] = None
+    nfe_data:       Optional[str] = None
 
     # Arquivos — populados por preparar_visualizacao_pedido()
     caminho_orcamento: Optional[str] = None
@@ -1651,9 +1652,10 @@ def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
         with sqlite3.connect(DB_PATH) as con:
             row = con.execute("SELECT dados_claude FROM documentos WHERE id=?", (pedido.doc_id_nfe,)).fetchone()
         if row:
-            pedido.nfe_numero = _campo(row[0], "Número da NF")
-            if pedido.nfe_numero == "A PREENCHER":
-                pedido.nfe_numero = None
+            numero = _campo(row[0], "Número da NF")
+            pedido.nfe_numero = numero if numero != "A PREENCHER" else None
+            data_raw = _campo(row[0], "Data de emissão")
+            pedido.nfe_data = data_raw[:5] if data_raw != "A PREENCHER" else None
 
     historico = []
     if pedido.lanc_criado_em:
@@ -1666,8 +1668,8 @@ def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
             data_fmt = _fmt_data_curta(dt)
         historico.append((data_fmt, "Pago"))
     if pedido.doc_id_nfe:
-        nfe_label = f"NF-e {pedido.nfe_numero} vinculada" if pedido.nfe_numero else "NF-e vinculada"
-        historico.append(("", nfe_label))
+        nfe_label = f"NF-e {pedido.nfe_numero}" if pedido.nfe_numero else "NF-e"
+        historico.append((pedido.nfe_data or "", nfe_label))
     pedido.historico = historico
 
     return pedido
@@ -1683,7 +1685,7 @@ def mostrar_pedido(pedido: Pedido) -> str:
     }
     _STATUS_SHORT = {
         StatusPedido.A_PAGAR:          "Aguardando pagamento",
-        StatusPedido.PAGO:             "Pago · NF-e pendente" if not pedido.doc_id_nfe else "Pago · NF-e vinculada",
+        StatusPedido.PAGO:             f"Pago · NF-e {pedido.nfe_numero}" if pedido.nfe_numero else ("Pago · NF-e pendente" if not pedido.doc_id_nfe else "Pago · NF-e"),
         StatusPedido.PENDENTE_REVISAO: "Requer atenção",
         StatusPedido.SUBSTITUIDO:      "Substituído",
         StatusPedido.SEM_LANCAMENTO:   "Sem registro financeiro",
