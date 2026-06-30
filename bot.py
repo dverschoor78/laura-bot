@@ -43,11 +43,16 @@ MESES = ["janeiro","fevereiro","março","abril","maio","junho",
 DELTAD = {
     "nome":  "Verschoor Investimentos Imobiliários Ltda",
     "cnpj":  "58.358.802/0001-58",
+    "ie":    "Isento",
     "end":   "Av. dos Pioneiros, 1380 – Centro – Carambeí/PR – CEP 84.145-000",
     "email": "dennis@deltad.com.br",
     "fone":  "(42) 99127-1255",
 }
 DELTAD_CNPJ_DIGITS = re.sub(r"\D", "", DELTAD["cnpj"])  # "58358802000158"
+
+GGV_ENCARREGADO = {
+    "GGV03": "Sabiá",
+}
 
 GGV_DESC = {
     "GGV01": "GGV01 — Matrícula 39.333, Quadra 05 Lote 02, JD das Nações, Carambeí-PR",
@@ -198,7 +203,7 @@ def init_db():
                 criado_em        TEXT DEFAULT (datetime('now','localtime'))
             )
         """)
-        for col in ["tipo", "ggv", "dados_claude", "condicao_pgto", "data_entrega", "endereco_entrega", "desconto_rs TEXT", "pfm_numero INTEGER"]:
+        for col in ["tipo", "ggv", "dados_claude", "condicao_pgto", "data_entrega", "endereco_entrega", "desconto_rs TEXT", "pfm_numero INTEGER", "vencimento_pgto TEXT", "encarregado TEXT"]:
             try:
                 con.execute(f"ALTER TABLE documentos ADD COLUMN {col}")
             except Exception:
@@ -305,56 +310,80 @@ def _dados_display(dados):
 def _resumo_gerar(doc_id):
     with sqlite3.connect(DB_PATH) as con:
         row = con.execute(
-            "SELECT dados_claude, tipo, ggv, condicao_pgto, data_entrega, desconto_rs FROM documentos WHERE id=?",
+            "SELECT dados_claude, tipo, ggv, condicao_pgto, data_entrega, desconto_rs, "
+            "vencimento_pgto, encarregado, endereco_entrega FROM documentos WHERE id=?",
             (doc_id,)
         ).fetchone()
     if not row:
         return "Documento não encontrado.", None
-    dados, tipo, ggv, condicao, data_ent, desconto_rs = row
-    _, label_tipo = TIPOS.get(tipo, ("📄", tipo))
+    dados, tipo, ggv, condicao, data_ent, desconto_rs, vencimento, encarregado, endereco = row
+
     label_ggv = ggv if ggv != "nao_identificado" else "Obra não identificada"
 
-    fornecedor = _campo(dados, "Fornecedor") or "Fornecedor não identificado"
-    _cnpj = _campo(dados, "CNPJ/CPF")
-    _pix  = _campo(dados, "Chave PIX")
-    cnpj  = None if _cnpj == "A PREENCHER" else _cnpj
-    pix   = None if _pix  == "A PREENCHER" else _pix
-    condicao   = condicao or _campo(dados, "Condição de pagamento") or ""
-    data_ent   = data_ent  or _campo(dados, "Prazo de entrega") or ""
-    n_itens    = sum(1 for l in dados.splitlines() if re.match(r"^\d+\.", l.strip()))
+    def _v(val):
+        return None if (not val or val == "A PREENCHER") else val
+
+    fornecedor = _v(_campo(dados, "Fornecedor")) or "Fornecedor não identificado"
+    cnpj       = _v(_campo(dados, "CNPJ/CPF"))
+    pix        = _v(_campo(dados, "Chave PIX"))
+    cond       = _v(condicao) or _v(_campo(dados, "Condição de pagamento"))
+    entrega    = _v(data_ent) or _v(_campo(dados, "Prazo de entrega"))
+    validade   = _v(_campo(dados, "Validade da proposta"))
+    obs        = _obs(dados).strip()
+    enc        = _v(encarregado) or GGV_ENCARREGADO.get(ggv)
+
     subtotal_v, desconto_v, total_final_v = _calcular_totais(dados, desconto_rs)
 
     SEP = "──────────────────────────────────"
-    linhas = [fornecedor, f"{label_tipo} · {label_ggv}", SEP]
+    linhas = []
 
-    if total_final_v > 0:
-        valor_str = f"R$ {_fmt_brl(total_final_v)}"
-        if desconto_v > 0 and subtotal_v > 0:
-            pct = desconto_v / subtotal_v * 100
-            valor_str += f"  (desconto {pct:.0f}%)"
-        linhas.append(valor_str)
-
-    detalhe = []
-    if n_itens > 0:
-        detalhe.append(f"{n_itens} {'item' if n_itens == 1 else 'itens'}")
-    cond = condicao.strip()
-    if cond and cond.lower() not in ("a preencher", "não especificado"):
-        detalhe.append(cond)
-    if detalhe:
-        linhas.append(" · ".join(detalhe))
-
-    data = data_ent.strip()
-    if data and data.lower() not in ("a preencher", "não especificado"):
-        linhas.append(f"Entrega: {data}")
-
+    # Bloco 1 — Fornecedor + Obra
+    linhas.append(fornecedor)
+    linhas.append(label_ggv)
     linhas.append(SEP)
 
-    if cnpj or pix:
-        if cnpj: linhas.append(f"CNPJ   {cnpj}")
-        if pix:  linhas.append(f"PIX    {pix}")
-        linhas.append(SEP)
+    # Bloco 2 — Itens + Total
+    bloco_itens = _bloco_itens(dados)
+    for linha in bloco_itens.splitlines():
+        if linha.strip():
+            linhas.append(linha.strip())
+    if total_final_v > 0:
+        linhas.append(f"Total — R$ {_fmt_brl(subtotal_v if desconto_v > 0 else total_final_v)}")
+    linhas.append(SEP)
 
+    # Bloco 3 — Financeiro + Pagamento
+    if desconto_v > 0 and subtotal_v > 0:
+        pct = desconto_v / subtotal_v * 100
+        linhas.append(f"Desconto — R$ {_fmt_brl(desconto_v)} ({pct:.0f}%)")
+        linhas.append(f"Valor final — R$ {_fmt_brl(total_final_v)}")
+    linhas.append(cond if cond else "Pagamento: não informado")
+    linhas.append(_v(vencimento) if _v(vencimento) else "Vencimento: não informado")
+    linhas.append(SEP)
+
+    # Bloco 4 — Logística
+    linhas.append(f"Entrega: {entrega if entrega else 'não informada'}")
+    linhas.append(f"Endereço: {endereco if endereco else 'não informado'}")
+    if validade:
+        linhas.append(f"Válido até: {validade}")
+    if enc:
+        linhas.append(f"Dúvidas: Dennis {DELTAD['fone']} ou {enc}, encarregado")
+    else:
+        linhas.append(f"Dúvidas: Dennis {DELTAD['fone']}")
+
+    # Bloco 5 — Fornecedor (dados de pagamento)
+    if cnpj or pix:
+        linhas.append(SEP)
+        if cnpj: linhas.append(f"CNPJ  {cnpj}")
+        if pix:  linhas.append(f"PIX   {pix}")
+
+    # Bloco 6 — Observações
+    if obs:
+        linhas.append(SEP)
+        linhas.append(f"Obs: {obs}")
+
+    # Atenção quando obra não definida
     if ggv == "nao_identificado":
+        linhas.append(SEP)
         linhas.append("Defina a obra antes de gerar o Pedido de Compra.")
 
     return "\n".join(linhas), teclado_orcamento(doc_id, tipo, ggv)
@@ -1266,6 +1295,18 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         texto_resumo, markup = _resumo_gerar(doc_id)
         await update.message.reply_text(texto_resumo, reply_markup=markup)
 
+    elif aguardando == "vencimento_pgto":
+        atualizar(doc_id, vencimento_pgto=texto)
+        ctx.user_data["aguardando"] = None
+        texto_resumo, markup = _resumo_gerar(doc_id)
+        await update.message.reply_text(texto_resumo, reply_markup=markup)
+
+    elif aguardando == "edit_encarregado":
+        atualizar(doc_id, encarregado=texto)
+        ctx.user_data["aguardando"] = None
+        texto_resumo, markup = _resumo_gerar(doc_id)
+        await update.message.reply_text(texto_resumo, reply_markup=markup)
+
 async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     partes = query.data.split(":")
@@ -1524,9 +1565,11 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("💰 Condição pgto", callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:pgto")],
                 [InlineKeyboardButton("📅 Data entrega",  callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:data")],
                 [InlineKeyboardButton("📍 Endereço",      callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:endereco")],
-                [InlineKeyboardButton("🏗 GGV",           callback_data=f"sel_ggv:{doc_id}:{tipo}:{ggv}")],
-                [InlineKeyboardButton("📋 Tipo doc.",     callback_data=f"sel_tipo:{doc_id}:{tipo}:{ggv}")],
-                [InlineKeyboardButton("◀️ Voltar",        callback_data=f"voltar_edit:{doc_id}:{tipo}:{ggv}")],
+                [InlineKeyboardButton("📅 Vencimento pgto", callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:vencimento")],
+                [InlineKeyboardButton("👷 Encarregado",    callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:encarregado")],
+                [InlineKeyboardButton("🏗 GGV",            callback_data=f"sel_ggv:{doc_id}:{tipo}:{ggv}")],
+                [InlineKeyboardButton("📋 Tipo doc.",      callback_data=f"sel_tipo:{doc_id}:{tipo}:{ggv}")],
+                [InlineKeyboardButton("◀️ Voltar",         callback_data=f"voltar_edit:{doc_id}:{tipo}:{ggv}")],
             ]
             await query.edit_message_reply_markup(InlineKeyboardMarkup(botoes))
 
@@ -1545,6 +1588,22 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(
                     "Endereço de entrega:",
                     reply_markup=teclado_endereco(doc_id, tipo, ggv)
+                )
+            elif campo == "vencimento":
+                ctx.user_data["aguardando"] = "vencimento_pgto"
+                with sqlite3.connect(DB_PATH) as con:
+                    row = con.execute("SELECT vencimento_pgto FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
+                atual = row[0] if row and row[0] else "Não informado"
+                await query.edit_message_text(
+                    f"Atual: {atual}\n\nNovo vencimento (ex: Parcela única até 15/07/2026):"
+                )
+            elif campo == "encarregado":
+                ctx.user_data["aguardando"] = "edit_encarregado"
+                with sqlite3.connect(DB_PATH) as con:
+                    row = con.execute("SELECT encarregado FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
+                atual = (row[0] if row and row[0] else None) or GGV_ENCARREGADO.get(ggv, "Não definido")
+                await query.edit_message_text(
+                    f"Atual: {atual}\n\nNovo encarregado:"
                 )
             elif campo == "itens":
                 ctx.user_data["aguardando"] = "edit_itens"

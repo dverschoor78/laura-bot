@@ -64,6 +64,13 @@ Referências: `docs/GLOSSARIO.md`, `docs/IDENTIDADE_DO_PRODUTO.md`
 
 ## Dívida Técnica
 
+- **CRÍTICA — Renomear GGV → Obra no código e banco**
+  Preocupação principal é no código: variáveis (`ggv`, `GGVS`, `GGV_DESC`, `GGV_ONEDRIVE`),
+  coluna do banco (`ggv`), e string values internos devem migrar para `obra`/`OBRAS`.
+  Na interface: "GGV03" deve aparecer como "Obra GGV03" (código como referência, não nome).
+  Escopo: refatoração abrangente — variáveis Python, coluna banco, possivelmente pfm_codigo.
+  Registrado em: 2026-06-29. Não implementar até decisão sobre pfm_codigo e arquivos existentes.
+
 - **Alta — BD fornecedores inconsistente**
   MO Construção com CNPJ errado; PRUDENTÓPOLIS com split incorreto.
   Justificativa: dados incorretos afetam a busca de fornecedores em cada geração de PFM.
