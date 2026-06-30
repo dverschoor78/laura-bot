@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-06-30
-> Sessão: Sprint de Experiência — Redesign de Cockpits
+> Sessão: Sprint de Experiência — Navegação e Identidade
 
 ---
 
@@ -51,6 +51,18 @@
 ---
 
 ## Última Fiada Implementada
+
+**Sprint de Experiência — Navegação e Identidade** *(2026-06-30)*
+
+- Boas-vindas: saudação ou texto desconhecido → "Obras — ... / Ajuda — ..." + 3 botões em linhas individuais
+- Ajuda (`/help`): texto pessoal e guiado — "No que posso ajudar?" — no estilo da identidade do produto
+- `/obras` registrado como comando; lista de obras com descrição curta de cada GGV
+- Lista de pedidos da obra: tela própria via "📋 Pedidos", navegação direta ao cockpit do pedido
+- Cockpit da obra: botão "✖ Fechar" adicionado; estrutura preparada para bloco financeiro (Fiada 5b-1)
+- Botões em linhas individuais em todos os menus para máxima largura no Telegram
+- PROCESSO.md: housekeeping passa a exigir atualização de `mostrar_ajuda()` a cada nova ação
+
+---
 
 **Sprint de Experiência — Redesign de Cockpits** *(2026-06-30)*
 
@@ -162,9 +174,9 @@ O DOCX ainda é gerado em paralelo (salvo na pasta OneDrive). Remoção do Word 
 
 ## Objetivo da Próxima Sessão
 
-1. **Testar fluxo completo** em `LAURA_ENV=test` — orçamento → categoria → PFM → comprovante → pago → cockpits
+1. **Testar fluxo completo** em `LAURA_ENV=test` — orçamento → categoria → PFM → comprovante → pago → cockpits → menus
 2. **Validar PC 2.0** — testar PDF com orçamento real; validar layout, fonte, dados
-3. **Fiada 5b-1 — Extrato da Obra** — substituir placeholder `⚪ Sem dados financeiros` com dados reais
+3. **Fiada 5b-1 — Extrato da Obra** — substituir `⚪ Sem dados financeiros` no cockpit com dados reais
 4. **Remover DOCX do fluxo principal** — após validação do PDF
 
 ---

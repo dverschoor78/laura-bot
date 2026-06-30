@@ -10,11 +10,24 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Validar PDF do PC 2.0 com orçamento real em produção
-2. Remover DOCX do fluxo principal após validação do PDF
-3. Fiada 5b-1 — Extrato da Obra: `extrato_obra()`, `totais_obra()` substituem o placeholder financeiro no cockpit
-4. Corrigir BD fornecedores (MO Construção CNPJ errado, PRUDENTÓPOLIS split)
-5. Revisão do Pedido de Compra — botão existe, ação pendente
+1. Testar fluxo completo em `LAURA_ENV=test`
+2. Validar PDF do PC 2.0 com orçamento real em produção
+3. Remover DOCX do fluxo principal após validação
+4. Fiada 5b-1 — Extrato da Obra: dados reais no cockpit
+5. Corrigir BD fornecedores (MO Construção CNPJ errado, PRUDENTÓPOLIS split)
+
+---
+
+## [Sprint de Experiência — Navegação e Identidade] — 2026-06-30
+
+- Boas-vindas: saudação ou texto não reconhecido abre menu com descrição de cada opção e 3 botões em linhas individuais
+- Ajuda (`/help`, botão ❓): texto pessoal — "No que posso ajudar?" — guia o usuário por cada ação disponível
+- `/obras` registrado como comando Telegram; lista obras com título curto de cada GGV
+- Lista de pedidos da obra: tela própria via "📋 Pedidos", cada pedido com emoji de status e valor
+- Navegação direta: botão de pedido na lista abre cockpit do pedido
+- Cockpit da obra: botão "✖ Fechar" + estrutura de bloco financeiro (placeholder para Fiada 5b-1)
+- Botões de ação em linhas individuais em todos os menus — máxima largura no Telegram
+- Processo: `mostrar_ajuda()` deve ser atualizado a cada nova ação visível ao usuário
 
 ---
 
