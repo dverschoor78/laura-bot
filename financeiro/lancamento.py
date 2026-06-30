@@ -157,7 +157,12 @@ def buscar_pedidos_sem_nfe(ggv: str, db_path: str) -> list:
 
 
 def buscar_candidatos_nfe(cnpj: str, valor: float, db_path: str) -> list:
-    """Encontra pedidos pagos sem NF-e com CNPJ e valor compatíveis."""
+    """Encontra pedidos pagos sem NF-e.
+
+    Retorna todos os pedidos elegíveis, ordenados por score:
+    - CNPJ coincide (+5), valor próximo (<1% +3, <5% +1)
+    - Score=0 significa sem sinal forte mas ainda elegível (fallback manual)
+    """
     with sqlite3.connect(db_path) as con:
         rows = con.execute(
             """SELECT l.pfm_codigo, l.fornecedor, l.valor, f.cnpj
@@ -177,7 +182,6 @@ def buscar_candidatos_nfe(cnpj: str, valor: float, db_path: str) -> list:
                 score += 3
             elif diff < 0.05:
                 score += 1
-        if score > 0:
-            candidatos.append({"pfm_codigo": pfm_codigo, "fornecedor": fornecedor,
-                                "valor_lanc": valor_lanc, "score": score})
+        candidatos.append({"pfm_codigo": pfm_codigo, "fornecedor": fornecedor,
+                            "valor_lanc": valor_lanc, "score": score})
     return sorted(candidatos, key=lambda x: x["score"], reverse=True)

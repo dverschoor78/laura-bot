@@ -1700,24 +1700,19 @@ def _teclado_categoria(doc_id, ggv, cat):
 
 def _parse_nfe(corpo: str) -> dict:
     """Extrai campos da NF-e do texto retornado pelo Claude."""
-    def _campo_nfe(label):
-        for linha in corpo.splitlines():
-            if linha.strip().startswith(label):
-                return linha.split(":", 1)[1].strip() if ":" in linha else ""
-        return "A PREENCHER"
-    valor_str = _campo_nfe("Valor total")
+    valor_str = _campo(corpo, "Valor total")
     try:
         valor_v = float(valor_str.replace("R$", "").replace(".", "").replace(",", ".").strip())
     except Exception:
         valor_v = None
     return {
-        "numero":    _campo_nfe("Número da NF"),
-        "cnpj":      _campo_nfe("CNPJ/CPF do emitente"),
-        "emitente":  _campo_nfe("Nome do emitente"),
+        "numero":    _campo(corpo, "Número da NF"),
+        "cnpj":      _campo(corpo, "CNPJ/CPF do emitente"),
+        "emitente":  _campo(corpo, "Nome do emitente"),
         "valor_fmt": valor_str,
         "valor_v":   valor_v,
-        "data":      _campo_nfe("Data de emissão"),
-        "descricao": _campo_nfe("Descrição do serviço/produto"),
+        "data":      _campo(corpo, "Data de emissão"),
+        "descricao": _campo(corpo, "Descrição do serviço/produto"),
     }
 
 def _mostrar_nfe(dados: dict, candidatos: list) -> str:
@@ -1731,12 +1726,19 @@ def _mostrar_nfe(dados: dict, candidatos: list) -> str:
     if dados["descricao"] != "A PREENCHER": linhas.append(dados["descricao"])
     linhas.append("")
     if not candidatos:
-        linhas.append("Nenhum pedido pago sem NF-e encontrado para este emitente.")
+        linhas.append("Nenhum pedido pago sem NF-e encontrado.")
         return "\n".join(linhas)
-    linhas.append("A qual pedido vincular esta NF-e?\n")
-    for c in candidatos:
-        valor_fmt = f"R$ {_fmt_brl(c['valor_lanc'])}" if c["valor_lanc"] else "—"
-        linhas.append(f"🟢 #{c['pfm_codigo']} · {c['fornecedor']} · {valor_fmt}")
+    fortes = [c for c in candidatos if c["score"] > 0]
+    if fortes:
+        linhas.append("A qual pedido vincular esta NF-e?\n")
+        for c in fortes:
+            valor_fmt = f"R$ {_fmt_brl(c['valor_lanc'])}" if c["valor_lanc"] else "—"
+            linhas.append(f"🟢 #{c['pfm_codigo']} · {c['fornecedor']} · {valor_fmt}")
+    else:
+        linhas.append("Escolha o pedido manualmente:\n")
+        for c in candidatos:
+            valor_fmt = f"R$ {_fmt_brl(c['valor_lanc'])}" if c["valor_lanc"] else "—"
+            linhas.append(f"🟢 #{c['pfm_codigo']} · {c['fornecedor']} · {valor_fmt}")
     return "\n".join(linhas)
 
 def _teclado_candidatos_nfe(doc_id: int, candidatos: list):
