@@ -116,6 +116,7 @@ class Pedido:
     lanc_criado_em: Optional[str] = None
     data_pagamento: Optional[str] = None
     doc_id_nfe:     Optional[int] = None
+    nfe_numero:     Optional[str] = None
 
     # Arquivos — populados por preparar_visualizacao_pedido()
     caminho_orcamento: Optional[str] = None
@@ -1646,16 +1647,27 @@ def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
     pfm_docx = pasta / f"{prefixo}{pedido.codigo}.docx"
     pedido.caminho_docx = str(pfm_docx) if pfm_docx.exists() else None
 
+    if pedido.doc_id_nfe:
+        with sqlite3.connect(DB_PATH) as con:
+            row = con.execute("SELECT dados_claude FROM documentos WHERE id=?", (pedido.doc_id_nfe,)).fetchone()
+        if row:
+            pedido.nfe_numero = _campo(row[0], "Número da NF")
+            if pedido.nfe_numero == "A PREENCHER":
+                pedido.nfe_numero = None
+
     historico = []
     if pedido.lanc_criado_em:
         historico.append((_fmt_data_curta(pedido.lanc_criado_em), "Pedido criado"))
     if pedido.data_pagamento:
         dt = pedido.data_pagamento
         if len(dt) >= 5 and dt[2:3] == "/":
-            data_fmt = dt[:5]          # "25/06/2026" → "25/06"
+            data_fmt = dt[:5]
         else:
-            data_fmt = _fmt_data_curta(dt)  # ISO "2026-06-25..." → "25/06"
+            data_fmt = _fmt_data_curta(dt)
         historico.append((data_fmt, "Pago"))
+    if pedido.doc_id_nfe:
+        nfe_label = f"NF-e {pedido.nfe_numero} vinculada" if pedido.nfe_numero else "NF-e vinculada"
+        historico.append(("", nfe_label))
     pedido.historico = historico
 
     return pedido
@@ -1705,25 +1717,33 @@ def mostrar_pedido(pedido: Pedido) -> str:
         arq.append("📎 Orçamento original")
     if pedido.caminho_docx:
         arq.append("📄 Pedido de Compra")
+    if pedido.doc_id_nfe:
+        nfe_label = f"🧾 NF-e {pedido.nfe_numero}" if pedido.nfe_numero else "🧾 NF-e"
+        arq.append(nfe_label)
     arquivos = "\n".join(arq) if arq else "Nenhum arquivo disponível"
 
     hist = []
     for data, evento in pedido.historico:
-        hist.append(f"{data}  {evento}")
+        hist.append(f"{data}  {evento}".strip())
     historico = "\n".join(hist) if hist else "—"
 
     return SEP.join([cabecalho, financeiro, arquivos, historico])
 
-def teclado_pedido(doc_id, pfm_codigo):
+def teclado_pedido(doc_id, pfm_codigo, doc_id_nfe=None):
     ggv = pfm_codigo.rsplit("-", 1)[0]
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Revisar",        callback_data=f"pfm_revisar:{doc_id}:{pfm_codigo}")],
-        [InlineKeyboardButton("📄 PDF",         callback_data=f"pfm_ver:{doc_id}:{pfm_codigo}")],
-        [InlineKeyboardButton("📎 Orçamento",   callback_data=f"pfm_orc:{doc_id}:{pfm_codigo}")],
-        [InlineKeyboardButton("Financeiro",     callback_data=f"pfm_lanc:{doc_id}:{pfm_codigo}")],
-        [InlineKeyboardButton("◀️ Pedidos",     callback_data=f"obra_pedidos:{ggv}")],
-        [InlineKeyboardButton("✖ Fechar",       callback_data=f"pfm_fechar:{doc_id}")],
-    ])
+    botoes = [
+        [InlineKeyboardButton("Revisar",      callback_data=f"pfm_revisar:{doc_id}:{pfm_codigo}")],
+        [InlineKeyboardButton("📄 PDF",       callback_data=f"pfm_ver:{doc_id}:{pfm_codigo}")],
+        [InlineKeyboardButton("📎 Orçamento", callback_data=f"pfm_orc:{doc_id}:{pfm_codigo}")],
+    ]
+    if doc_id_nfe:
+        botoes.append([InlineKeyboardButton("🧾 NF-e", callback_data=f"pfm_nfe:{doc_id_nfe}:{pfm_codigo}")])
+    botoes += [
+        [InlineKeyboardButton("Financeiro",   callback_data=f"pfm_lanc:{doc_id}:{pfm_codigo}")],
+        [InlineKeyboardButton("◀️ Pedidos",   callback_data=f"obra_pedidos:{ggv}")],
+        [InlineKeyboardButton("✖ Fechar",     callback_data=f"pfm_fechar:{doc_id}")],
+    ]
+    return InlineKeyboardMarkup(botoes)
 
 def _tela_categoria(cat, ramo):
     if cat:
@@ -1993,7 +2013,7 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 preparar_visualizacao_pedido(pedido)
                 await update.message.reply_text(
                     mostrar_pedido(pedido),
-                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo)
+                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe)
                 )
             else:
                 await update.message.reply_text(f"Pedido {pfm_codigo} não encontrado.")
@@ -2594,6 +2614,23 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             else:
                 await ctx.bot.send_document(chat_id=query.message.chat_id, document=dados, filename=path.name)
 
+        elif acao == "pfm_nfe":
+            _, doc_id_nfe, pfm_codigo = partes
+            with sqlite3.connect(DB_PATH) as con:
+                row = con.execute("SELECT caminho FROM documentos WHERE id=?", (int(doc_id_nfe),)).fetchone()
+            caminho = row[0] if row else None
+            if not caminho or not Path(caminho).exists():
+                await query.answer("Arquivo da NF-e não encontrado.", show_alert=True)
+                return
+            path = Path(caminho)
+            await query.answer()
+            dados = path.read_bytes()
+            ext = path.suffix.lower()
+            if ext in (".jpg", ".jpeg", ".png", ".webp"):
+                await ctx.bot.send_photo(chat_id=query.message.chat_id, photo=dados)
+            else:
+                await ctx.bot.send_document(chat_id=query.message.chat_id, document=dados, filename=path.name)
+
         elif acao == "nfe_confirmar":
             _, doc_id_nfe, pfm_codigo = partes
             ok = vincular_nfe(pfm_codigo, int(doc_id_nfe), DB_PATH)
@@ -2625,7 +2662,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 preparar_visualizacao_pedido(pedido)
                 await query.edit_message_text(
                     mostrar_pedido(pedido),
-                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo)
+                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe)
                 )
             else:
                 await query.answer(f"Pedido {pfm_codigo} não encontrado.", show_alert=True)
