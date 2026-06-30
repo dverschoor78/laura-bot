@@ -4,6 +4,39 @@
 
 ---
 
+## Fase 5 — Módulo Financeiro
+
+**Fiada 0 — Fundação** ✓ *(concluída 2026-06-30)*
+
+- ADR-002: princípio "todo novo domínio nasce modular"
+- `financeiro/lancamento.py`: enums, `sugerir_categoria()`, `init_db_financeiro()`
+- `financeiro/conciliacao.py`: esqueleto (Fase 5d)
+- `app/README.md`: elimina ambiguidade da pasta reservada
+- `lancamentos`: novas colunas `categoria`, `tipo_documento`, `fonte_recurso`, `conciliado_em`
+
+**Fiada 5a-1 — Categoria no Lançamento** *(próxima)*
+
+- `sugerir_categoria()` integrada ao fluxo do PFM em bot.py
+- Usuário vê categoria sugerida com botão de confirmação/correção antes de gravar
+- Lançamento gravado inclui `categoria`
+
+**Fiada 5b-1 — Extrato da Obra** *(planejada)*
+
+- `financeiro/lancamento.py`: `extrato_obra()`, `totais_obra()`, `composicao_categorias()`
+- Cockpit da obra exibe bloco financeiro ao digitar código de GGV
+
+**Fiada 5c-1 — Lançamentos Manuais** *(planejada)*
+
+- `financeiro/lancamento.py`: `criar_lancamento_manual()`
+- Aportes, impostos e despesas avulsas sem PFM registráveis via Telegram
+
+**Fiada 5d-1 — Conciliação Mensal** *(planejada)*
+
+- `financeiro/conciliacao.py` completo
+- Importação extrato Mercado Pago + matching automático + fechamento de período
+
+---
+
 ## Em Andamento
 
 **Fase 2 — Estrutura** *(Sprint de Experiência)*

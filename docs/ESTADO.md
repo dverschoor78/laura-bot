@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-06-30
-> Sessão: Fase 4a — Cadastro de Obras + Fase 4b — PC 2.0 (parcial)
+> Sessão: Fase 5 — Módulo Financeiro (Fiada 0 — Fundação)
 
 ---
 
@@ -13,6 +13,7 @@
 - Ciclo financeiro completo: orçamento → PFM → A PAGAR → comprovante PIX → PAGO.
 - PC 2.0 (PDF) implementado mas ainda não validado em produção — DOCX continua funcionando.
 - Modo teste operacional e isolado de produção.
+- Módulo Financeiro: fundação criada (`financeiro/`). Sem funcionalidade nova ainda.
 
 ---
 
@@ -50,6 +51,18 @@
 ---
 
 ## Última Fiada Implementada
+
+**Fase 5 — Módulo Financeiro: Fiada 0 — Fundação** *(2026-06-30)*
+
+- ADR-002 registrada: modularização incremental por domínio
+- `financeiro/__init__.py` — docstring de contrato do domínio
+- `financeiro/lancamento.py` — enums (`CategoriaLancamento`, `StatusLancamento`, `TipoDocumento`), `sugerir_categoria()`, `init_db_financeiro()`
+- `financeiro/conciliacao.py` — esqueleto documentado (Fase 5d)
+- `app/README.md` — elimina ambiguidade sobre uso da pasta `app/`
+- `bot.py`: `init_db()` chama `init_db_financeiro(DB_PATH)` ao iniciar
+- Colunas adicionadas em `lancamentos`: `categoria`, `tipo_documento`, `fonte_recurso`, `conciliado_em`
+
+---
 
 **Fase 4b — PC 2.0 parcial + Pendências de extração** *(2026-06-30)*
 
@@ -130,8 +143,8 @@ O DOCX ainda é gerado em paralelo (salvo na pasta OneDrive). Remoção do Word 
 
 ## Objetivo da Próxima Sessão
 
-1. **Validar PC 2.0** — testar PDF com orçamento real; validar layout, fonte, dados
-2. **Relatório de compras por obra** — extrato tipo cadastro, acessível pelo cockpit da obra
+1. **Fiada 5a-1 — Categoria no Lançamento** — `sugerir_categoria()` integrada ao fluxo do PFM; usuário vê e confirma antes de gravar
+2. **Validar PC 2.0** — testar PDF com orçamento real; validar layout, fonte, dados
 3. **Remover DOCX do fluxo principal** — após validação do PDF
 
 ---

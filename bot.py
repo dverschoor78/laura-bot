@@ -18,6 +18,8 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
+from financeiro.lancamento import init_db_financeiro
+
 load_dotenv()
 TOKEN       = os.environ["TELEGRAM_BOT_TOKEN"]
 DONO_ID     = int(os.environ["TELEGRAM_USER_ID"])
@@ -303,6 +305,7 @@ def init_db():
                 con.execute(f"ALTER TABLE fornecedores ADD COLUMN {col}")
             except Exception:
                 pass
+    init_db_financeiro(DB_PATH)
 
 def buscar_obra(codigo):
     """Retorna dict com dados da obra ou {} se não encontrada."""
