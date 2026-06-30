@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional
 from datetime import datetime
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from docx import Document
 from docx.shared import Pt, Cm, RGBColor
@@ -78,6 +78,8 @@ ENDERECOS = {
     "escritorio":  "Avenida dos Pioneiros, 1380 - Carambeí-PR CEP 84.145-000",
     "chacara":     "Avenida dos Pioneiros, 5125 - Carambeí-PR CEP 84.145-000",
 }
+
+GGV_CODIGO_RE = re.compile(r"^\s*(GGV\d{2})\s*$", re.IGNORECASE)
 
 class StatusPedido(str, Enum):
     A_PAGAR          = "a_pagar"
@@ -179,9 +181,36 @@ def _pasta_pfm(ggv: str) -> Path:
         pasta = Path("data/test_pfms")
         pasta.mkdir(parents=True, exist_ok=True)
         return pasta
-    return GGV_ONEDRIVE.get(ggv, Path("data/pfms"))
+    obra = buscar_obra(ggv)
+    pasta_str = obra.get("pasta_onedrive", "")
+    return Path(pasta_str) if pasta_str else Path("data/pfms")
 
 # ── Banco ──────────────────────────────────────────────────────────────────
+
+def _migrar_obras(con):
+    """Pré-popula a tabela obras a partir dos dados que eram hardcoded. Idempotente."""
+    dados = [
+        ("GGV00", "Despesas Gerais", "", "", "",
+         "Dennis Verschoor", "(42) 99127-1255", "", 1),
+        ("GGV01", "Matrícula 39.333, Quadra 05 Lote 02, JD das Nações, Carambeí-PR",
+         "Rua Índia em frente ao nº139, JD das Nações - Carambeí-PR CEP 84.145-000",
+         "", "", "Dennis Verschoor", "(42) 99127-1255", "", 1),
+        ("GGV02", "Matrícula 39.337, Quadra 05 Lote 06, JD das Nações, Carambeí-PR",
+         "Rua Índia em frente ao nº139, JD das Nações - Carambeí-PR CEP 84.145-000",
+         "", "", "Dennis Verschoor", "(42) 99127-1255", "", 1),
+        ("GGV03", "Matrícula 39.339, Quadra 05 Lote 08, JD das Nações, Carambeí-PR",
+         "Rua Índia em frente ao nº139, JD das Nações - Carambeí-PR CEP 84.145-000",
+         "Sabiá", "(42) 98439-9498",
+         "Dennis Verschoor", "(42) 99127-1255",
+         r"C:\Users\denni\OneDrive\00 Obras\2026-06 GGV03\04 Aquisição e Execução", 1),
+    ]
+    for d in dados:
+        con.execute("""
+            INSERT OR IGNORE INTO obras
+            (codigo, descricao, endereco_entrega, encarregado_nome, encarregado_fone,
+             responsavel_nome, responsavel_fone, pasta_onedrive, ativa)
+            VALUES (?,?,?,?,?,?,?,?,?)
+        """, d)
 
 def init_db():
     with sqlite3.connect(DB_PATH) as con:
@@ -228,6 +257,21 @@ def init_db():
             except Exception:
                 pass
         con.execute("""
+            CREATE TABLE IF NOT EXISTS obras (
+                codigo            TEXT PRIMARY KEY,
+                descricao         TEXT,
+                endereco_entrega  TEXT,
+                encarregado_nome  TEXT,
+                encarregado_fone  TEXT,
+                responsavel_nome  TEXT,
+                responsavel_fone  TEXT,
+                pasta_onedrive    TEXT,
+                ativa             INTEGER DEFAULT 1,
+                criado_em         TEXT DEFAULT (datetime('now','localtime'))
+            )
+        """)
+        _migrar_obras(con)
+        con.execute("""
             CREATE TABLE IF NOT EXISTS fornecedores (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 nome         TEXT NOT NULL,
@@ -250,6 +294,35 @@ def init_db():
                 UNIQUE(cpf)
             )
         """)
+
+def buscar_obra(codigo):
+    """Retorna dict com dados da obra ou {} se não encontrada."""
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT codigo, descricao, endereco_entrega, encarregado_nome, encarregado_fone, "
+            "responsavel_nome, responsavel_fone, pasta_onedrive FROM obras WHERE codigo=?",
+            (codigo,)
+        ).fetchone()
+    if not row:
+        return {}
+    keys = ["codigo", "descricao", "endereco_entrega", "encarregado_nome",
+            "encarregado_fone", "responsavel_nome", "responsavel_fone", "pasta_onedrive"]
+    return dict(zip(keys, row))
+
+def atualizar_obra(codigo, **kwargs):
+    cols = ", ".join(f"{k}=?" for k in kwargs)
+    vals = list(kwargs.values()) + [codigo]
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute(f"UPDATE obras SET {cols} WHERE codigo=?", vals)
+
+def criar_obra(codigo, descricao=""):
+    """Insere nova obra. Retorna True se criada, False se já existia."""
+    with sqlite3.connect(DB_PATH) as con:
+        cur = con.execute(
+            "INSERT OR IGNORE INTO obras (codigo, descricao, ativa) VALUES (?, ?, 1)",
+            (codigo.upper(), descricao)
+        )
+        return cur.rowcount == 1
 
 def ja_existe(hash_arquivo):
     if TEST_MODE:
@@ -330,7 +403,8 @@ def _resumo_gerar(doc_id):
     entrega    = _v(data_ent) or _v(_campo(dados, "Prazo de entrega"))
     validade   = _v(_campo(dados, "Validade da proposta"))
     obs        = _obs(dados).strip()
-    enc        = _v(encarregado) or GGV_ENCARREGADO.get(ggv)
+    _obra      = buscar_obra(ggv)
+    enc        = _v(encarregado) or _obra.get("encarregado_nome")
 
     subtotal_v, desconto_v, total_final_v = _calcular_totais(dados, desconto_rs)
 
@@ -374,7 +448,9 @@ def _resumo_gerar(doc_id):
     if validade:
         linhas.append(f"Válido até: {_esc_html(validade)}")
     if enc:
-        linhas.append(f"Dúvidas: Dennis {DELTAD['fone']} ou {_esc_html(enc)}, encarregado")
+        enc_fone = _obra.get("encarregado_fone", "")
+        enc_txt  = f"{_esc_html(enc)} {enc_fone}".strip() if enc_fone else _esc_html(enc)
+        linhas.append(f"Dúvidas: Dennis {DELTAD['fone']} ou {enc_txt}, encarregado")
     else:
         linhas.append(f"Dúvidas: Dennis {DELTAD['fone']}")
     linhas.append(SEP)
@@ -964,6 +1040,37 @@ def parse_resposta(texto):
             corpo.append(linha)
     return tipo, ggv, "\n".join(corpo).strip()
 
+def mostrar_cockpit_obra(obra):
+    codigo    = obra.get("codigo", "")
+    desc      = obra.get("descricao", "Sem descrição")
+    enc_nome  = obra.get("encarregado_nome", "")
+    enc_fone  = obra.get("encarregado_fone", "")
+    resp_nome = obra.get("responsavel_nome", "")
+    resp_fone = obra.get("responsavel_fone", "")
+    end       = obra.get("endereco_entrega", "")
+    enc_txt   = f"{enc_nome} {enc_fone}".strip() if enc_nome else "Não definido"
+    resp_txt  = f"{resp_nome} {resp_fone}".strip() if resp_nome else "Não definido"
+    linhas = [f"Obra {codigo}", desc, "", f"Encarregado   {enc_txt}", f"Responsável   {resp_txt}"]
+    if end:
+        linhas.append(f"Entrega       {end}")
+    return "\n".join(linhas)
+
+def teclado_obra(codigo):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✏️ Editar obra", callback_data=f"obra_editar:{codigo}")],
+    ])
+
+def teclado_obra_campos(codigo):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Descrição",             callback_data=f"obra_campo:{codigo}:descricao")],
+        [InlineKeyboardButton("Endereço de entrega",   callback_data=f"obra_campo:{codigo}:endereco_entrega")],
+        [InlineKeyboardButton("Encarregado (nome)",    callback_data=f"obra_campo:{codigo}:encarregado_nome")],
+        [InlineKeyboardButton("Encarregado (fone)",    callback_data=f"obra_campo:{codigo}:encarregado_fone")],
+        [InlineKeyboardButton("Responsável (nome)",    callback_data=f"obra_campo:{codigo}:responsavel_nome")],
+        [InlineKeyboardButton("Responsável (fone)",    callback_data=f"obra_campo:{codigo}:responsavel_fone")],
+        [InlineKeyboardButton("◀️ Voltar",             callback_data=f"obra_ver:{codigo}")],
+    ])
+
 def teclado_orcamento(doc_id, tipo, ggv):
     if ggv == "nao_identificado":
         return InlineKeyboardMarkup([
@@ -1165,6 +1272,28 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Estou online.")
 
+async def ajuda(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != DONO_ID:
+        return
+    await update.message.reply_text(
+        "O que você pode enviar:\n\n"
+        "Foto ou PDF — orçamento, comprovante PIX ou outro documento\n\n"
+        "GGV03-009 — consulta um pedido de compra\n"
+        "GGV03 — abre o cockpit da obra\n\n"
+        "/nova_obra — cadastrar uma obra nova"
+    )
+
+async def comando_desconhecido(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != DONO_ID:
+        return
+    await update.message.reply_text("Comando não reconhecido. /help para ver o que eu faço.")
+
+async def nova_obra(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != DONO_ID:
+        return
+    ctx.user_data["aguardando"] = "nova_obra_codigo"
+    await update.message.reply_text("Código da nova obra (ex: GGV04):")
+
 async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != DONO_ID:
         return
@@ -1220,6 +1349,18 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     texto      = update.message.text.strip()
 
     if not aguardando:
+        m_obra = GGV_CODIGO_RE.match(texto)
+        if m_obra:
+            codigo = m_obra.group(1).upper()
+            obra = buscar_obra(codigo)
+            if obra:
+                await update.message.reply_text(
+                    mostrar_cockpit_obra(obra),
+                    reply_markup=teclado_obra(codigo)
+                )
+            else:
+                await update.message.reply_text(f"Obra {codigo} não encontrada.")
+            return
         m = PFM_CODIGO_RE.search(texto)
         if m:
             pfm_codigo = m.group(1).upper()
@@ -1233,9 +1374,7 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             else:
                 await update.message.reply_text(f"Pedido {pfm_codigo} não encontrado.")
         else:
-            await update.message.reply_text(
-                "Para consultar um pedido, envie o código — ex: GGV03-009."
-            )
+            await update.message.reply_text("Não entendi. /help para ver o que eu faço.")
         return
 
     doc_id = ctx.user_data.get("doc_id")
@@ -1308,6 +1447,35 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.user_data["aguardando"] = None
         texto_resumo, markup = _resumo_gerar(doc_id)
         await update.message.reply_text(texto_resumo, reply_markup=markup, parse_mode="HTML")
+
+    elif aguardando == "nova_obra_codigo":
+        codigo = texto.upper()
+        if not GGV_CODIGO_RE.match(codigo):
+            await update.message.reply_text("Formato inválido. Use GGV seguido de dois dígitos — ex: GGV04. Tente novamente:")
+            return
+        criada = criar_obra(codigo)
+        ctx.user_data["aguardando"] = None
+        if not criada:
+            await update.message.reply_text(f"Obra {codigo} já existe.")
+        else:
+            await update.message.reply_text(f"Obra {codigo} criada. Complete os dados abaixo.")
+        obra = buscar_obra(codigo)
+        await update.message.reply_text(mostrar_cockpit_obra(obra), reply_markup=teclado_obra(codigo))
+
+    elif aguardando and aguardando.startswith("obra_edit_"):
+        campo = aguardando[len("obra_edit_"):]
+        obra_codigo = ctx.user_data.get("obra_codigo")
+        if obra_codigo and campo:
+            atualizar_obra(obra_codigo, **{campo: texto})
+            ctx.user_data["aguardando"] = None
+            obra = buscar_obra(obra_codigo)
+            await update.message.reply_text(
+                mostrar_cockpit_obra(obra),
+                reply_markup=teclado_obra(obra_codigo)
+            )
+        else:
+            ctx.user_data["aguardando"] = None
+            await update.message.reply_text("Contexto perdido. Envie o código da obra novamente.")
 
 async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1550,7 +1718,11 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": "endereco_entrega"})
                 await query.edit_message_text("Endereço de entrega:")
                 return
-            endereco = ENDERECOS.get(escolha, escolha)
+            if escolha.startswith("obra_"):
+                ggv_key = escolha[5:]
+                endereco = buscar_obra(ggv_key).get("endereco_entrega") or ENDERECOS.get(escolha, escolha)
+            else:
+                endereco = ENDERECOS.get(escolha, escolha)
             atualizar(int(doc_id), endereco_entrega=endereco)
             texto, markup = _resumo_gerar(int(doc_id))
             await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
@@ -1603,7 +1775,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ctx.user_data["aguardando"] = "edit_encarregado"
                 with sqlite3.connect(DB_PATH) as con:
                     row = con.execute("SELECT encarregado FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
-                atual = (row[0] if row and row[0] else None) or GGV_ENCARREGADO.get(ggv, "Não definido")
+                atual = (row[0] if row and row[0] else None) or buscar_obra(ggv).get("encarregado_nome", "Não definido")
                 await query.edit_message_text(
                     f"Atual: {atual}\n\nNovo encarregado:"
                 )
@@ -1770,6 +1942,43 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 reply_markup=teclado_pedido(doc_id, pfm_codigo)
             )
 
+        elif acao == "obra_ver":
+            codigo = partes[1]
+            obra = buscar_obra(codigo)
+            if obra:
+                await query.edit_message_text(
+                    mostrar_cockpit_obra(obra),
+                    reply_markup=teclado_obra(codigo)
+                )
+            else:
+                await query.edit_message_text(f"Obra {codigo} não encontrada.")
+
+        elif acao == "obra_editar":
+            codigo = partes[1]
+            obra = buscar_obra(codigo)
+            if obra:
+                await query.edit_message_text(
+                    f"Qual campo deseja editar em {codigo}?",
+                    reply_markup=teclado_obra_campos(codigo)
+                )
+            else:
+                await query.edit_message_text(f"Obra {codigo} não encontrada.")
+
+        elif acao == "obra_campo":
+            _, codigo, campo = partes
+            ctx.user_data["aguardando"]   = f"obra_edit_{campo}"
+            ctx.user_data["obra_codigo"]  = codigo
+            labels = {
+                "descricao":         "Descrição",
+                "endereco_entrega":  "Endereço de entrega",
+                "encarregado_nome":  "Nome do encarregado",
+                "encarregado_fone":  "Telefone do encarregado",
+                "responsavel_nome":  "Nome do responsável",
+                "responsavel_fone":  "Telefone do responsável",
+            }
+            label = labels.get(campo, campo)
+            await query.edit_message_text(f"Novo valor para {label}:")
+
         elif acao == "pfm_fechar":
             await query.edit_message_text("Fechado.")
 
@@ -1778,10 +1987,19 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── Inicialização ──────────────────────────────────────────────────────────
 
+async def _post_init(app):
+    await app.bot.set_my_commands([
+        BotCommand("help",      "O que eu faço"),
+        BotCommand("nova_obra", "Cadastrar uma obra nova"),
+    ])
+
 init_db()
-app = Application.builder().token(TOKEN).build()
-app.add_handler(CommandHandler("start", start))
+app = Application.builder().token(TOKEN).post_init(_post_init).build()
+app.add_handler(CommandHandler("start",     start))
+app.add_handler(CommandHandler("help",      ajuda))
+app.add_handler(CommandHandler("nova_obra", nova_obra))
 app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, receber_arquivo))
 app.add_handler(CallbackQueryHandler(responder_botao))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receber_texto))
+app.add_handler(MessageHandler(filters.COMMAND, comando_desconhecido))
 app.run_polling()

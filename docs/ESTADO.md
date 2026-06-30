@@ -53,6 +53,15 @@
 
 ## Última Fiada Implementada
 
+**Fase 4a — Cadastro de Obras** *(2026-06-30)*
+
+- Tabela `obras` substitui dicts hardcoded (`GGV_ENCARREGADO`, `GGV_DESC`, `GGV_ONEDRIVE`, `ENDERECOS`)
+- Cockpit da obra: digitar `GGV03` abre o card com edição campo a campo
+- `/nova_obra` para cadastrar novas obras conversacionalmente
+- `/help`, comando desconhecido → `/help`, menu de comandos no Telegram
+
+---
+
 **v0.5.0 — Marcar como PAGO**
 
 - `teclado_candidatos_pix()`: um botão `💳 Confirmar` por candidato encontrado
@@ -67,11 +76,9 @@
 
 ## Em Andamento
 
-**Sprint de Experiência — Fase 2 (Estrutura)**
+**Fase 4b — Pedido de Compra 2.0**
 
-Tela de validação do orçamento redesenhada e commitada.
-Pendente nesta fase: saldo do GGV na tela de pedido criado e saldo restante
-da obra na confirmação de pagamento.
+Design aprovado (`prints/pc_alternativa_a.html`). Implementação pendente: geração HTML → PDF com dados reais.
 
 ---
 
@@ -98,6 +105,11 @@ da obra na confirmação de pagamento.
 
 ## Decisões Recentes
 
+- **Obra vs. GGV (2026-06-29)** — "Obra" é o conceito; "GGV03" é o código da obra; "#GGV03-009"
+  é o identificador público do Pedido de Compra. Interface usa "Obra GGV03"; banco mantém coluna
+  `ggv` por compatibilidade. `pfm_codigo`, arquivos `.docx` e pastas existentes não serão alterados.
+  Migração interna (`ggv` → `obra_codigo`) fica registrada como dívida futura de baixa prioridade.
+
 - Tipo do documento é definido pelo usuário antes da IA — mais confiável e extensível
 - `ID da transação` é a chave de deduplicação de comprovante, não o `obs` completo —
   mais curto e estável entre re-extrações do mesmo arquivo
@@ -108,9 +120,11 @@ da obra na confirmação de pagamento.
 
 ## Objetivo da Próxima Sessão
 
-**Fase 2 — Conclusão** — completar os itens restantes da Fase 2:
-saldo do GGV na tela de pedido criado; saldo restante da obra na confirmação de pagamento.
-Em seguida, iniciar **Fase 3 — Navegação**: Cockpit da Obra, cartão de fornecedor, /pendentes.
+**Fase 4 — Pedido de Compra 2.0 — Implementação**
+
+Design aprovado. Próximo passo: implementar geração de PDF a partir de template HTML.
+Referência visual: `prints/pc_alternativa_a.html`
+Decisão de tecnologia pendente: WeasyPrint vs. Playwright para HTML → PDF.
 
 ---
 

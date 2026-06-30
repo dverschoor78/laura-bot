@@ -42,11 +42,54 @@ Pendente nesta fase:
 - /pendentes: lista por obra, vencidos destacados com ⚠️
 - Tela de correção campo a campo (refatorado de "editar" para "corrigir")
 
-**Fase 4 — Pedido de Compra**
-- Novo layout DOCX: sete zonas definidas na Sprint de Experiência
-- PDF gerado automaticamente via LibreOffice headless
-- PDF como output primário no Telegram; Word salvo no OneDrive
-- Cabeçalho repetido em documentos multipágina
+**Fase 4a — Cadastro de Obras** ✓ *(concluída 2026-06-30)*
+
+Tabela `obras` no banco com dados por GGV. Substitui dicts hardcoded no código.
+- Tabela `obras` criada e pré-populada (GGV00–GGV03)
+- `buscar_obra()` e `atualizar_obra()` e `criar_obra()`
+- Cockpit da obra: digitar `GGV03` abre o card
+- Edição campo a campo via teclado inline
+- `/nova_obra` para cadastrar novas obras
+- `/help` e handler de comando desconhecido
+- Menu de comandos registrado no Telegram
+
+**Fase 4b — Pedido de Compra 2.0**
+
+Design aprovado em 2026-06-30. Referência: `prints/pc_alternativa_a.html`
+
+Estrutura do documento (7 zonas):
+1. Cabeçalho — Verschoor Investimentos Imobiliários + #GGV03-009 + data
+2. Contexto — Origem (orçamento, WhatsApp, contatos) + Entrega (obra, data, encarregado)
+3. Fornecedor — label "Fornecedor" + nome + ramo + CNPJ + cidade
+4. Itens — numerados, descrição + qtde + valor unitário + total por item
+5. Resumo financeiro — Subtotal / Desconto X,XX% / Total (destaque)
+6. Condições — Pagamento (PIX, chave, vencimento) + Entrega (data, endereço)
+7. Tagline — "Laura não é uma ferramenta que você usa. É uma memória que você carrega." — centralizada no fundo da página
+
+Implementação pendente:
+- Gerar HTML via template Python com dados reais
+- Converter para PDF (WeasyPrint ou Playwright)
+- PDF como output primário no Telegram
+- Word removido do fluxo principal
+
+**Pendências prioritárias do PC 2.0 — campos ainda ausentes:**
+
+1. **Número do orçamento do fornecedor** — Claude não extrai hoje.
+   Solução: adicionar "Número do orçamento:" ao PROMPT + campo `nr_orcamento_fornecedor` no banco.
+
+2. **Data da negociação** — não capturada.
+   Solução provisória: usar `documentos.criado_em` como "recebido em".
+   Solução definitiva: campo editável pelo usuário no fluxo de confirmação.
+
+3. **Contato do fornecedor** (nome + telefone para o bloco Origem) — existe em
+   `fornecedores.contato` e `fornecedores.whatsapp` mas Claude não extrai do orçamento.
+   Solução: adicionar "Contato:" e "Telefone:" ao PROMPT de extração de orçamento.
+
+4. **Ramo do fornecedor** ("Comércio de Materiais de Construção") — não existe na tabela.
+   Solução: adicionar campo `ramo` à tabela `fornecedores` + extração pelo Claude.
+
+5. **Criar obra nova via Telegram** — hoje só pelo banco diretamente.
+   Solução: fluxo `/nova_obra` com campos passo a passo.
 
 ---
 
@@ -61,12 +104,11 @@ Pendente nesta fase:
 
 ## Dívida Técnica
 
-- **CRÍTICA — Renomear GGV → Obra no código e banco**
-  Preocupação principal é no código: variáveis (`ggv`, `GGVS`, `GGV_DESC`, `GGV_ONEDRIVE`),
-  coluna do banco (`ggv`), e string values internos devem migrar para `obra`/`OBRAS`.
-  Na interface: "GGV03" deve aparecer como "Obra GGV03" (código como referência, não nome).
-  Escopo: refatoração abrangente — variáveis Python, coluna banco, possivelmente pfm_codigo.
-  Registrado em: 2026-06-29. Não implementar até decisão sobre pfm_codigo e arquivos existentes.
+- **Baixa — Separar conceito de Obra do código GGV internamente**
+  Decisão 2026-06-29: a mudança é de linguagem e domínio, não de migração imediata.
+  Interface já usa "Obra GGV03"; banco mantém coluna `ggv` por compatibilidade.
+  `pfm_codigo` (ex: GGV03-009), arquivos `.docx` e links existentes não serão alterados.
+  Dívida futura: migrar domínio interno `ggv` → `obra_codigo` em fiada específica.
 
 - **Alta — BD fornecedores inconsistente**
   MO Construção com CNPJ errado; PRUDENTÓPOLIS com split incorreto.
