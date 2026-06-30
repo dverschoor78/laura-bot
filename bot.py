@@ -111,6 +111,7 @@ class Pedido:
     # Datas de registro — base para construir o histórico
     doc_criado_em:  Optional[str] = None
     lanc_criado_em: Optional[str] = None
+    data_pagamento: Optional[str] = None
 
     # Arquivos — populados por preparar_visualizacao_pedido()
     caminho_orcamento: Optional[str] = None
@@ -1300,23 +1301,84 @@ def parse_resposta(texto):
 
 def mostrar_cockpit_obra(obra):
     codigo    = obra.get("codigo", "")
-    desc      = obra.get("descricao", "Sem descrição")
-    enc_nome  = obra.get("encarregado_nome", "")
-    enc_fone  = obra.get("encarregado_fone", "")
-    resp_nome = obra.get("responsavel_nome", "")
-    resp_fone = obra.get("responsavel_fone", "")
-    end       = obra.get("endereco_entrega", "")
-    enc_txt   = f"{enc_nome} {enc_fone}".strip() if enc_nome else "Não definido"
-    resp_txt  = f"{resp_nome} {resp_fone}".strip() if resp_nome else "Não definido"
-    linhas = [f"Obra {codigo}", desc, "", f"Encarregado   {enc_txt}", f"Responsável   {resp_txt}"]
-    if end:
-        linhas.append(f"Entrega       {end}")
+    desc      = obra.get("descricao", "") or ""
+    enc_nome  = obra.get("encarregado_nome", "") or ""
+    enc_fone  = obra.get("encarregado_fone", "") or ""
+    resp_nome = obra.get("responsavel_nome", "") or ""
+    resp_fone = obra.get("responsavel_fone", "") or ""
+    end       = obra.get("endereco_entrega", "") or ""
+
+    # Header: "GGV03 — Condomínio residencial" + detalhe em linha separada
+    if "," in desc:
+        titulo, detalhe = desc.split(",", 1)
+        titulo  = titulo.replace(codigo, "").strip()
+        detalhe = detalhe.strip().rstrip(".")
+    else:
+        titulo  = desc.replace(codigo, "").strip() or "Sem descrição"
+        detalhe = ""
+    cabecalho = f"{codigo} — {titulo}"
+    if detalhe:
+        cabecalho += f"\n{detalhe}"
+
+    SEP = "──────────────────────────────"
+
+    # Placeholder financeiro — Fiada 5b-1
+    financeiro = "⚪ Sem dados financeiros"
+
+    # Contatos com separador · entre nome e fone
+    enc_txt  = f"{enc_nome} · {enc_fone}".strip(" ·") if enc_nome else "Não definido"
+    resp_txt = f"{resp_nome} · {resp_fone}".strip(" ·") if resp_nome else "Não definido"
+
+    # Endereço: remove CEP e troca " - " por " · "
+    end_curto = re.sub(r"\s+CEP[\s\d\.\-]+$", "", end).replace(" - ", " · ") if end else ""
+
+    contatos = f"Encarregado   {enc_txt}\nResponsável   {resp_txt}"
+    if end_curto:
+        contatos += f"\nEntrega       {end_curto}"
+
+    return f"{cabecalho}\n\n{SEP}\n{financeiro}\n{SEP}\n{contatos}"
+
+def _pedidos_obra(ggv):
+    with sqlite3.connect(DB_PATH) as con:
+        return con.execute(
+            "SELECT pfm_codigo, status, fornecedor, valor FROM lancamentos WHERE ggv=? ORDER BY pfm_codigo",
+            (ggv,)
+        ).fetchall()
+
+def teclado_obra(codigo, pedidos=None):
+    botoes = []
+    if pedidos:
+        botoes.append([InlineKeyboardButton("📋 Pedidos", callback_data=f"obra_pedidos:{codigo}")])
+    botoes.append([InlineKeyboardButton("✏️ Editar obra", callback_data=f"obra_editar:{codigo}")])
+    botoes.append([InlineKeyboardButton("✖ Fechar",       callback_data=f"obra_fechar:{codigo}")])
+    return InlineKeyboardMarkup(botoes)
+
+def mostrar_lista_pedidos(codigo, pedidos):
+    _ST = {"a_pagar": "🟡", "pago": "🟢", "pendente_revisao": "🔴", "substituido": "⚫"}
+    if not pedidos:
+        return f"Pedidos — {codigo}\n\nNenhum pedido registrado."
+    linhas = [f"Pedidos — {codigo}\n"]
+    for pfm_codigo, status, fornecedor, valor in pedidos:
+        emoji    = _ST.get(status, "⚪")
+        forn_cur = (fornecedor or "—")[:20]
+        val_str  = f"R$ {_fmt_brl(valor)}" if valor else "—"
+        linhas.append(f"{emoji} {pfm_codigo}  {forn_cur} · {val_str}")
     return "\n".join(linhas)
 
-def teclado_obra(codigo):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✏️ Editar obra", callback_data=f"obra_editar:{codigo}")],
-    ])
+def teclado_lista_pedidos(codigo, pedidos):
+    _ST = {"a_pagar": "🟡", "pago": "🟢", "pendente_revisao": "🔴", "substituido": "⚫"}
+    botoes = []
+    row = []
+    for pfm_codigo, status, *_ in pedidos:
+        emoji = _ST.get(status, "⚪")
+        row.append(InlineKeyboardButton(f"{emoji} {pfm_codigo}", callback_data=f"pedido_abrir:{pfm_codigo}"))
+        if len(row) == 2:
+            botoes.append(row)
+            row = []
+    if row:
+        botoes.append(row)
+    botoes.append([InlineKeyboardButton("◀️ Voltar à obra", callback_data=f"obra_ver:{codigo}")])
+    return InlineKeyboardMarkup(botoes)
 
 def teclado_obra_campos(codigo):
     return InlineKeyboardMarkup([
@@ -1402,14 +1464,14 @@ def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
             return None
         doc_id, ggv_db, dados, condicao_pgto, data_entrega, desconto_rs, caminho, doc_criado = doc
         lanc = con.execute(
-            "SELECT fornecedor, valor, data_prevista_entrega, vencimento_pagamento, status, criado_em "
+            "SELECT fornecedor, valor, data_prevista_entrega, vencimento_pagamento, status, criado_em, data_pagamento "
             "FROM lancamentos WHERE pfm_codigo=?",
             (pfm_codigo,)
         ).fetchone()
 
-    forn_lanc = data_prev_ent = venc = status_raw = lanc_criado = None
+    forn_lanc = data_prev_ent = venc = status_raw = lanc_criado = data_pgto = None
     if lanc:
-        forn_lanc, _, data_prev_ent, venc, status_raw, lanc_criado = lanc
+        forn_lanc, _, data_prev_ent, venc, status_raw, lanc_criado, data_pgto = lanc
 
     try:
         status = StatusPedido(status_raw) if status_raw else StatusPedido.SEM_LANCAMENTO
@@ -1433,6 +1495,7 @@ def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
         entrega_prevista   = data_prev_ent or data_entrega or "—",
         doc_criado_em      = doc_criado,
         lanc_criado_em     = lanc_criado,
+        data_pagamento     = data_pgto,
         caminho_orcamento  = caminho,
     )
 
@@ -1447,68 +1510,72 @@ def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
     pedido.caminho_docx = str(pfm_docx) if pfm_docx.exists() else None
 
     historico = []
-    if pedido.doc_criado_em:
-        historico.append((_fmt_data_curta(pedido.doc_criado_em), "Orçamento recebido"))
     if pedido.lanc_criado_em:
         historico.append((_fmt_data_curta(pedido.lanc_criado_em), "Pedido de Compra gerado"))
+    if pedido.data_pagamento:
+        historico.append((pedido.data_pagamento[:5], "Pago"))
     pedido.historico = historico
 
     return pedido
 
 def mostrar_pedido(pedido: Pedido) -> str:
     """Formata o Pedido como mensagem Telegram. Sem IO — apenas formatação."""
-    _STATUS_LABEL = {
-        StatusPedido.A_PAGAR:          "🟡 Aguardando pagamento",
-        StatusPedido.PAGO:             "🟢 Pago",
-        StatusPedido.PENDENTE_REVISAO: "🔴 Requer atenção",
-        StatusPedido.SUBSTITUIDO:      "⚫ Substituído",
-        StatusPedido.SEM_LANCAMENTO:   "⚪ Sem registro financeiro",
+    _STATUS_EMOJI = {
+        StatusPedido.A_PAGAR:          "🟡",
+        StatusPedido.PAGO:             "🟢",
+        StatusPedido.PENDENTE_REVISAO: "🔴",
+        StatusPedido.SUBSTITUIDO:      "⚫",
+        StatusPedido.SEM_LANCAMENTO:   "⚪",
+    }
+    _STATUS_SHORT = {
+        StatusPedido.A_PAGAR:          "Aguardando pagamento",
+        StatusPedido.PAGO:             "Pago",
+        StatusPedido.PENDENTE_REVISAO: "Requer atenção",
+        StatusPedido.SUBSTITUIDO:      "Substituído",
+        StatusPedido.SEM_LANCAMENTO:   "Sem registro financeiro",
     }
     SEP = "\n──────────────────────────────\n"
 
-    cabecalho = (
-        f"Pedido #{pedido.codigo}\n\n"
-        f"Status:\n{_STATUS_LABEL.get(pedido.status, pedido.status)}\n\n"
-        f"Fornecedor:\n{pedido.fornecedor}\n\n"
-        f"CNPJ:\n{pedido.cnpj}"
-    )
+    emoji  = _STATUS_EMOJI.get(pedido.status, "")
+    status = _STATUS_SHORT.get(pedido.status, str(pedido.status))
+    cabecalho = f"{emoji} #{pedido.codigo} — {status}\n\n{pedido.fornecedor}"
 
-    fin = ["Financeiro"]
-    if pedido.valor_orcamento > 0:
-        fin.append(f"Valor orçamento:\nR$ {_fmt_brl(pedido.valor_orcamento)}")
-    if pedido.desconto > 0:
-        fin.append(f"Desconto:\n-R$ {_fmt_brl(pedido.desconto)}")
-        fin.append(f"Valor com desconto:\nR$ {_fmt_brl(pedido.valor_negociado)}")
-    elif pedido.valor_negociado > 0:
-        fin.append(f"Valor:\nR$ {_fmt_brl(pedido.valor_negociado)}")
-    fin.append(f"Condição de pagamento:\n{pedido.condicao_pagamento}")
-    fin.append(f"Vencimento:\n{pedido.vencimento}")
-    financeiro = "\n\n".join(fin)
+    linhas_fin = []
+    if pedido.valor_negociado > 0:
+        valor_str = f"R$ {_fmt_brl(pedido.valor_negociado)}"
+        if pedido.desconto > 0:
+            valor_str += f"  (desc. R$ {_fmt_brl(pedido.desconto)})"
+        linhas_fin.append(valor_str)
+    cond = pedido.condicao_pagamento if pedido.condicao_pagamento not in ("—", None) else None
+    ent  = pedido.entrega_prevista   if pedido.entrega_prevista   not in ("—", None) else None
+    if cond and ent:
+        linhas_fin.append(f"{cond} · entrega {ent}")
+    elif cond:
+        linhas_fin.append(cond)
+    elif ent:
+        linhas_fin.append(f"Entrega: {ent}")
+    if pedido.vencimento and pedido.vencimento not in ("—", None):
+        linhas_fin.append(f"Vencimento: {pedido.vencimento}")
+    financeiro = "\n".join(linhas_fin) if linhas_fin else "Dados financeiros não disponíveis"
 
-    entrega = f"Entrega\n\nData prevista:\n{pedido.entrega_prevista}"
-
-    arq = ["Documentos"]
+    arq = []
     if pedido.caminho_orcamento:
         arq.append("📎 Orçamento original")
     if pedido.caminho_docx:
-        arq.append("📄 Pedido em Word")
-    if not (pedido.caminho_orcamento or pedido.caminho_docx):
-        arq.append("Nenhum arquivo disponível")
-    arquivos = "\n".join(arq)
+        arq.append("📄 Pedido de Compra")
+    arquivos = "\n".join(arq) if arq else "Nenhum arquivo disponível"
 
-    hist = ["Histórico"]
+    hist = []
     for data, evento in pedido.historico:
-        hist.append(f"{data}\n{evento}")
-    if not pedido.historico:
-        hist.append("(sem eventos registrados)")
-    historico = "\n\n".join(hist)
+        hist.append(f"{data}  {evento}")
+    historico = "\n".join(hist) if hist else "(sem eventos registrados)"
 
-    return SEP.join([cabecalho, financeiro, entrega, arquivos, historico])
+    return SEP.join([cabecalho, financeiro, arquivos, historico])
 
 def teclado_pedido(doc_id, pfm_codigo):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Revisar",        callback_data=f"pfm_revisar:{doc_id}:{pfm_codigo}")],
-        [InlineKeyboardButton("📄 Word",        callback_data=f"pfm_ver:{doc_id}:{pfm_codigo}")],
+        [InlineKeyboardButton("📄 PDF",         callback_data=f"pfm_ver:{doc_id}:{pfm_codigo}")],
         [InlineKeyboardButton("Financeiro",     callback_data=f"pfm_lanc:{doc_id}:{pfm_codigo}")],
         [InlineKeyboardButton("Histórico",      callback_data=f"pfm_hist:{doc_id}:{pfm_codigo}")],
         [InlineKeyboardButton("✖ Fechar",       callback_data=f"pfm_fechar:{doc_id}")],
@@ -1665,7 +1732,7 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if obra:
                 await update.message.reply_text(
                     mostrar_cockpit_obra(obra),
-                    reply_markup=teclado_obra(codigo)
+                    reply_markup=teclado_obra(codigo, _pedidos_obra(codigo))
                 )
             else:
                 await update.message.reply_text(f"Obra {codigo} não encontrada.")
@@ -1769,7 +1836,7 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text(f"Obra {codigo} criada. Complete os dados abaixo.")
         obra = buscar_obra(codigo)
-        await update.message.reply_text(mostrar_cockpit_obra(obra), reply_markup=teclado_obra(codigo))
+        await update.message.reply_text(mostrar_cockpit_obra(obra), reply_markup=teclado_obra(codigo, _pedidos_obra(codigo)))
 
     elif aguardando and aguardando.startswith("obra_edit_"):
         campo = aguardando[len("obra_edit_"):]
@@ -1780,7 +1847,7 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             obra = buscar_obra(obra_codigo)
             await update.message.reply_text(
                 mostrar_cockpit_obra(obra),
-                reply_markup=teclado_obra(obra_codigo)
+                reply_markup=teclado_obra(obra_codigo, _pedidos_obra(obra_codigo))
             )
         else:
             ctx.user_data["aguardando"] = None
@@ -2183,28 +2250,15 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         elif acao == "pfm_ver":
             _, doc_id, pfm_codigo = partes
-            with sqlite3.connect(DB_PATH) as con:
-                row = con.execute("SELECT ggv FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
-            if not row:
-                await query.answer("Documento não encontrado.", show_alert=True)
-                return
-            ggv_doc = row[0]
-            pasta = _pasta_pfm(ggv_doc)
-            prefixo = "TESTE-" if TEST_MODE else ""
-            pfm_path = pasta / f"{prefixo}{pfm_codigo}.docx"
-            if pfm_path.exists():
-                with open(pfm_path, "rb") as f:
-                    await ctx.bot.send_document(
-                        chat_id=DONO_ID,
-                        document=f,
-                        filename=f"{pfm_codigo}.docx",
-                        caption=f"📄 {pfm_codigo}"
-                    )
-            else:
-                await query.answer(
-                    "Arquivo não localizado. Pode ter sido movido ou ainda não foi gerado.",
-                    show_alert=True
-                )
+            await query.answer()
+            html      = _gerar_html_pc(int(doc_id))
+            pdf_bytes = await _html_para_pdf(html)
+            await ctx.bot.send_document(
+                chat_id=DONO_ID,
+                document=pdf_bytes,
+                filename=f"{pfm_codigo}.pdf",
+                caption=f"📄 {pfm_codigo}"
+            )
 
         elif acao == "pfm_lanc":
             _, doc_id, pfm_codigo = partes
@@ -2250,10 +2304,55 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         elif acao == "pfm_hist":
             _, doc_id, pfm_codigo = partes
+            with sqlite3.connect(DB_PATH) as con:
+                doc_row  = con.execute(
+                    "SELECT criado_em FROM documentos WHERE id=?", (int(doc_id),)
+                ).fetchone()
+                lanc_row = con.execute(
+                    "SELECT criado_em, data_prevista_entrega, data_pagamento, valor_pago FROM lancamentos WHERE pfm_codigo=?",
+                    (pfm_codigo,)
+                ).fetchone()
+            eventos = []
+            if doc_row and doc_row[0]:
+                eventos.append((_fmt_data_curta(doc_row[0]), "Orçamento recebido"))
+            if lanc_row:
+                lanc_criado, data_ent, data_pgto, valor_pago = lanc_row
+                if lanc_criado:
+                    eventos.append((_fmt_data_curta(lanc_criado), "Pedido de Compra gerado"))
+                if data_ent and data_ent not in ("—", "A PREENCHER"):
+                    eventos.append((data_ent[:5], "Entrega prevista"))
+                if data_pgto:
+                    val_str = f"  ·  R$ {_fmt_brl(valor_pago)}" if valor_pago else ""
+                    eventos.append((data_pgto[:5], f"Pago{val_str}"))
+            if eventos:
+                linhas = "\n".join(f"{d}  {e}" for d, e in eventos)
+                texto_hist = f"Histórico — #{pfm_codigo}\n\n{linhas}"
+            else:
+                texto_hist = f"Histórico — #{pfm_codigo}\n\n(sem eventos registrados)"
             await query.edit_message_text(
-                f"Histórico completo do Pedido #{pfm_codigo} em breve.",
+                texto_hist,
                 reply_markup=teclado_pedido(doc_id, pfm_codigo)
             )
+
+        elif acao == "obra_pedidos":
+            codigo  = partes[1]
+            pedidos = _pedidos_obra(codigo)
+            await query.edit_message_text(
+                mostrar_lista_pedidos(codigo, pedidos),
+                reply_markup=teclado_lista_pedidos(codigo, pedidos)
+            )
+
+        elif acao == "pedido_abrir":
+            pfm_codigo = partes[1]
+            pedido = buscar_pedido(pfm_codigo)
+            if pedido:
+                preparar_visualizacao_pedido(pedido)
+                await query.edit_message_text(
+                    mostrar_pedido(pedido),
+                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo)
+                )
+            else:
+                await query.answer(f"Pedido {pfm_codigo} não encontrado.", show_alert=True)
 
         elif acao == "obra_ver":
             codigo = partes[1]
@@ -2261,7 +2360,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if obra:
                 await query.edit_message_text(
                     mostrar_cockpit_obra(obra),
-                    reply_markup=teclado_obra(codigo)
+                    reply_markup=teclado_obra(codigo, _pedidos_obra(codigo))
                 )
             else:
                 await query.edit_message_text(f"Obra {codigo} não encontrada.")
@@ -2293,6 +2392,9 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(f"Novo valor para {label}:")
 
         elif acao == "pfm_fechar":
+            await query.edit_message_text("Fechado.")
+
+        elif acao == "obra_fechar":
             await query.edit_message_text("Fechado.")
 
     except Exception as e:
