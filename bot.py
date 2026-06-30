@@ -138,8 +138,12 @@ PASSO 3 — Extraia os dados em português conforme o tipo:
 
 Se [orcamento]:
 - Fornecedor:
+- Ramo de atividade: (ex: Comércio de Materiais de Construção, Serralheria, Elétrica — informe como aparece no documento ou deduza pelo contexto)
 - CNPJ/CPF:
 - Chave PIX: (procure em qualquer parte do documento — dados cadastrais, cabeçalho, rodapé, condições de pagamento; pode ser CPF, CNPJ, e-mail ou telefone)
+- Número do orçamento: (número ou código do orçamento emitido pelo fornecedor, se houver)
+- Vendedor: (nome do vendedor ou representante que emitiu o orçamento, se houver)
+- Telefone do vendedor: (telefone ou WhatsApp do vendedor, se houver)
 - Itens (formato: N. Descrição do produto (QTDE UND) — R$ TOTAL; liste todos os itens do orçamento):
 - Valor total:
 - Desconto (valor em R$, se houver; se informado em %, calcule o valor sobre o total):
@@ -294,6 +298,11 @@ def init_db():
                 UNIQUE(cpf)
             )
         """)
+        for col in ["ramo TEXT"]:
+            try:
+                con.execute(f"ALTER TABLE fornecedores ADD COLUMN {col}")
+            except Exception:
+                pass
 
 def buscar_obra(codigo):
     """Retorna dict com dados da obra ou {} se não encontrada."""
@@ -466,7 +475,7 @@ def _resumo_gerar(doc_id):
     return "\n".join(linhas), teclado_orcamento(doc_id, tipo, ggv)
 
 _FORN_COLS = ["nome", "razao_social", "cnpj", "cpf", "chave_pix", "email",
-              "whatsapp", "logradouro", "numero", "bairro", "cidade", "uf", "cep"]
+              "whatsapp", "logradouro", "numero", "bairro", "cidade", "uf", "cep", "ramo"]
 
 def buscar_fornecedor(nome_claude, cnpj_claude=None):
     """Busca no BD: 1º por CNPJ exato, 2º por prefixo do nome."""
@@ -684,6 +693,241 @@ def proximo_pfm_numero(ggv):
         ).fetchone()
     return (row[0] or 0) + 1
 
+_PC_CSS = """
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+@page { size: A4; margin: 0; }
+body { font-family: 'Inter', system-ui, -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }
+.page { background: #fff; width: 210mm; min-height: 297mm; padding: 16mm 18mm 12mm; display: flex; flex-direction: column; }
+.header { display: flex; justify-content: space-between; align-items: flex-start; }
+.company-brand { font-size: 12px; font-weight: 600; letter-spacing: 0.01em; color: #111827; }
+.company-meta { font-size: 9.5px; color: #9CA3AF; margin-top: 6px; line-height: 1.75; }
+.doc-meta { text-align: right; }
+.doc-tipo { font-size: 9px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: #9CA3AF; }
+.doc-number { font-size: 27px; font-weight: 700; color: #111827; letter-spacing: -0.025em; line-height: 1; margin-top: 5px; }
+.doc-date { font-size: 9.5px; color: #9CA3AF; margin-top: 7px; }
+.rule { border: none; border-top: 1px solid #E5E7EB; }
+.rule-gap { margin: 28px 0; }
+.context-block { display: grid; grid-template-columns: 1fr 1fr; gap: 20px 48px; }
+.ctx-label { font-size: 9px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: #9CA3AF; margin-bottom: 5px; }
+.ctx-value { font-size: 10.5px; color: #6B7280; line-height: 1.7; }
+.supplier { margin-top: 6px; }
+.supplier-name { font-size: 22px; font-weight: 600; color: #111827; letter-spacing: -0.015em; line-height: 1.2; }
+.supplier-trade { font-size: 11px; color: #6B7280; margin-top: 5px; }
+.supplier-meta { font-size: 10px; color: #9CA3AF; margin-top: 3px; }
+.section-label { font-size: 9px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: #9CA3AF; margin-bottom: 16px; }
+.item { display: flex; justify-content: space-between; align-items: flex-start; padding: 13px 0; border-bottom: 1px solid #F9FAFB; }
+.item:last-child { border-bottom: none; }
+.item-left { display: flex; gap: 16px; }
+.item-num { font-size: 10px; font-weight: 500; color: #D1D5DB; min-width: 20px; padding-top: 1px; flex-shrink: 0; }
+.item-desc { font-size: 11.5px; font-weight: 500; color: #374151; line-height: 1.4; }
+.item-qty { font-size: 10px; color: #9CA3AF; margin-top: 3px; }
+.item-value { font-size: 11.5px; font-weight: 500; color: #374151; white-space: nowrap; }
+.financial-outer { display: flex; justify-content: flex-end; margin-top: 24px; }
+.financial-inner { min-width: 216px; }
+.fin-row { display: flex; justify-content: space-between; gap: 48px; padding: 4px 0; }
+.fin-l { font-size: 10px; color: #9CA3AF; }
+.fin-v { font-size: 10px; color: #6B7280; }
+.fin-rule { border: none; border-top: 1px solid #E5E7EB; margin: 10px 0; }
+.fin-total-row { display: flex; justify-content: space-between; align-items: baseline; gap: 48px; }
+.fin-total-l { font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #111827; }
+.fin-total-v { font-size: 20px; font-weight: 700; color: #111827; letter-spacing: -0.02em; }
+.bottom { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; }
+.bottom-label { font-size: 9px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: #9CA3AF; margin-bottom: 10px; }
+.bottom-main { font-size: 11.5px; font-weight: 500; color: #374151; margin-bottom: 5px; }
+.bottom-detail { font-size: 10px; color: #6B7280; line-height: 1.7; }
+.footer-tagline { margin-top: auto; padding-top: 16px; text-align: center; font-size: 11px; font-style: italic; color: #B8BFC9; letter-spacing: 0.01em; }
+"""
+
+def _gerar_html_pc(doc_id: int) -> str:
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT ggv, dados_claude, condicao_pgto, data_entrega, endereco_entrega, "
+            "desconto_rs, vencimento_pgto, criado_em FROM documentos WHERE id=?",
+            (doc_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Documento {doc_id} não encontrado.")
+        ggv, dados, condicao, data_ent_db, end_db, desconto_rs, vencimento, criado_em = row
+        pfm_row = con.execute(
+            "SELECT pfm_codigo FROM lancamentos WHERE doc_id=? ORDER BY id DESC LIMIT 1",
+            (doc_id,)
+        ).fetchone()
+    pfm_codigo  = pfm_row[0] if pfm_row else "—"
+    obra        = buscar_obra(ggv)
+
+    nome_claude = _campo(dados, "Fornecedor")
+    cnpj_claude = _campo(dados, "CNPJ/CPF")
+    forn_db     = buscar_fornecedor(nome_claude, cnpj_claude)
+    if forn_db:
+        fornecedor = forn_db.get("razao_social") or forn_db.get("nome") or nome_claude
+        cnpj       = forn_db.get("cnpj") or forn_db.get("cpf") or cnpj_claude
+        ramo       = forn_db.get("ramo") or _campo(dados, "Ramo de atividade")
+        _cidade    = forn_db.get("cidade") or ""
+        _uf        = forn_db.get("uf") or ""
+        if len(_cidade) > 30 or "/" in _cidade or any(c.isdigit() for c in _cidade):
+            _cidade = _uf = ""
+        forn_local = " · ".join(filter(None, [_cidade, _uf]))
+        pix        = forn_db.get("chave_pix") or _campo(dados, "Chave PIX")
+    else:
+        fornecedor = nome_claude
+        cnpj       = cnpj_claude
+        ramo       = _campo(dados, "Ramo de atividade")
+        forn_local = ""
+        pix        = _campo(dados, "Chave PIX")
+
+    nr_orc    = _campo(dados, "Número do orçamento")
+    vendedor  = _campo(dados, "Vendedor")
+    vend_fone = _campo(dados, "Telefone do vendedor")
+
+    itens      = _itens(dados)
+    subtotal_v, desconto_v, total_final_v = _calcular_totais(dados, desconto_rs)
+    desconto_pct = (desconto_v / subtotal_v * 100) if subtotal_v > 0 and desconto_v > 0 else 0
+
+    now          = datetime.now()
+    data_emissao = f"{now.day} de {MESES[now.month-1]} de {now.year}"
+
+    def _h(s): return _esc_html(str(s)) if s and s != "A PREENCHER" else ""
+
+    # Bloco Origem
+    origem_linhas = []
+    if _h(nr_orc):
+        origem_linhas.append(f"Orçamento #{_h(nr_orc)}")
+    resp_nome = obra.get("responsavel_nome") or "Dennis"
+    resp_fone = obra.get("responsavel_fone") or DELTAD["fone"]
+    origem_linhas.append("Negociado via WhatsApp")
+    contatos = [f"{_h(resp_nome)} {_h(resp_fone)}".strip()]
+    if _h(vendedor):
+        v = _h(vendedor)
+        if _h(vend_fone):
+            v += f" {_h(vend_fone)}"
+        contatos.append(v)
+    origem_linhas.append(" &middot; ".join(contatos))
+    origem_html = "<br>".join(origem_linhas)
+
+    # Bloco Entrega
+    enc_nome = obra.get("encarregado_nome", "")
+    enc_fone = obra.get("encarregado_fone", "")
+    entrega_linhas = [f"Obra {ggv}"]
+    if _h(data_ent_db):
+        entrega_linhas.append(f"Até {_h(data_ent_db)}")
+    if enc_nome:
+        enc_str = f"Encarregado: {_h(enc_nome)}"
+        if enc_fone:
+            enc_str += f" {_h(enc_fone)}"
+        entrega_linhas.append(enc_str)
+    entrega_html = "<br>".join(entrega_linhas)
+
+    # Itens
+    items_html = ""
+    for i, item in enumerate(itens, 1):
+        if not isinstance(item, dict):
+            items_html += f'<div class="item"><div class="item-left"><span class="item-num">{i:02d}</span><div><div class="item-desc">{_esc_html(str(item))}</div></div></div></div>'
+            continue
+        und      = _esc_html(item.get("und", "un"))
+        qty_line = f'<div class="item-qty">{_esc_html(item["qtde"])} {und} &nbsp;&middot;&nbsp; R$ {_esc_html(item["unit"])}/{und}</div>' if item.get("qtde") else ""
+        items_html += (
+            f'<div class="item">'
+            f'<div class="item-left"><span class="item-num">{i:02d}</span>'
+            f'<div><div class="item-desc">{_esc_html(item.get("desc",""))}</div>{qty_line}</div></div>'
+            f'<div class="item-value">R$ {_esc_html(item.get("total",""))}</div>'
+            f'</div>'
+        )
+
+    # Financeiro
+    fin_html = f'<div class="fin-row"><span class="fin-l">Subtotal</span><span class="fin-v">R$ {_fmt_brl(subtotal_v)}</span></div>'
+    if desconto_v > 0:
+        pct_str = f"{desconto_pct:.2f}".replace(".", ",")
+        fin_html += f'<div class="fin-row"><span class="fin-l">Desconto {pct_str}%</span><span class="fin-v">&minus;R$ {_fmt_brl(desconto_v)}</span></div>'
+    fin_html += f'<hr class="fin-rule"><div class="fin-total-row"><span class="fin-total-l">Total</span><span class="fin-total-v">R$ {_fmt_brl(total_final_v)}</span></div>'
+
+    # Pagamento e entrega (bottom)
+    pgto_detail = ""
+    if _h(pix):
+        pgto_detail += f"Chave: {_h(pix)}<br>"
+    if _h(vencimento):
+        pgto_detail += f"Vencimento: {_h(vencimento)}"
+    end_entrega  = _h(end_db or obra.get("endereco_entrega", ""))
+
+    # Fornecedor meta
+    forn_meta_parts = []
+    if _h(cnpj):
+        forn_meta_parts.append(f"CNPJ {_h(cnpj)}")
+    if forn_local:
+        forn_meta_parts.append(_esc_html(forn_local))
+    forn_meta = " &nbsp;&middot;&nbsp; ".join(forn_meta_parts)
+
+    ramo_html  = f'<div class="supplier-trade">{_esc_html(ramo)}</div>' if _h(ramo) else ""
+    forn_meta_html = f'<div class="supplier-meta">{forn_meta}</div>' if forn_meta else ""
+
+    return f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Pedido de Compra #{pfm_codigo}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>{_PC_CSS}</style>
+</head>
+<body>
+<div class="page">
+  <div class="header">
+    <div>
+      <div class="company-brand">Verschoor Investimentos Imobiliários</div>
+      <div class="company-meta">CNPJ {DELTAD['cnpj']} &nbsp;&middot;&nbsp; I.E. {DELTAD['ie']}<br>{_esc_html(DELTAD['end'])}</div>
+    </div>
+    <div class="doc-meta">
+      <div class="doc-tipo">Pedido de Compra</div>
+      <div class="doc-number">#{pfm_codigo}</div>
+      <div class="doc-date">{data_emissao}</div>
+    </div>
+  </div>
+  <hr class="rule rule-gap">
+  <div class="context-block">
+    <div><div class="ctx-label">Origem</div><div class="ctx-value">{origem_html}</div></div>
+    <div><div class="ctx-label">Entrega</div><div class="ctx-value">{entrega_html}</div></div>
+  </div>
+  <hr class="rule rule-gap">
+  <div class="section-label" style="margin-bottom:6px;">Fornecedor</div>
+  <div class="supplier">
+    <div class="supplier-name">{_esc_html(fornecedor)}</div>
+    {ramo_html}
+    {forn_meta_html}
+  </div>
+  <hr class="rule" style="margin-top:32px;margin-bottom:28px;">
+  <div class="section-label">Itens solicitados</div>
+  {items_html}
+  <div class="financial-outer">
+    <div class="financial-inner">{fin_html}</div>
+  </div>
+  <hr class="rule" style="margin-top:28px;margin-bottom:28px;">
+  <div class="bottom">
+    <div>
+      <div class="bottom-label">Pagamento</div>
+      <div class="bottom-main">{_h(condicao) or 'PIX à vista'}</div>
+      <div class="bottom-detail">{pgto_detail}</div>
+    </div>
+    <div>
+      <div class="bottom-label">Entrega</div>
+      <div class="bottom-main">{_h(data_ent_db) or '—'}</div>
+      <div class="bottom-detail">{end_entrega}</div>
+    </div>
+  </div>
+  <div class="footer-tagline">Laura não é uma ferramenta que você usa. É uma memória que você carrega.</div>
+</div>
+</body>
+</html>"""
+
+async def _html_para_pdf(html_str: str) -> bytes:
+    from playwright.async_api import async_playwright
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page    = await browser.new_page()
+        await page.set_content(html_str, wait_until="networkidle")
+        pdf     = await page.pdf(format="A4", print_background=True)
+        await browser.close()
+        return pdf
+
 def gerar_pfm(doc_id):
     with sqlite3.connect(DB_PATH) as con:
         row = con.execute(
@@ -696,6 +940,7 @@ def gerar_pfm(doc_id):
 
     nome_claude = _campo(dados, "Fornecedor")
     cnpj_claude = _campo(dados, "CNPJ/CPF")
+    ramo_claude = _campo(dados, "Ramo de atividade")
     forn_db     = buscar_fornecedor(nome_claude, cnpj_claude)
 
     if forn_db:
@@ -714,10 +959,19 @@ def gerar_pfm(doc_id):
         forn_email   = forn_db.get("email") or ""
         forn_fone    = forn_db.get("whatsapp") or ""
         forn_contato = forn_db.get("contato") or ""
+        ramo         = forn_db.get("ramo") or ramo_claude
+        # Persiste ramo se ainda não estava cadastrado
+        if not forn_db.get("ramo") and ramo_claude and ramo_claude != "A PREENCHER":
+            cnpj_key = forn_db.get("cnpj") or forn_db.get("cpf")
+            if cnpj_key:
+                with sqlite3.connect(DB_PATH) as _con:
+                    _con.execute("UPDATE fornecedores SET ramo=? WHERE cnpj=? OR cpf=?",
+                                 (ramo_claude, cnpj_key, cnpj_key))
     else:
         fornecedor  = nome_claude
         cnpj        = cnpj_claude
         pix         = _campo(dados, "Chave PIX")
+        ramo        = ramo_claude
         forn_logr = forn_bairro = forn_cidade = forn_email = forn_fone = forn_contato = ""
 
     prazo        = _campo(dados, "Prazo de entrega")
@@ -1845,13 +2099,14 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             atualizar(int(doc_id), status="confirmado")
             await query.edit_message_text("Gerando Pedido de Compra...")
             caminho, codigo, fornecedor, valor_v, lanc_status, ja_existia = gerar_pfm(int(doc_id))
-            with open(caminho, "rb") as f:
-                await ctx.bot.send_document(
-                    chat_id=DONO_ID,
-                    document=f,
-                    filename=f"{codigo}.docx",
-                    caption=f"Pedido #{codigo}"
-                )
+            html    = _gerar_html_pc(int(doc_id))
+            pdf_bytes = await _html_para_pdf(html)
+            await ctx.bot.send_document(
+                chat_id=DONO_ID,
+                document=pdf_bytes,
+                filename=f"{codigo}.pdf",
+                caption=f"Pedido #{codigo}"
+            )
             if ja_existia:
                 lanc_msg = f"Pedido #{codigo} já tinha registro financeiro."
             elif lanc_status == "pendente_revisao":

@@ -53,43 +53,27 @@ Tabela `obras` no banco com dados por GGV. Substitui dicts hardcoded no código.
 - `/help` e handler de comando desconhecido
 - Menu de comandos registrado no Telegram
 
-**Fase 4b — Pedido de Compra 2.0**
+**Fase 4b — Pedido de Compra 2.0** *(implementado — aguarda validação em produção)*
 
 Design aprovado em 2026-06-30. Referência: `prints/pc_alternativa_a.html`
 
-Estrutura do documento (7 zonas):
-1. Cabeçalho — Verschoor Investimentos Imobiliários + #GGV03-009 + data
-2. Contexto — Origem (orçamento, WhatsApp, contatos) + Entrega (obra, data, encarregado)
-3. Fornecedor — label "Fornecedor" + nome + ramo + CNPJ + cidade
-4. Itens — numerados, descrição + qtde + valor unitário + total por item
-5. Resumo financeiro — Subtotal / Desconto X,XX% / Total (destaque)
-6. Condições — Pagamento (PIX, chave, vencimento) + Entrega (data, endereço)
-7. Tagline — "Laura não é uma ferramenta que você usa. É uma memória que você carrega." — centralizada no fundo da página
+Implementado em 2026-06-30:
+- `_PC_CSS` — CSS do documento como constante Python
+- `_gerar_html_pc(doc_id)` — gera HTML com dados reais do banco
+- `_html_para_pdf(html)` — converte para PDF via Playwright Chromium (async)
+- Handler `pfm` envia PDF; DOCX continua gerado silenciosamente para o OneDrive
+- PROMPT: 4 novos campos — Ramo de atividade, Número do orçamento, Vendedor, Telefone do vendedor
+- `fornecedores.ramo` — coluna adicionada, salva automaticamente ao gerar PFM
 
-Implementação pendente:
-- Gerar HTML via template Python com dados reais
-- Converter para PDF (WeasyPrint ou Playwright)
-- PDF como output primário no Telegram
-- Word removido do fluxo principal
+Pendente:
+- Validar layout do PDF com orçamento real
+- Remover geração DOCX do fluxo principal após validação
+- Data da negociação: ainda usa `criado_em` como proxy
 
-**Pendências prioritárias do PC 2.0 — campos ainda ausentes:**
+**Fase 4c — Relatório de Compras por Obra** *(próxima)*
 
-1. **Número do orçamento do fornecedor** — Claude não extrai hoje.
-   Solução: adicionar "Número do orçamento:" ao PROMPT + campo `nr_orcamento_fornecedor` no banco.
-
-2. **Data da negociação** — não capturada.
-   Solução provisória: usar `documentos.criado_em` como "recebido em".
-   Solução definitiva: campo editável pelo usuário no fluxo de confirmação.
-
-3. **Contato do fornecedor** (nome + telefone para o bloco Origem) — existe em
-   `fornecedores.contato` e `fornecedores.whatsapp` mas Claude não extrai do orçamento.
-   Solução: adicionar "Contato:" e "Telefone:" ao PROMPT de extração de orçamento.
-
-4. **Ramo do fornecedor** ("Comércio de Materiais de Construção") — não existe na tabela.
-   Solução: adicionar campo `ramo` à tabela `fornecedores` + extração pelo Claude.
-
-5. **Criar obra nova via Telegram** — hoje só pelo banco diretamente.
-   Solução: fluxo `/nova_obra` com campos passo a passo.
+Extrato tipo cadastro acessível pelo cockpit da obra.
+Mostra todos os PFMs de um GGV com status financeiro e totalizadores.
 
 ---
 

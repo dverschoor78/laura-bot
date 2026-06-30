@@ -1,6 +1,6 @@
 # Arquitetura do Projeto Laura
 
-> Versão: 2026-06-29 — reflete o estado real do sistema
+> Versão: 2026-06-30 — reflete o estado real do sistema
 
 ---
 
@@ -13,7 +13,7 @@ com IA, apresenta para confirmação, gera o PFM Word numerado, salva no OneDriv
 e registra o lançamento A PAGAR no banco.
 
 **Tecnologias em uso:** Python 3.12 · python-telegram-bot 22 · SQLite · Claude API
-(Anthropic) · python-docx · OneDrive (pasta local mapeada)
+(Anthropic) · python-docx · Playwright Chromium · OneDrive (pasta local mapeada)
 
 ---
 
@@ -24,17 +24,18 @@ Telegram ──────► bot.py ──────► Claude API (haiku-4-
                    │
                    ├──────────► data/laura.db  (SQLite)
                    ├──────────► data/uploads/  (arquivos recebidos)
+                   ├──────────► Playwright Chromium (HTML → PDF em memória)
                    └──────────► OneDrive/GGV03/04 Aquisição e Execução/
-                                (PFMs gerados em .docx)
+                                (DOCX gerado silenciosamente como backup)
 ```
 
 - **`bot.py`** — monólito único com toda a lógica: banco, IA, PFM, handlers Telegram
-- **`data/laura.db`** — banco SQLite com três tabelas (ver seção 3)
+- **`data/laura.db`** — banco SQLite com quatro tabelas (ver seção 3)
 - **`data/uploads/`** — arquivos temporários recebidos pelo bot
 - **Claude API** — extração de dados dos documentos; modelo `claude-haiku-4-5-20251001`
-- **OneDrive** — destino final dos PFMs; pasta local acessada via `GGV_ONEDRIVE`
-- **`templates/PFM-template.docx`** — existe no repositório mas não é usado; o PFM é
-  gerado programaticamente via python-docx, sem template Jinja2
+- **Playwright Chromium** — geração de PDF do Pedido de Compra 2.0 a partir de HTML; roda headless em memória
+- **OneDrive** — destino final dos PFMs .docx (backup); pasta local acessada via tabela `obras`
+- **`prints/pc_alternativa_a.html`** — protótipo aprovado do PC 2.0; referência de design
 
 ---
 
@@ -73,11 +74,29 @@ Relação: um documento origina um lançamento. `pfm_codigo` é a chave de cruza
 **`fornecedores`** — cadastro importado dos PFMs do GGV01
 
 Campos relevantes: `nome`, `razao_social`, `cnpj`, `cpf`, `chave_pix`, `email`,
-`whatsapp`, `logradouro`, `bairro`, `cidade`, `uf`.
+`whatsapp`, `logradouro`, `bairro`, `cidade`, `uf`, `ramo`.
 
 Uso: `buscar_fornecedor()` tenta primeiro por CNPJ, depois pelo primeiro token do nome.
 Quando encontrado, os dados do cadastro prevalecem sobre os dados extraídos pelo Claude.
+Campo `ramo` é salvo automaticamente quando extraído do orçamento e o fornecedor ainda não o tem.
 Sem relação de FK com as demais tabelas.
+
+---
+
+**`obras`** — cadastro das obras GGV (adicionada na Fase 4a)
+
+| Campo | Propósito |
+|---|---|
+| `codigo` | Chave primária (ex: GGV03) |
+| `descricao` | Descrição completa da obra/matrícula |
+| `endereco_entrega` | Endereço padrão de entrega dos materiais |
+| `encarregado_nome`, `encarregado_fone` | Encarregado da obra |
+| `responsavel_nome`, `responsavel_fone` | Responsável (Dennis por padrão) |
+| `pasta_onedrive` | Caminho local da pasta OneDrive do GGV |
+| `ativa` | Flag de obra ativa (1/0) |
+
+Pré-populada com GGV00–GGV03 via `_migrar_obras()` (idempotente).
+Substitui os dicts hardcoded `GGV_ENCARREGADO`, `GGV_DESC`, `GGV_ONEDRIVE` e `ENDERECOS`.
 
 ---
 
@@ -91,14 +110,16 @@ Dennis envia foto ou PDF
   → salva em data/uploads/
   → envia para Claude API com PROMPT estruturado
   → Claude retorna tipo, GGV e campos extraídos
+    (inclui: Ramo, Número do orçamento, Vendedor, Telefone do vendedor)
   → bot exibe para confirmação (botões inline)
   → Dennis confirma (ou edita tipo, GGV, campos)
   → bot coleta condição de pagamento e endereço de entrega
   → Dennis aciona "Gerar PFM"
-  → gerar_pfm() cria o .docx via python-docx
-  → salva em OneDrive/GGV03/04 Aquisição e Execução/
+  → gerar_pfm() cria o .docx (salvo em OneDrive — backup silencioso)
   → registra lançamento A PAGAR em lancamentos
-  → envia o .docx para Dennis no Telegram
+  → _gerar_html_pc() monta HTML do Pedido de Compra 2.0
+  → _html_para_pdf() converte HTML → PDF via Playwright Chromium
+  → envia o .pdf para Dennis no Telegram
 ```
 
 **Fluxo B — Consulta de pedido por código**

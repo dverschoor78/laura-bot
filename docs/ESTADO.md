@@ -1,19 +1,17 @@
 # Estado do Projeto Laura
 
-> Atualizado em: 2026-06-29
-> Sessão: Sprint de Experiência — Fase 2 (Estrutura)
+> Atualizado em: 2026-06-30
+> Sessão: Fase 4a — Cadastro de Obras + Fase 4b — PC 2.0 (parcial)
 
 ---
 
 ## Saúde do Projeto
 
-🟢 Verde
+🟡 Amarelo
 
 - Fundação concluída.
 - Ciclo financeiro completo: orçamento → PFM → A PAGAR → comprovante PIX → PAGO.
-- Código estável.
-- Nenhuma funcionalidade interrompida.
-- Nenhuma implementação parcialmente concluída.
+- PC 2.0 (PDF) implementado mas ainda não validado em produção — DOCX continua funcionando.
 - Modo teste operacional e isolado de produção.
 
 ---
@@ -53,6 +51,17 @@
 
 ## Última Fiada Implementada
 
+**Fase 4b — PC 2.0 parcial + Pendências de extração** *(2026-06-30)*
+
+- PROMPT: 4 novos campos — `Ramo de atividade`, `Número do orçamento`, `Vendedor`, `Telefone do vendedor`
+- `fornecedores`: coluna `ramo` adicionada; salva automaticamente ao gerar PFM
+- `_gerar_html_pc()`: gera HTML do Pedido de Compra com dados reais
+- `_html_para_pdf()`: converte HTML para PDF via Playwright Chromium
+- Handler `pfm`: envia PDF em vez de DOCX
+- Playwright instalado como nova dependência
+
+---
+
 **Fase 4a — Cadastro de Obras** *(2026-06-30)*
 
 - Tabela `obras` substitui dicts hardcoded (`GGV_ENCARREGADO`, `GGV_DESC`, `GGV_ONEDRIVE`, `ENDERECOS`)
@@ -76,9 +85,10 @@
 
 ## Em Andamento
 
-**Fase 4b — Pedido de Compra 2.0**
+**Fase 4b — Pedido de Compra 2.0** *(aguarda validação)*
 
-Design aprovado (`prints/pc_alternativa_a.html`). Implementação pendente: geração HTML → PDF com dados reais.
+HTML→PDF implementado via Playwright Chromium. Precisa ser testado em produção com orçamento real.
+O DOCX ainda é gerado em paralelo (salvo na pasta OneDrive). Remoção do Word fica para depois da validação.
 
 ---
 
@@ -120,11 +130,9 @@ Design aprovado (`prints/pc_alternativa_a.html`). Implementação pendente: gera
 
 ## Objetivo da Próxima Sessão
 
-**Fase 4 — Pedido de Compra 2.0 — Implementação**
-
-Design aprovado. Próximo passo: implementar geração de PDF a partir de template HTML.
-Referência visual: `prints/pc_alternativa_a.html`
-Decisão de tecnologia pendente: WeasyPrint vs. Playwright para HTML → PDF.
+1. **Validar PC 2.0** — testar PDF com orçamento real; validar layout, fonte, dados
+2. **Relatório de compras por obra** — extrato tipo cadastro, acessível pelo cockpit da obra
+3. **Remover DOCX do fluxo principal** — após validação do PDF
 
 ---
 
@@ -144,6 +152,6 @@ Arquitetura detalhada:
 
 ---
 
-*Última atualização: 2026-06-29*
+*Última atualização: 2026-06-30*
 *Responsáveis: Dennis + Claude*
 *Próxima revisão: ao final da próxima sessão*

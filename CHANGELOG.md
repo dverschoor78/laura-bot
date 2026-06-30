@@ -10,12 +10,45 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Fase 2 (pendente): saldo do GGV na tela de pedido criado; saldo restante na confirmação de pagamento
-2. Fase 3 — Navegação: Cockpit da Obra, cartão de fornecedor, /pendentes melhorado
-3. Fase 4 — Pedido de Compra: novo layout DOCX + PDF via LibreOffice headless
+1. Validar PDF do PC 2.0 com orçamento real em produção
+2. Relatório de compras por obra (Fase 4c) — extrato acessível pelo cockpit
+3. Remover DOCX do fluxo principal após validação do PDF
 4. Revisão do Pedido de Compra — botão existe, ação pendente
 5. Histórico do Pedido — botão existe, ação pendente
 6. Corrigir BD fornecedores (MO Construção CNPJ errado, PRUDENTÓPOLIS split)
+
+---
+
+## [Fase 4b — Pedido de Compra 2.0] — 2026-06-30
+
+### Novo documento — PC 2.0 em PDF
+
+- Pedido de Compra gerado como PDF com design "A Carta" aprovado
+- Layout em 7 zonas: cabeçalho · contexto · fornecedor · itens · financeiro · condições · tagline
+- Ramo de atividade do fornecedor exibido abaixo do nome
+- Número do orçamento, vendedor e telefone no bloco Origem
+- Encarregado e endereço da obra no bloco Entrega
+- Desconto exibido com percentual calculado automaticamente
+- Tagline da Laura centralizada no fundo do documento
+- DOCX continua gerado silenciosamente como backup no OneDrive
+
+### Extração aprimorada pelo Claude
+
+- 4 novos campos no PROMPT: Ramo de atividade, Número do orçamento, Vendedor, Telefone do vendedor
+- Campo `ramo` adicionado à tabela `fornecedores` — salvo automaticamente ao gerar PFM
+
+---
+
+## [Fase 4a — Cadastro de Obras] — 2026-06-30
+
+### Novo — Cockpit da obra
+
+- Digitar `GGV03` abre o card da obra com dados cadastrais
+- Botão "Editar obra" → seleciona campo → edita pelo chat
+- `/nova_obra` para cadastrar novas obras conversacionalmente
+- `/help` lista o que a Laura faz; comando desconhecido redireciona para `/help`
+- Menu de comandos registrado no Telegram (aparece ao digitar `/`)
+- Resposta "Não entendi." para texto que não corresponde a nenhuma ação
 
 ---
 
