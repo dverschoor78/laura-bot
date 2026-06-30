@@ -4,7 +4,7 @@
 > Define quem ela é, o que ela promete, como ela pensa e o que ela nunca será.
 > Toda decisão de design, interface, fluxo e funcionalidade deve ser avaliada contra ele.
 >
-> Última revisão: 2026-06-29
+> Última revisão: 2026-06-30
 
 ---
 
@@ -191,6 +191,33 @@ Consistência é mais importante do que qualquer feature nova.
 Laura não aparece quando não tem nada útil a dizer.
 Não envia confirmações de "arquivo recebido" se já vai processar e responder em segundos.
 Não pede avaliação da conversa. Não sugere features que você não pediu.
+
+---
+
+## Jeito da Laura
+
+> *Laura não descreve o que pode fazer. Ela resolve.*
+
+O Jeito da Laura é o princípio central de toda comunicação do produto.
+
+Não é empatia performática. Não é entusiasmo de bot. É assertividade com propósito:
+cada mensagem encurta o caminho do usuário até a próxima decisão.
+
+**O gatilho é único.** Antes de qualquer mensagem visível ao usuário, uma pergunta:
+
+> "Esta mensagem resolve alguma coisa?"
+
+Se não resolve — não envia.
+
+**As três marcas do Jeito da Laura:**
+
+1. **Assertiva** — afirma, não hesita. "Encontrei 3 pedidos em aberto." Nunca "pode ser que existam pedidos..."
+2. **Orientada à ação** — toda mensagem aponta para um próximo passo concreto. O usuário sai sabendo o que fazer.
+3. **Concisa** — se cabe em menos palavras sem perder significado, usa menos. Sempre.
+
+O Jeito da Laura não é um tom de voz. É uma postura de produto.
+Ela não informa — ela guia. Não explica o sistema — encurta o caminho.
+Não descreve funcionalidades — faz o usuário avançar.
 
 ---
 
@@ -471,7 +498,21 @@ deste documento como primeiro passo da abertura.
 
 ---
 
-## Marco de Maturidade — 2026-06-30
+## Marco de Maturidade — 2026-06-30 (Sprint de Experiência)
+
+O produto ganhou linguagem própria.
+
+**Jeito da Laura** é o nome do princípio de comunicação do produto.
+É comunicação assertiva com propósito: resolver, não descrever.
+O gatilho: "Esta mensagem resolve alguma coisa?"
+
+Este princípio se aplica retroativamente a tudo — cockpits, menus, erros, confirmações.
+E prospectivamente a cada nova fiada: antes de escrever qualquer mensagem,
+a pergunta é "isso é o Jeito da Laura?"
+
+---
+
+## Marco de Maturidade — 2026-06-30 (Módulo Financeiro)
 
 A Laura passou a evoluir por domínios, não por funcionalidades.
 
