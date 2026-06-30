@@ -251,7 +251,7 @@ def init_db():
                 criado_em        TEXT DEFAULT (datetime('now','localtime'))
             )
         """)
-        for col in ["tipo", "ggv", "dados_claude", "condicao_pgto", "data_entrega", "endereco_entrega", "desconto_rs TEXT", "pfm_numero INTEGER", "vencimento_pgto TEXT", "encarregado TEXT"]:
+        for col in ["tipo", "ggv", "dados_claude", "condicao_pgto", "data_entrega", "endereco_entrega", "desconto_rs TEXT", "pfm_numero INTEGER", "vencimento_pgto TEXT", "encarregado TEXT", "rev_numero INTEGER DEFAULT 0"]:
             try:
                 con.execute(f"ALTER TABLE documentos ADD COLUMN {col}")
             except Exception:
@@ -990,7 +990,7 @@ async def _html_para_pdf(html_str: str) -> bytes:
         await browser.close()
         return pdf
 
-def gerar_pfm(doc_id, categoria=None):
+def gerar_pfm(doc_id, categoria=None, pfm_codigo_override=None):
     with sqlite3.connect(DB_PATH) as con:
         row = con.execute(
             "SELECT ggv, dados_claude, condicao_pgto, data_entrega, endereco_entrega, desconto_rs FROM documentos WHERE id=?",
@@ -1046,9 +1046,12 @@ def gerar_pfm(doc_id, categoria=None):
     subtotal_v, desconto_v, total_final_v = _calcular_totais(dados, desconto_rs)
     valor = f"R$ {_fmt_brl(total_final_v)}" if total_final_v > 0 else _campo(dados, "Valor total")
 
-    pfm_num    = proximo_pfm_numero(ggv)
-    pfm_codigo = f"{ggv}-{pfm_num:03d}"
-    atualizar(doc_id, pfm_numero=pfm_num, status="pfm_gerado")
+    if pfm_codigo_override:
+        pfm_codigo = pfm_codigo_override
+    else:
+        pfm_num    = proximo_pfm_numero(ggv)
+        pfm_codigo = f"{ggv}-{pfm_num:03d}"
+        atualizar(doc_id, pfm_numero=pfm_num, status="pfm_gerado")
 
     now = datetime.now()
     doc = Document()
@@ -1235,9 +1238,12 @@ def gerar_pfm(doc_id, categoria=None):
     caminho = pasta / f"{prefixo}{pfm_codigo}.docx"
     doc.save(caminho)
 
-    lanc_status, ja_existia = registrar_lancamento(
-        doc_id, pfm_codigo, ggv, fornecedor, total_final_v, data_entrega_db, categoria
-    )
+    if pfm_codigo_override:
+        lanc_status, ja_existia = "a_pagar", True
+    else:
+        lanc_status, ja_existia = registrar_lancamento(
+            doc_id, pfm_codigo, ggv, fornecedor, total_final_v, data_entrega_db, categoria
+        )
     return caminho, pfm_codigo, fornecedor, total_final_v, lanc_status, ja_existia
 
 # ── Comprovante PIX ────────────────────────────────────────────────────────
@@ -1821,6 +1827,30 @@ async def _executar_gerar_pfm(query, ctx, doc_id, ggv, categoria):
             f"{fornecedor} — R$ {_fmt_brl(valor_v)}{cat_linha}"
         )
     await ctx.bot.send_message(chat_id=DONO_ID, text=lanc_msg)
+
+
+async def _executar_revisao_pfm(query, ctx, doc_id, pfm_codigo_base):
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute("SELECT rev_numero FROM documentos WHERE id=?", (doc_id,)).fetchone()
+        rev_num = (row[0] or 0) + 1
+        con.execute("UPDATE documentos SET rev_numero=? WHERE id=?", (rev_num, doc_id))
+    rev_codigo = f"{pfm_codigo_base}-R{rev_num:02d}"
+    await query.edit_message_text(f"Gerando revisão {rev_codigo}...")
+    gerar_pfm(doc_id, pfm_codigo_override=rev_codigo)
+    html      = _gerar_html_pc(doc_id)
+    pdf_bytes = await _html_para_pdf(html)
+    await ctx.bot.send_document(
+        chat_id=DONO_ID,
+        document=pdf_bytes,
+        filename=f"{rev_codigo}.pdf",
+        caption=f"📄 {rev_codigo}"
+    )
+    ctx.user_data.pop("modo_revisao", None)
+    await ctx.bot.send_message(
+        chat_id=DONO_ID,
+        text=f"✅ {rev_codigo} gerado. Lançamento financeiro mantido.",
+        reply_markup=teclado_pedido(doc_id, pfm_codigo_base)
+    )
 
 
 # ── Handlers ───────────────────────────────────────────────────────────────
@@ -2450,13 +2480,17 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         elif acao == "pfm":
             _, doc_id, ggv = partes
-            atualizar(int(doc_id), status="confirmado")
-            ramo = _campo(_dados_doc(int(doc_id)), "Ramo de atividade")
-            cat  = sugerir_categoria(ramo)
-            await query.edit_message_text(
-                _tela_categoria(cat, ramo),
-                reply_markup=_teclado_categoria(int(doc_id), ggv, cat)
-            )
+            pfm_codigo_revisao = ctx.user_data.get("modo_revisao")
+            if pfm_codigo_revisao:
+                await _executar_revisao_pfm(query, ctx, int(doc_id), pfm_codigo_revisao)
+            else:
+                atualizar(int(doc_id), status="confirmado")
+                ramo = _campo(_dados_doc(int(doc_id)), "Ramo de atividade")
+                cat  = sugerir_categoria(ramo)
+                await query.edit_message_text(
+                    _tela_categoria(cat, ramo),
+                    reply_markup=_teclado_categoria(int(doc_id), ggv, cat)
+                )
 
         elif acao == "cat_confirmar":
             _, doc_id, ggv, cat_val = partes
@@ -2475,8 +2509,9 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         elif acao == "pfm_revisar":
             _, doc_id, pfm_codigo = partes
-            ctx.user_data["doc_id"] = int(doc_id)
-            ctx.user_data["tipo"]   = "orcamento"
+            ctx.user_data["doc_id"]       = int(doc_id)
+            ctx.user_data["tipo"]         = "orcamento"
+            ctx.user_data["modo_revisao"] = pfm_codigo
             texto_resumo, markup = _resumo_gerar(int(doc_id))
             try:
                 await query.edit_message_text(texto_resumo, reply_markup=markup, parse_mode="HTML")
