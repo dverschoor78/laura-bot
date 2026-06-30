@@ -14,9 +14,9 @@
 >
 > *Laura não espera ser perguntada. Ela mostra o que precisa de atenção.*
 
-Laura existe para uma finalidade única:
+Laura existe para uma finalidade que cresceu com o produto:
 
-> **Garantir que quem constrói nunca perca o rastro de uma compra.**
+> **Garantir que quem constrói nunca perca o rastro de uma compra — nem de nenhum centavo da obra.**
 
 Não é um ERP. Não é um bot de automação. Não é um gerador de documentos.
 
@@ -84,6 +84,27 @@ na forma como essa pessoa se relaciona com o dinheiro das suas obras.
 
 O profissional deixa de ser o guardião da informação e passa a ser o tomador de decisões.
 Laura cuida da memória. O usuário cuida da obra.
+
+---
+
+## Os Dois Objetos Centrais
+
+A Laura possui dois objetos de domínio de primeira classe. Toda decisão de produto
+deve preservar a separação entre eles.
+
+**Pedido de Compra** — registra uma decisão.
+O que será comprado, de quem, por quanto, com quais condições. É a ordem formal
+da empresa. Nasce de um orçamento. Circula como PDF. Identifica-se por #GGV03-009.
+
+**Lançamento Financeiro** — preserva as consequências dessa decisão.
+O impacto real no caixa da obra: quanto foi comprometido, quanto foi pago, se foi
+conciliado com o banco. Nasce automaticamente de um Pedido de Compra — ou manualmente,
+para fatos financeiros que não geram pedido (aportes, impostos, avulsos).
+
+> *"O Pedido de Compra registra uma decisão. O Lançamento Financeiro preserva suas
+> consequências. Juntos, eles contam a história econômica da obra."*
+
+Um gera o outro. Nenhum substitui o outro.
 
 ---
 
@@ -373,7 +394,7 @@ quem comprou, de quem, o quê, quanto, quando e como paga.
 
 ## A Promessa
 
-> **Você nunca vai perder o rastro de uma compra.**
+> **Você nunca vai perder o rastro de uma compra — nem de nenhum centavo da obra.**
 
 Essa é a promessa de Laura ao usuário.
 
@@ -381,6 +402,10 @@ Toda compra tem um registro.
 Todo registro tem um status.
 Todo status é confiável.
 Toda informação está a uma mensagem de distância.
+
+A promessa não mudou de natureza. Ela cresceu.
+A Laura deixou de preservar apenas o rastro das compras.
+Passou a preservar também toda a história financeira das obras.
 
 Esta promessa é inviolável.
 Se uma feature compromete a integridade dos dados, ela não entra.
@@ -443,6 +468,22 @@ Quando houver conflito entre uma feature técnica e a identidade do produto, a i
 `docs/PROCESSO.md` define dois tipos de sessão de desenvolvimento: **Sessão de Engenharia**
 e **Sessão de Produto**. Toda fiada que produza algo visível ao usuário requer a leitura
 deste documento como primeiro passo da abertura.
+
+---
+
+## Marco de Maturidade — 2026-06-30
+
+A Laura passou a evoluir por domínios, não por funcionalidades.
+
+Primeiro domínio: **Compras** — Pedido de Compra, orçamento, fornecedores. Reside em `bot.py`.
+Segundo domínio: **Financeiro** — Lançamento Financeiro, extrato, conciliação. Reside em `financeiro/`.
+
+Novos domínios nascem modulares. Domínios existentes permanecem onde estão até
+existir um motivo real para migração.
+
+No horizonte, surge naturalmente um terceiro objeto de domínio: a **Obra** — não apenas
+como código identificador, mas como agregador de tudo que acontece em uma construção.
+Quando esse momento chegar, a separação já existirá; bastará reunir o que já está separado.
 
 ---
 

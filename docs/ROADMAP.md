@@ -153,11 +153,34 @@ Mostra todos os PFMs de um GGV com status financeiro e totalizadores.
 
 ---
 
+## Visão de Longo Prazo — Obra como Terceiro Objeto
+
+*Registrado em 2026-06-30. Não implementar antes de existir motivo real.*
+
+A Laura possui hoje dois objetos de domínio:
+- **Pedido de Compra** — a decisão de comprar
+- **Lançamento Financeiro** — o impacto financeiro dessa decisão
+
+Naturalmente surgirá um terceiro: a **Obra** — não apenas como código identificador (GGV03),
+mas como agregador de toda a informação de uma construção.
+
+Uma Obra futura reunirá:
+- Pedidos de Compra (já existem, vinculados por GGV)
+- Lançamentos Financeiros (em construção)
+- Documentos (plantas, contratos, alvarás)
+- Cronograma físico
+- Custos acumulados e projeção de término
+- Indicadores de rentabilidade
+
+Quando esse momento chegar, a separação já existirá nos domínios.
+Bastará criar o objeto Obra como agregador — sem reescrever o que já funciona.
+
+---
+
 ## Ideias Futuras
 
-- Conciliação com extrato Mercado Pago
-- Relatório mensal por GGV
-- Exportação XLSX dos lançamentos
+- Relatório mensal por GGV gerado e enviado automaticamente
+- Exportação XLSX dos lançamentos por obra
 - `/pendentes` com filtros por GGV e período
 - Backup automático do banco via cron
 - Sugestão automática de tipo de documento ("Sugerir automaticamente")

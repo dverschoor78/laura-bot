@@ -10,12 +10,47 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Validar PDF do PC 2.0 com orçamento real em produção
-2. Relatório de compras por obra (Fase 4c) — extrato acessível pelo cockpit
+1. Fiada 5a-1 — Categoria no Lançamento: `sugerir_categoria()` integrada ao fluxo do PFM
+2. Validar PDF do PC 2.0 com orçamento real em produção
 3. Remover DOCX do fluxo principal após validação do PDF
 4. Revisão do Pedido de Compra — botão existe, ação pendente
 5. Histórico do Pedido — botão existe, ação pendente
 6. Corrigir BD fornecedores (MO Construção CNPJ errado, PRUDENTÓPOLIS split)
+
+---
+
+## [Fase 5 — Módulo Financeiro: Fiada 0 — Fundação] — 2026-06-30
+
+### Marco de arquitetura de produto
+
+Esta sessão foi uma sessão de arquitetura de produto, não apenas de engenharia.
+
+Até aqui a Laura tinha um único objeto de domínio: o Pedido de Compra.
+A partir desta fase nasce um segundo objeto igualmente importante: o Lançamento Financeiro.
+
+> *"O Pedido de Compra registra uma decisão. O Lançamento Financeiro preserva suas
+> consequências. Juntos, eles contam a história econômica da obra."*
+
+**Princípio arquitetural registrado (ADR-002):**
+> *"Todo novo domínio nasce modular. Os domínios existentes permanecem no monólito
+> até existir um motivo real para migração. A modularização acontece por nascimento,
+> não por refatoração."*
+
+**Visão de longo prazo registrada:**
+Surge naturalmente um terceiro grande objeto futuro: a **Obra** — não apenas como código
+(GGV03), mas como agregador de Pedidos de Compra, Lançamentos Financeiros, documentos,
+cronograma, custos e indicadores. Registrado no ROADMAP. Não implementado agora.
+
+### Fiada 0 — Fundação (sem comportamento novo ao usuário)
+
+- `financeiro/lancamento.py`: `CategoriaLancamento`, `StatusLancamento`, `TipoDocumento`,
+  `sugerir_categoria()`, `init_db_financeiro()`
+- `financeiro/conciliacao.py`: esqueleto documentado para Fase 5d
+- `financeiro/__init__.py`: contrato público do domínio
+- `app/README.md`: elimina ambiguidade da pasta reservada para ADR-003
+- `bot.py`: `init_db()` passa a chamar `init_db_financeiro(DB_PATH)` ao iniciar
+- `lancamentos`: novas colunas `categoria`, `tipo_documento`, `fonte_recurso`, `conciliado_em`
+  adicionadas via ALTER TABLE idempotente
 
 ---
 

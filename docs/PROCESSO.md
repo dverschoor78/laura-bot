@@ -95,6 +95,11 @@ Não existe velocidade de entrega que justifique comprometer a identidade do pro
 - Uma responsabilidade por fiada
 - Não misturar refatoração com nova funcionalidade
 
+**Regra de domínio (ADR-002):**
+- Lógica de negócio do domínio Financeiro nasce em `financeiro/` — nunca em `bot.py`
+- `bot.py` é o orquestrador da conversa Telegram; ele chama o domínio, não implementa a lógica
+- Todo novo domínio futuro segue o mesmo princípio: nasce em seu próprio módulo desde o primeiro dia
+
 Se durante a implementação o escopo crescer, parar e replanejar.
 
 ---
