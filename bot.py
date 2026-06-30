@@ -318,7 +318,7 @@ def _resumo_gerar(doc_id):
         return "Documento não encontrado.", None
     dados, tipo, ggv, condicao, data_ent, desconto_rs, vencimento, encarregado, endereco = row
 
-    label_ggv = ggv if ggv != "nao_identificado" else "Obra não identificada"
+    label_ggv = f"Obra {ggv}" if ggv != "nao_identificado" else "Obra não identificada"
 
     def _v(val):
         return None if (not val or val == "A PREENCHER") else val
@@ -337,54 +337,55 @@ def _resumo_gerar(doc_id):
     SEP = "──────────────────────────────────"
     linhas = []
 
-    # Bloco 1 — Fornecedor + Obra
-    linhas.append(fornecedor)
-    linhas.append(label_ggv)
+    # Bloco 1 — Obra
+    linhas.append(f"<b>{_esc_html(label_ggv)}</b>")
     linhas.append(SEP)
 
-    # Bloco 2 — Itens + Total
+    # Bloco 2 — Fornecedor + dados de pagamento do fornecedor
+    linhas.append(_esc_html(fornecedor))
+    if cnpj: linhas.append(f"CNPJ  {_esc_html(cnpj)}")
+    if pix:  linhas.append(f"PIX   {_esc_html(pix)}")
+    linhas.append(SEP)
+
+    # Bloco 3 — Itens + Total
     bloco_itens = _bloco_itens(dados)
     for linha in bloco_itens.splitlines():
         if linha.strip():
-            linhas.append(linha.strip())
-    if total_final_v > 0:
-        linhas.append(f"Total — R$ {_fmt_brl(subtotal_v if desconto_v > 0 else total_final_v)}")
+            linhas.append(_esc_html(linha.strip()))
+    if subtotal_v > 0:
+        linhas.append(f"Total — R$ {_fmt_brl(subtotal_v)}")
     linhas.append(SEP)
 
-    # Bloco 3 — Financeiro + Pagamento
+    # Bloco 4 — Financeiro (desconto → valor final → condição → vencimento)
     if desconto_v > 0 and subtotal_v > 0:
         pct = desconto_v / subtotal_v * 100
         linhas.append(f"Desconto — R$ {_fmt_brl(desconto_v)} ({pct:.0f}%)")
-        linhas.append(f"Valor final — R$ {_fmt_brl(total_final_v)}")
-    linhas.append(cond if cond else "Pagamento: não informado")
-    linhas.append(_v(vencimento) if _v(vencimento) else "Vencimento: não informado")
+    if total_final_v > 0:
+        linhas.append(f"<b>Valor final — R$ {_fmt_brl(total_final_v)}</b>")
+    else:
+        linhas.append("<b>Valor final: não informado</b>")
+    linhas.append(_esc_html(cond) if cond else "Pagamento: não informado")
+    linhas.append(_esc_html(_v(vencimento)) if _v(vencimento) else "Vencimento: não informado")
     linhas.append(SEP)
 
-    # Bloco 4 — Logística
-    linhas.append(f"Entrega: {entrega if entrega else 'não informada'}")
-    linhas.append(f"Endereço: {endereco if endereco else 'não informado'}")
+    # Bloco 5 — Logística
+    linhas.append(f"Entrega: {_esc_html(entrega) if entrega else 'não informada'}")
+    linhas.append(f"Endereço: {_esc_html(endereco) if endereco else 'não informado'}")
     if validade:
-        linhas.append(f"Válido até: {validade}")
+        linhas.append(f"Válido até: {_esc_html(validade)}")
     if enc:
-        linhas.append(f"Dúvidas: Dennis {DELTAD['fone']} ou {enc}, encarregado")
+        linhas.append(f"Dúvidas: Dennis {DELTAD['fone']} ou {_esc_html(enc)}, encarregado")
     else:
         linhas.append(f"Dúvidas: Dennis {DELTAD['fone']}")
+    linhas.append(SEP)
 
-    # Bloco 5 — Fornecedor (dados de pagamento)
-    if cnpj or pix:
-        linhas.append(SEP)
-        if cnpj: linhas.append(f"CNPJ  {cnpj}")
-        if pix:  linhas.append(f"PIX   {pix}")
-
-    # Bloco 6 — Observações
-    if obs:
-        linhas.append(SEP)
-        linhas.append(f"Obs: {obs}")
+    # Bloco 6 — Observações (sempre mostrado)
+    linhas.append(f"Obs: {_esc_html(obs) if obs else 'não informado'}")
 
     # Atenção quando obra não definida
     if ggv == "nao_identificado":
         linhas.append(SEP)
-        linhas.append("Defina a obra antes de gerar o Pedido de Compra.")
+        linhas.append("⚠️ Defina a obra antes de gerar o Pedido de Compra.")
 
     return "\n".join(linhas), teclado_orcamento(doc_id, tipo, ggv)
 
@@ -420,6 +421,9 @@ def buscar_fornecedor(nome_claude, cnpj_claude=None):
     return None
 
 # ── PFM ───────────────────────────────────────────────────────────────────
+
+def _esc_html(s):
+    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 def _campo(dados, nome):
     nao_encontrado = {
@@ -963,16 +967,14 @@ def parse_resposta(texto):
 def teclado_orcamento(doc_id, tipo, ggv):
     if ggv == "nao_identificado":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("📍 Definir obra",    callback_data=f"sel_ggv:{doc_id}:{tipo}:{ggv}")],
-            [InlineKeyboardButton("📦 Conferir itens",  callback_data=f"ver_itens:{doc_id}:{tipo}:{ggv}")],
-            [InlineKeyboardButton("✏️ Corrigir dados",  callback_data=f"sel_edit:{doc_id}:{tipo}:{ggv}")],
-            [InlineKeyboardButton("Cancelar",           callback_data=f"cancelar:{doc_id}")],
+            [InlineKeyboardButton("📍 Definir obra",   callback_data=f"sel_ggv:{doc_id}:{tipo}:{ggv}")],
+            [InlineKeyboardButton("✏️ Corrigir dados", callback_data=f"sel_edit:{doc_id}:{tipo}:{ggv}")],
+            [InlineKeyboardButton("Cancelar",          callback_data=f"cancelar:{doc_id}")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Gerar Pedido de Compra", callback_data=f"pfm:{doc_id}:{ggv}")],
-        [InlineKeyboardButton("📦 Conferir itens",          callback_data=f"ver_itens:{doc_id}:{tipo}:{ggv}")],
-        [InlineKeyboardButton("✏️ Corrigir dados",          callback_data=f"sel_edit:{doc_id}:{tipo}:{ggv}")],
-        [InlineKeyboardButton("Cancelar",                   callback_data=f"cancelar:{doc_id}")],
+        [InlineKeyboardButton("✏️ Corrigir dados",         callback_data=f"sel_edit:{doc_id}:{tipo}:{ggv}")],
+        [InlineKeyboardButton("Cancelar",                  callback_data=f"cancelar:{doc_id}")],
     ])
 
 def teclado_candidatos_pix(doc_id_comp: int, candidatos: list):
@@ -1243,13 +1245,13 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         atualizar(doc_id, condicao_pgto=texto)
         ctx.user_data["aguardando"] = None
         texto_resumo, markup = _resumo_gerar(doc_id)
-        await update.message.reply_text(texto_resumo, reply_markup=markup)
+        await update.message.reply_text(texto_resumo, reply_markup=markup, parse_mode="HTML")
 
     elif aguardando == "data_entrega":
         atualizar(doc_id, data_entrega=texto)
         ctx.user_data["aguardando"] = None
         texto_resumo, markup = _resumo_gerar(doc_id)
-        await update.message.reply_text(texto_resumo, reply_markup=markup)
+        await update.message.reply_text(texto_resumo, reply_markup=markup, parse_mode="HTML")
 
     elif aguardando == "edit_desconto":
         try:
@@ -1259,7 +1261,7 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         atualizar(doc_id, desconto_rs=f"{v:.2f}" if v > 0 else None)
         ctx.user_data["aguardando"] = None
         texto_resumo, markup = _resumo_gerar(doc_id)
-        await update.message.reply_text(texto_resumo, reply_markup=markup)
+        await update.message.reply_text(texto_resumo, reply_markup=markup, parse_mode="HTML")
 
     elif aguardando in ("edit_fornecedor", "edit_cnpj", "edit_valor", "edit_pix", "edit_itens"):
         campo_map = {
@@ -1284,7 +1286,7 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             atualizar(doc_id, dados_claude=novos_dados)
             ctx.user_data["aguardando"] = None
             texto_resumo, markup = _resumo_gerar(doc_id)
-            await update.message.reply_text(texto_resumo, reply_markup=markup)
+            await update.message.reply_text(texto_resumo, reply_markup=markup, parse_mode="HTML")
         else:
             ctx.user_data["aguardando"] = None
             await update.message.reply_text("Documento não encontrado.")
@@ -1293,19 +1295,19 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         atualizar(doc_id, endereco_entrega=texto)
         ctx.user_data["aguardando"] = None
         texto_resumo, markup = _resumo_gerar(doc_id)
-        await update.message.reply_text(texto_resumo, reply_markup=markup)
+        await update.message.reply_text(texto_resumo, reply_markup=markup, parse_mode="HTML")
 
     elif aguardando == "vencimento_pgto":
         atualizar(doc_id, vencimento_pgto=texto)
         ctx.user_data["aguardando"] = None
         texto_resumo, markup = _resumo_gerar(doc_id)
-        await update.message.reply_text(texto_resumo, reply_markup=markup)
+        await update.message.reply_text(texto_resumo, reply_markup=markup, parse_mode="HTML")
 
     elif aguardando == "edit_encarregado":
         atualizar(doc_id, encarregado=texto)
         ctx.user_data["aguardando"] = None
         texto_resumo, markup = _resumo_gerar(doc_id)
-        await update.message.reply_text(texto_resumo, reply_markup=markup)
+        await update.message.reply_text(texto_resumo, reply_markup=markup, parse_mode="HTML")
 
 async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1332,7 +1334,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if tipo == "orcamento":
                 ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": None})
                 texto, markup = _resumo_gerar(int(doc_id))
-                await query.edit_message_text(texto, reply_markup=markup)
+                await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
             elif tipo == "comprovante_pix":
                 dados_claude = _dados_doc(int(doc_id))
                 dados        = parse_comprovante(dados_claude)
@@ -1359,10 +1361,10 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 status = con.execute("SELECT status FROM documentos WHERE id=?", (int(doc_id),)).fetchone()[0]
             if status == "confirmado":
                 texto, markup = _resumo_gerar(int(doc_id))
-                await query.edit_message_text(texto, reply_markup=markup)
+                await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
             else:
                 texto, markup = _resumo_gerar(int(doc_id))
-                await query.edit_message_text(texto, reply_markup=markup)
+                await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
 
         elif acao == "sel_tipo_inicial":
             _, doc_id, tipo = partes
@@ -1418,7 +1420,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     )
             elif tipo == "orcamento":
                 texto, markup = _resumo_gerar(int(doc_id))
-                await query.edit_message_text(texto, reply_markup=markup)
+                await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
             else:
                 await query.edit_message_text(
                     f"{label_tipo}\n\n{corpo}\n\nConfirmar ou cancelar?",
@@ -1525,10 +1527,10 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 status = con.execute("SELECT status FROM documentos WHERE id=?", (int(doc_id),)).fetchone()[0]
             if status == "confirmado":
                 texto, markup = _resumo_gerar(int(doc_id))
-                await query.edit_message_text(texto, reply_markup=markup)
+                await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
             else:
                 texto, markup = _resumo_gerar(int(doc_id))
-                await query.edit_message_text(texto, reply_markup=markup)
+                await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
 
         elif acao == "pgto":
             _, doc_id, ggv, escolha = partes
@@ -1540,7 +1542,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             atualizar(int(doc_id), condicao_pgto=label_pgto)
             ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": None})
             texto, markup = _resumo_gerar(int(doc_id))
-            await query.edit_message_text(texto, reply_markup=markup)
+            await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
 
         elif acao == "end":
             _, doc_id, ggv, escolha = partes
@@ -1551,7 +1553,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             endereco = ENDERECOS.get(escolha, escolha)
             atualizar(int(doc_id), endereco_entrega=endereco)
             texto, markup = _resumo_gerar(int(doc_id))
-            await query.edit_message_text(texto, reply_markup=markup)
+            await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
 
         elif acao == "sel_edit":
             _, doc_id, tipo, ggv = partes
@@ -1652,7 +1654,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         elif acao == "voltar_edit":
             _, doc_id, tipo, ggv = partes
             texto, markup = _resumo_gerar(int(doc_id))
-            await query.edit_message_text(texto, reply_markup=markup)
+            await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
 
         elif acao == "ver_itens":
             _, doc_id, tipo, ggv = partes
