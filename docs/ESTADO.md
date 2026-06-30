@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-06-30
-> Sessão: Fase 5 — Módulo Financeiro (Fiada 0 — Fundação)
+> Sessão: Fase 5 — Módulo Financeiro (Fiada 5a-1 — Categoria no Lançamento)
 
 ---
 
@@ -51,6 +51,16 @@
 ---
 
 ## Última Fiada Implementada
+
+**Fase 5 — Fiada 5a-1 — Categoria no Lançamento** *(2026-06-30)*
+
+- `sugerir_categoria()` integrada ao fluxo do PFM em `bot.py`
+- Tela de categoria exibida antes de gerar o pedido: sugestão com [✅ Confirmar] ou grade de seleção quando sem sugestão
+- `registrar_lancamento()` e `gerar_pfm()` recebem `categoria` como parâmetro
+- Categoria exibida na mensagem pós-PFM e na tela Financeiro do pedido
+- Modo teste: deduplicação por `identificador_comprovante` bypassada (duas ocorrências)
+
+---
 
 **Fase 5 — Módulo Financeiro: Fiada 0 — Fundação** *(2026-06-30)*
 
@@ -143,8 +153,8 @@ O DOCX ainda é gerado em paralelo (salvo na pasta OneDrive). Remoção do Word 
 
 ## Objetivo da Próxima Sessão
 
-1. **Fiada 5a-1 — Categoria no Lançamento** — `sugerir_categoria()` integrada ao fluxo do PFM; usuário vê e confirma antes de gravar
-2. **Validar PC 2.0** — testar PDF com orçamento real; validar layout, fonte, dados
+1. **Validar PC 2.0** — testar PDF com orçamento real em modo teste; validar layout, fonte, dados
+2. **Fiada 5b-1 — Extrato da Obra** — `extrato_obra()`, `totais_obra()` em `financeiro/lancamento.py`; cockpit da obra exibe bloco financeiro
 3. **Remover DOCX do fluxo principal** — após validação do PDF
 
 ---

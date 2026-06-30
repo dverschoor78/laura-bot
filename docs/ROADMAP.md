@@ -14,11 +14,11 @@
 - `app/README.md`: elimina ambiguidade da pasta reservada
 - `lancamentos`: novas colunas `categoria`, `tipo_documento`, `fonte_recurso`, `conciliado_em`
 
-**Fiada 5a-1 — Categoria no Lançamento** *(próxima)*
+**Fiada 5a-1 — Categoria no Lançamento** ✓ *(concluída 2026-06-30)*
 
 - `sugerir_categoria()` integrada ao fluxo do PFM em bot.py
-- Usuário vê categoria sugerida com botão de confirmação/correção antes de gravar
-- Lançamento gravado inclui `categoria`
+- Tela de categoria antes de gerar o pedido: sugestão com confirmação ou grade de seleção
+- Lançamento gravado inclui `categoria`; exibida na mensagem pós-PFM e na tela Financeiro
 
 **Fiada 5b-1 — Extrato da Obra** *(planejada)*
 

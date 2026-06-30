@@ -10,12 +10,23 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Fiada 5a-1 — Categoria no Lançamento: `sugerir_categoria()` integrada ao fluxo do PFM
-2. Validar PDF do PC 2.0 com orçamento real em produção
-3. Remover DOCX do fluxo principal após validação do PDF
+1. Validar PDF do PC 2.0 com orçamento real em produção
+2. Remover DOCX do fluxo principal após validação do PDF
+3. Fiada 5b-1 — Extrato da Obra: `extrato_obra()`, `totais_obra()` no cockpit
 4. Revisão do Pedido de Compra — botão existe, ação pendente
 5. Histórico do Pedido — botão existe, ação pendente
 6. Corrigir BD fornecedores (MO Construção CNPJ errado, PRUDENTÓPOLIS split)
+
+---
+
+## [Fase 5 — Fiada 5a-1 — Categoria no Lançamento] — 2026-06-30
+
+### O que mudou
+
+- Ao clicar "✅ Gerar Pedido de Compra", Laura sugere a categoria do lançamento com base no ramo do fornecedor (`sugerir_categoria()` de `financeiro/lancamento.py`)
+- Usuário confirma a sugestão ou seleciona manualmente entre todas as categorias disponíveis
+- Lançamento gravado inclui `categoria`; exibida na mensagem de confirmação e na tela Financeiro do pedido
+- Modo teste: deduplicação de comprovante PIX (por `identificador_comprovante`) bypassada em `TEST_MODE`, alinhando com o comportamento já existente para hash de arquivo
 
 ---
 
