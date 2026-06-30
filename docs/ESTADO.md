@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-06-30
-> Sessão: Fase 5 — Módulo Financeiro (Fiada 5a-1 — Categoria no Lançamento)
+> Sessão: Sprint de Experiência — Redesign de Cockpits
 
 ---
 
@@ -51,6 +51,15 @@
 ---
 
 ## Última Fiada Implementada
+
+**Sprint de Experiência — Redesign de Cockpits** *(2026-06-30)*
+
+- Cockpit do pedido: header compacto, financeiro consolidado, sem CNPJ/labels redundantes
+- Botão PDF regenera via Playwright; histórico completo com entrega prevista e valor pago
+- Cockpit da obra: header limpo, placeholder financeiro, CEP removido, botão Fechar
+- Lista de pedidos da obra: tela própria via "📋 Pedidos", navegação direta ao pedido
+
+---
 
 **Fase 5 — Fiada 5a-1 — Categoria no Lançamento** *(2026-06-30)*
 
@@ -153,9 +162,10 @@ O DOCX ainda é gerado em paralelo (salvo na pasta OneDrive). Remoção do Word 
 
 ## Objetivo da Próxima Sessão
 
-1. **Validar PC 2.0** — testar PDF com orçamento real em modo teste; validar layout, fonte, dados
-2. **Fiada 5b-1 — Extrato da Obra** — `extrato_obra()`, `totais_obra()` em `financeiro/lancamento.py`; cockpit da obra exibe bloco financeiro
-3. **Remover DOCX do fluxo principal** — após validação do PDF
+1. **Testar fluxo completo** em `LAURA_ENV=test` — orçamento → categoria → PFM → comprovante → pago → cockpits
+2. **Validar PC 2.0** — testar PDF com orçamento real; validar layout, fonte, dados
+3. **Fiada 5b-1 — Extrato da Obra** — substituir placeholder `⚪ Sem dados financeiros` com dados reais
+4. **Remover DOCX do fluxo principal** — após validação do PDF
 
 ---
 

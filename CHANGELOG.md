@@ -12,10 +12,35 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ### Próximas fiadas (priorizadas)
 1. Validar PDF do PC 2.0 com orçamento real em produção
 2. Remover DOCX do fluxo principal após validação do PDF
-3. Fiada 5b-1 — Extrato da Obra: `extrato_obra()`, `totais_obra()` no cockpit
-4. Revisão do Pedido de Compra — botão existe, ação pendente
-5. Histórico do Pedido — botão existe, ação pendente
-6. Corrigir BD fornecedores (MO Construção CNPJ errado, PRUDENTÓPOLIS split)
+3. Fiada 5b-1 — Extrato da Obra: `extrato_obra()`, `totais_obra()` substituem o placeholder financeiro no cockpit
+4. Corrigir BD fornecedores (MO Construção CNPJ errado, PRUDENTÓPOLIS split)
+5. Revisão do Pedido de Compra — botão existe, ação pendente
+
+---
+
+## [Sprint de Experiência — Redesign de Cockpits] — 2026-06-30
+
+### Cockpit do Pedido
+
+- Header compacto: `🟢 #GGV03-005 — Pago` em vez de campos separados por label
+- Valor final consolidado com desconto entre parênteses; condição e entrega na mesma linha
+- CNPJ, vencimento vazio e labels redundantes removidos
+- Botão "📄 Word" → "📄 PDF" — regenerado via Playwright na hora (sem dependência de arquivo em disco)
+- Histórico completo implementado: orçamento recebido, pedido gerado, entrega prevista, pago com valor
+- `data_pagamento` adicionada ao dataclass `Pedido` e à query de `buscar_pedido()`
+
+### Cockpit da Obra
+
+- Header: `GGV03 — Condomínio residencial` — código sem repetição na descrição
+- Bloco financeiro placeholder (`⚪ Sem dados financeiros`) reservado para Fiada 5b-1
+- CEP removido do endereço; separador ` - ` → ` · `
+- Botões: `📋 Pedidos` · `✏️ Editar obra` · `✖ Fechar`
+
+### Lista de Pedidos da Obra
+
+- Tela própria via botão "📋 Pedidos": lista compacta com emoji de status, código, fornecedor e valor
+- Botões individuais (2 por linha) com navegação direta ao cockpit do pedido
+- "◀️ Voltar à obra" retorna ao cockpit do GGV
 
 ---
 
