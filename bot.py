@@ -582,8 +582,49 @@ def _substituir_itens(dados, novo_bloco):
         return dados + f"\nItens:\n{novo_bloco}"
     return "\n".join(linhas[:inicio + 1] + novo_bloco.splitlines() + linhas[fim:])
 
+def _recalcular_itens(dados: str) -> str:
+    """Após edição de itens, recalcula total de cada linha (qtde × unit) e atualiza Valor total."""
+    linhas_out = []
+    capturando = False
+    novo_total = 0.0
+    for linha in dados.splitlines():
+        stripped = linha.strip().lstrip("- *")
+        if re.match(r"^(itens|materiais)", stripped, re.IGNORECASE) and ":" in stripped:
+            capturando = True
+            linhas_out.append(linha)
+            continue
+        if capturando:
+            if re.match(r"^(valor total|condição|condicao|prazo|validade|observ)", stripped, re.IGNORECASE):
+                capturando = False
+                linhas_out.append(linha)
+                continue
+            m = ITEM_RE.match(stripped)
+            if m:
+                desc, qtde_str, und, val1, val2 = m.groups()
+                qtde_v = _parse_brl(qtde_str)
+                num_m = re.match(r"^(\d+)\.", stripped)
+                num = num_m.group(1) if num_m else "?"
+                if val2:
+                    unit_v  = _parse_brl(val1)
+                    total_v = round(qtde_v * unit_v, 2)
+                    novo_total += total_v
+                    linhas_out.append(
+                        f"{num}. {desc.strip()} ({qtde_str} {und.upper()}) — R$ {_fmt_brl(unit_v)} cada = R$ {_fmt_brl(total_v)}"
+                    )
+                    continue
+                else:
+                    novo_total += _parse_brl(val1)
+            linhas_out.append(linha)
+            continue
+        linhas_out.append(linha)
+    resultado = "\n".join(linhas_out)
+    if novo_total > 0:
+        resultado = _substituir_campo(resultado, "Valor total", f"R$ {_fmt_brl(novo_total)}")
+    return resultado
+
 ITEM_RE = re.compile(
-    r"^\d+\.\s+(.+?)\s+\(([0-9,.]+)\s+([A-Za-z]{1,4})\)\s*[—–\-]+\s*R\$\s*([0-9.,]+)",
+    r"^\d+\.\s+(.+?)\s+\(([0-9,.]+)\s+([A-Za-z]{1,4})\)\s*[—–\-]+\s*R\$\s*([0-9.,]+)"
+    r"(?:\s*cada\s*=\s*R\$\s*([0-9.,]+))?",
     re.IGNORECASE,
 )
 
@@ -612,10 +653,14 @@ def _itens(dados):
                 break
             m = ITEM_RE.match(stripped)
             if m:
-                desc, qtde_str, und, total_str = m.groups()
-                total_v = _parse_brl(total_str)
-                qtde_v  = _parse_brl(qtde_str)
-                unit_v  = total_v / qtde_v if qtde_v else 0
+                desc, qtde_str, und, val1, val2 = m.groups()
+                qtde_v = _parse_brl(qtde_str)
+                if val2:
+                    unit_v  = _parse_brl(val1)
+                    total_v = round(qtde_v * unit_v, 2)
+                else:
+                    total_v = _parse_brl(val1)
+                    unit_v  = total_v / qtde_v if qtde_v else 0
                 resultado.append({
                     "desc":     desc.strip(),
                     "und":      und.upper(),
@@ -1964,7 +2009,7 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if row:
             dados_atuais, ggv_db = row
             if aguardando == "edit_itens":
-                novos_dados = _substituir_itens(dados_atuais, texto)
+                novos_dados = _recalcular_itens(_substituir_itens(dados_atuais, texto))
                 nome_campo = "Itens"
             else:
                 nome_campo = campo_map[aguardando]
