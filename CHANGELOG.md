@@ -18,6 +18,21 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Fase 6 — Fiada 6c — Foto de Entrega e Registro de Entrega] — 2026-06-30
+
+### Ciclo logístico fechado: pedido → pago → NF-e → entregue
+
+- Novo tipo de documento `foto_entrega` no seletor — sem análise Claude, vai direto à seleção do pedido
+- `/entrega`: lista pedidos sem entrega registrada → seleciona → observação → grava
+- Botão `📦 Entregue` no cockpit do pedido enquanto entrega não registrada; vira `📦 Foto de entrega` quando tem foto
+- Teclado de observações com sugestões de Laura: Entrega completa · Entrega parcial · Material com avaria · Produto diferente · Outra
+- Qualquer pedido pode receber entrega, independente de status (a_pagar ou pago)
+- Cockpit: histórico com data e observação; `📦 Foto de entrega` nos arquivos quando houver foto
+- Ajuda (`/help`) atualizada com "Incluir nota fiscal" e "Registrar entrega"
+- Banco: colunas `doc_id_entrega`, `obs_entrega`, `entregue_em` em `lancamentos`
+
+---
+
 ## [Fiada 6a+ — Contato vendedor na tela de extração] — 2026-06-30
 
 - Bloco Fornecedor da tela de validação exibe `Contato   Flávio  42 99912-7781` quando extraído
