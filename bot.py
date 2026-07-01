@@ -92,6 +92,7 @@ GGV_CODIGO_RE = re.compile(r"^\s*(GGV\d{2})\s*$", re.IGNORECASE)
 class StatusPedido(str, Enum):
     A_PAGAR          = "a_pagar"
     PAGO             = "pago"
+    PAGO_COM_RECIBO  = "pago_com_recibo"
     PENDENTE_REVISAO = "pendente_revisao"
     SUBSTITUIDO      = "substituido"
     SEM_LANCAMENTO   = "sem_lancamento"
@@ -127,6 +128,7 @@ class Pedido:
     obs_entrega:           Optional[str] = None
     entregue_em:           Optional[str] = None
     categoria:             Optional[str] = None
+    doc_id_recibo:         Optional[int] = None
 
     # Arquivos — populados por preparar_visualizacao_pedido()
     caminho_orcamento: Optional[str] = None
@@ -382,7 +384,7 @@ def init_db():
         """)
         for col in ["valor_pago REAL", "data_pagamento TEXT", "doc_id_comprovante INTEGER",
                     "identificador_comprovante TEXT", "doc_id_entrega INTEGER",
-                    "obs_entrega TEXT", "entregue_em TEXT"]:
+                    "obs_entrega TEXT", "entregue_em TEXT", "doc_id_recibo INTEGER"]:
             try:
                 con.execute(f"ALTER TABLE lancamentos ADD COLUMN {col}")
             except Exception:
@@ -434,7 +436,7 @@ def init_db():
                 UNIQUE(cpf)
             )
         """)
-        for col in ["ramo TEXT", "receita_pendente INTEGER DEFAULT 0"]:
+        for col in ["ramo TEXT", "receita_pendente INTEGER DEFAULT 0", "emite_nf INTEGER"]:
             try:
                 con.execute(f"ALTER TABLE fornecedores ADD COLUMN {col}")
             except Exception:
@@ -1158,6 +1160,103 @@ async def _html_para_pdf(html_str: str) -> bytes:
         await browser.close()
         return pdf
 
+def _gerar_html_recibo(pfm_codigo: str) -> str:
+    """Recibo de pagamento para fornecedor/prestador sem NF-e — mesmo estilo visual do PC 2.0."""
+    pedido = buscar_pedido(pfm_codigo)
+    if not pedido:
+        raise ValueError(f"Pedido {pfm_codigo} não encontrado.")
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute("SELECT dados_claude FROM documentos WHERE id=?", (pedido.doc_id,)).fetchone()
+    dados = row[0] if row else ""
+
+    nome_claude = _campo(dados, "Fornecedor")
+    cnpj_claude = _campo(dados, "CNPJ/CPF")
+    forn_db = buscar_fornecedor(nome_claude, cnpj_claude)
+    if forn_db:
+        prestador_nome = forn_db.get("razao_social") or forn_db.get("nome") or nome_claude
+        prestador_doc  = forn_db.get("cnpj") or forn_db.get("cpf") or cnpj_claude
+        prestador_end  = " ".join(filter(None, [forn_db.get("logradouro"), forn_db.get("numero")]))
+        _cidade, _uf   = forn_db.get("cidade") or "", forn_db.get("uf") or ""
+        prestador_local = " · ".join(filter(None, [_cidade, _uf]))
+    else:
+        prestador_nome, prestador_doc = pedido.fornecedor, pedido.cnpj
+        prestador_end = prestador_local = ""
+
+    itens = _itens(dados)
+    if itens:
+        descricao = "; ".join(i.get("desc", str(i)) if isinstance(i, dict) else str(i) for i in itens)
+    else:
+        descricao = pedido.fornecedor
+
+    now          = datetime.now()
+    data_emissao = f"{now.day} de {MESES[now.month-1]} de {now.year}"
+    valor_fmt    = f"R$ {_fmt_brl(pedido.valor_negociado)}"
+
+    def _h(s):
+        return _esc_html(str(s)) if s and s != "A PREENCHER" else ""
+
+    contratado_linhas = [prestador_nome, prestador_doc]
+    if _h(prestador_end):
+        contratado_linhas.append(prestador_end)
+    if _h(prestador_local):
+        contratado_linhas.append(prestador_local)
+    contratado_html = "<br>".join(_h(l) for l in contratado_linhas if _h(l))
+
+    return f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><style>{_PC_CSS}</style></head>
+<body>
+<div class="page">
+  <div class="header">
+    <div>
+      <div class="company-brand">{_h(DELTAD['nome'])}</div>
+      <div class="company-meta">CNPJ {_h(DELTAD['cnpj'])}<br>{_h(DELTAD['end'])}</div>
+    </div>
+    <div class="doc-meta">
+      <div class="doc-tipo">Recibo de Pagamento</div>
+      <div class="doc-number">{_h(pfm_codigo)}</div>
+      <div class="doc-date">{_h(data_emissao)}</div>
+    </div>
+  </div>
+  <hr class="rule rule-gap">
+  <div class="context-block">
+    <div>
+      <div class="ctx-label">Contratante</div>
+      <div class="ctx-value">{_h(DELTAD['nome'])}<br>CNPJ {_h(DELTAD['cnpj'])}</div>
+    </div>
+    <div>
+      <div class="ctx-label">Contratado</div>
+      <div class="ctx-value">{contratado_html}</div>
+    </div>
+  </div>
+  <div style="margin-top:28px;">
+    <div class="section-label">Serviço Prestado</div>
+    <div class="ctx-value">{_h(descricao)}</div>
+  </div>
+  <div class="financial-outer" style="margin-top:24px;">
+    <div class="financial-inner">
+      <div class="fin-total-row">
+        <div class="fin-total-l">VALOR RECEBIDO</div>
+        <div class="fin-total-v">{_h(valor_fmt)}</div>
+      </div>
+    </div>
+  </div>
+  <div class="bottom" style="margin-top:28px;">
+    <div>
+      <div class="bottom-label">Referência</div>
+      <div class="bottom-main">Pedido #{_h(pfm_codigo)}</div>
+      <div class="bottom-detail">Pago em {_h(pedido.data_pagamento) or _h(data_emissao)}</div>
+    </div>
+    <div>
+      <div class="bottom-label">Forma de pagamento</div>
+      <div class="bottom-main">PIX</div>
+    </div>
+  </div>
+  <div class="footer-tagline">Recibo gerado por Laura — controle interno DeltaD</div>
+</div>
+</body>
+</html>"""
+
 def gerar_pfm(doc_id, categoria=None, pfm_codigo_override=None):
     with sqlite3.connect(DB_PATH) as con:
         row = con.execute(
@@ -1794,7 +1893,7 @@ def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
         lanc = con.execute(
             "SELECT fornecedor, valor, data_prevista_entrega, vencimento_pagamento, status, criado_em, "
             "data_pagamento, doc_id_nfe, doc_id_comprovante, identificador_comprovante, "
-            "obs_entrega, entregue_em, categoria "
+            "obs_entrega, entregue_em, categoria, doc_id_recibo "
             "FROM lancamentos WHERE pfm_codigo=?",
             (pfm_codigo,)
         ).fetchone()
@@ -1803,9 +1902,9 @@ def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
         ).fetchone()[0]
 
     forn_lanc = data_prev_ent = venc = status_raw = lanc_criado = data_pgto = None
-    doc_id_nfe = doc_id_comp = ident_comp = obs_ent = entregue_em = categoria_lanc = None
+    doc_id_nfe = doc_id_comp = ident_comp = obs_ent = entregue_em = categoria_lanc = doc_id_recibo = None
     if lanc:
-        forn_lanc, _, data_prev_ent, venc, status_raw, lanc_criado, data_pgto, doc_id_nfe, doc_id_comp, ident_comp, obs_ent, entregue_em, categoria_lanc = lanc
+        forn_lanc, _, data_prev_ent, venc, status_raw, lanc_criado, data_pgto, doc_id_nfe, doc_id_comp, ident_comp, obs_ent, entregue_em, categoria_lanc, doc_id_recibo = lanc
 
     try:
         status = StatusPedido(status_raw) if status_raw else StatusPedido.SEM_LANCAMENTO
@@ -1837,6 +1936,7 @@ def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
         obs_entrega               = obs_ent,
         entregue_em               = entregue_em,
         categoria                 = categoria_lanc,
+        doc_id_recibo             = doc_id_recibo,
         caminho_orcamento         = caminho,
     )
 
@@ -1902,6 +2002,7 @@ def mostrar_pedido(pedido: Pedido) -> str:
     _STATUS_EMOJI = {
         StatusPedido.A_PAGAR:          "🟡",
         StatusPedido.PAGO:             "🟢",
+        StatusPedido.PAGO_COM_RECIBO:  "🟢",
         StatusPedido.PENDENTE_REVISAO: "🔴",
         StatusPedido.SUBSTITUIDO:      "⚫",
         StatusPedido.SEM_LANCAMENTO:   "⚪",
@@ -1909,6 +2010,7 @@ def mostrar_pedido(pedido: Pedido) -> str:
     _STATUS_SHORT = {
         StatusPedido.A_PAGAR:          "Aguardando pagamento",
         StatusPedido.PAGO:             _status_pago_label(pedido),
+        StatusPedido.PAGO_COM_RECIBO:  "Pago · Recibo emitido",
         StatusPedido.PENDENTE_REVISAO: "Requer atenção",
         StatusPedido.SUBSTITUIDO:      "Substituído",
         StatusPedido.SEM_LANCAMENTO:   "Sem registro financeiro",
@@ -1959,7 +2061,8 @@ def mostrar_pedido(pedido: Pedido) -> str:
     return SEP.join([cabecalho, financeiro, arquivos, historico])
 
 def teclado_pedido(doc_id, pfm_codigo, doc_id_nfe=None, doc_id_comprovante=None,
-                   qtd_fotos_entrega=0, obs_entrega=None):
+                   qtd_fotos_entrega=0, obs_entrega=None, status=None, categoria=None,
+                   doc_id_recibo=None):
     ggv = pfm_codigo.rsplit("-", 1)[0]
     botoes = [
         [InlineKeyboardButton("Revisar",      callback_data=f"pfm_revisar:{doc_id}:{pfm_codigo}")],
@@ -1970,6 +2073,11 @@ def teclado_pedido(doc_id, pfm_codigo, doc_id_nfe=None, doc_id_comprovante=None,
         botoes.append([InlineKeyboardButton("💰 Comprovante", callback_data=f"pfm_comp:{doc_id_comprovante}:{pfm_codigo}")])
     if doc_id_nfe:
         botoes.append([InlineKeyboardButton("🧾 NF-e", callback_data=f"pfm_nfe:{doc_id_nfe}:{pfm_codigo}")])
+    if doc_id_recibo:
+        botoes.append([InlineKeyboardButton("📄 Recibo", callback_data=f"pfm_recibo:{doc_id_recibo}:{pfm_codigo}")])
+    elif (status == StatusPedido.PAGO and not doc_id_nfe
+            and categoria not in CATEGORIAS_SEM_NFE_OBRIGATORIA):
+        botoes.append([InlineKeyboardButton("📄 Sem NF — gerar recibo", callback_data=f"recibo_iniciar:{pfm_codigo}")])
     if obs_entrega:
         if qtd_fotos_entrega:
             botoes.append([InlineKeyboardButton(
@@ -2014,6 +2122,21 @@ def teclado_obs_entrega():
         [InlineKeyboardButton("✏️ Outra observação",     callback_data="entrega_obs:outro")],
     ])
 
+_MOTIVOS_RECIBO = {
+    "autonomo": "Autônomo sem CNPJ",
+    "informal": "Prestador informal",
+    "orgao":    "Órgão/entidade sem NF-e",
+}
+
+def teclado_motivo_recibo(pfm_codigo):
+    botoes = [
+        [InlineKeyboardButton(label, callback_data=f"recibo_motivo:{pfm_codigo}:{chave}")]
+        for chave, label in _MOTIVOS_RECIBO.items()
+    ]
+    botoes.append([InlineKeyboardButton("✏️ Outro motivo", callback_data=f"recibo_motivo:{pfm_codigo}:outro")])
+    botoes.append([InlineKeyboardButton("✖ Cancelar", callback_data=f"pedido_abrir:{pfm_codigo}")])
+    return InlineKeyboardMarkup(botoes)
+
 def _salvar_entrega_db(pfm_codigo, obs):
     with sqlite3.connect(DB_PATH) as con:
         con.execute(
@@ -2030,7 +2153,8 @@ def _tela_apos_entrega(pfm_codigo):
     return (
         mostrar_pedido(pedido),
         teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe,
-                       pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega)
+                       pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega,
+                       pedido.status, pedido.categoria, pedido.doc_id_recibo)
     )
 
 def _adicionar_foto_entrega(pfm_codigo, doc_id_foto, legenda):
@@ -2286,6 +2410,51 @@ async def _executar_revisao_pfm(query, ctx, doc_id, pfm_codigo_base):
         reply_markup=teclado_pedido(doc_id, pfm_codigo_base)
     )
 
+async def _gerar_recibo(ctx, pfm_codigo: str, motivo: str):
+    """Gera o recibo em PDF para fornecedor/prestador sem NF-e, arquiva e fecha o pedido."""
+    pedido = buscar_pedido(pfm_codigo)
+    if not pedido:
+        await ctx.bot.send_message(chat_id=DONO_ID, text="Pedido não encontrado.")
+        return
+    html      = _gerar_html_recibo(pfm_codigo)
+    pdf_bytes = await _html_para_pdf(html)
+
+    ggv        = pfm_codigo.split("-")[0]
+    nome_base  = _nome_base_pfm(pfm_codigo, pedido.fornecedor, "recibo")
+    destino    = _pasta_entrega(ggv) / f"{nome_base}.pdf"
+    destino.write_bytes(pdf_bytes)
+
+    hash_recibo = hashlib.sha256(pdf_bytes).hexdigest()
+    doc_id_recibo = registrar(destino.name, destino, hash_recibo, "recibo", ggv, f"Motivo: {motivo}")
+
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute(
+            "UPDATE lancamentos SET status='pago_com_recibo', doc_id_recibo=? WHERE pfm_codigo=?",
+            (doc_id_recibo, pfm_codigo)
+        )
+        con.execute(
+            "UPDATE fornecedores SET emite_nf=0 WHERE cnpj=? OR cpf=?",
+            (pedido.cnpj, pedido.cnpj)
+        )
+
+    await ctx.bot.send_document(
+        chat_id=DONO_ID,
+        document=pdf_bytes,
+        filename=f"{nome_base}.pdf",
+        caption=f"📄 Recibo — Pedido #{pfm_codigo}"
+    )
+    pedido_atualizado = buscar_pedido(pfm_codigo)
+    await ctx.bot.send_message(
+        chat_id=DONO_ID,
+        text=f"🟢 Pedido #{pfm_codigo} — Pago · Recibo emitido.",
+        reply_markup=teclado_pedido(
+            pedido_atualizado.doc_id, pfm_codigo, pedido_atualizado.doc_id_nfe,
+            pedido_atualizado.doc_id_comprovante, pedido_atualizado.qtd_fotos_entrega,
+            pedido_atualizado.obs_entrega, pedido_atualizado.status,
+            pedido_atualizado.categoria, pedido_atualizado.doc_id_recibo
+        )
+    )
+
 async def _sincronizar_receita_pendentes(ctx: ContextTypes.DEFAULT_TYPE):
     """Job periódico: tenta de novo os fornecedores que ficaram sem resposta da Receita na hora do cadastro."""
     with sqlite3.connect(DB_PATH) as con:
@@ -2491,7 +2660,7 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 preparar_visualizacao_pedido(pedido)
                 await update.message.reply_text(
                     mostrar_pedido(pedido),
-                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega)
+                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status, pedido.categoria, pedido.doc_id_recibo)
                 )
             else:
                 await update.message.reply_text(f"Pedido {pfm_codigo} não encontrado.")
@@ -2579,6 +2748,16 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 _texto_gerir_entrega(pfm_codigo, forn, obs_ent, qtd_fotos),
                 reply_markup=_teclado_gerir_entrega(pfm_codigo, qtd_fotos)
             )
+        else:
+            await update.message.reply_text("Pedido não encontrado.")
+
+    elif aguardando == "recibo_motivo_texto":
+        motivo = texto.strip()
+        pfm_codigo = ctx.user_data.pop("recibo_pfm_codigo", None)
+        ctx.user_data["aguardando"] = None
+        if pfm_codigo:
+            await update.message.reply_text(f"Gerando recibo #{pfm_codigo}...")
+            await _gerar_recibo(ctx, pfm_codigo, motivo)
         else:
             await update.message.reply_text("Pedido não encontrado.")
 
@@ -3163,12 +3342,12 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             else:
                 await ctx.bot.send_document(chat_id=query.message.chat_id, document=dados, filename=path.name)
 
-        elif acao in ("pfm_nfe", "pfm_comp"):
+        elif acao in ("pfm_nfe", "pfm_comp", "pfm_recibo"):
             _, doc_id_arquivo, pfm_codigo = partes
             with sqlite3.connect(DB_PATH) as con:
                 row = con.execute("SELECT caminho FROM documentos WHERE id=?", (int(doc_id_arquivo),)).fetchone()
             caminho = row[0] if row else None
-            label = {"pfm_nfe": "NF-e", "pfm_comp": "comprovante"}.get(acao, acao)
+            label = {"pfm_nfe": "NF-e", "pfm_comp": "comprovante", "pfm_recibo": "recibo"}.get(acao, acao)
             if not caminho or not Path(caminho).exists():
                 await query.answer(f"Arquivo de {label} não encontrado.", show_alert=True)
                 return
@@ -3398,6 +3577,24 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         elif acao == "nfe_cancelar":
             await query.edit_message_text("NF-e não vinculada.")
 
+        elif acao == "recibo_iniciar":
+            pfm_codigo = partes[1]
+            await query.edit_message_text(
+                f"#{pfm_codigo} — Por que não tem NF-e?",
+                reply_markup=teclado_motivo_recibo(pfm_codigo)
+            )
+
+        elif acao == "recibo_motivo":
+            _, pfm_codigo, chave = partes
+            if chave == "outro":
+                ctx.user_data["aguardando"] = "recibo_motivo_texto"
+                ctx.user_data["recibo_pfm_codigo"] = pfm_codigo
+                await query.edit_message_text("Descreva o motivo:")
+                return
+            motivo = _MOTIVOS_RECIBO.get(chave, chave)
+            await query.edit_message_text(f"Gerando recibo #{pfm_codigo}...")
+            await _gerar_recibo(ctx, pfm_codigo, motivo)
+
         elif acao == "obra_pedidos":
             codigo  = partes[1]
             pedidos = _pedidos_obra(codigo)
@@ -3413,7 +3610,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 preparar_visualizacao_pedido(pedido)
                 await query.edit_message_text(
                     mostrar_pedido(pedido),
-                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega)
+                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status, pedido.categoria, pedido.doc_id_recibo)
                 )
             else:
                 await query.answer(f"Pedido {pfm_codigo} não encontrado.", show_alert=True)

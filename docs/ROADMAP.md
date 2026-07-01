@@ -1,6 +1,6 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-01 (produção migrada e limpa; auto-cadastro via Receita; arquivos organizados por obra; taxas/impostos/serviços públicos)
+> Atualizado em: 2026-07-01 (produção migrada e limpa; auto-cadastro via Receita; arquivos organizados por obra; taxas/impostos/serviços públicos; recibo automático)
 
 ---
 
@@ -137,21 +137,23 @@ cadastro como `emite_nf = false` para Laura gerar recibo automaticamente, sem pe
 - Revisão do Pedido de Compra implementada: `pfm_revisar` → rev01, rev02...
 - PROMPT de comprovante: prefere EndToEnd PIX (`E10573521...`) ao número MP
 
-**Fiada 6b — Geração automática de recibo** *(próxima — combinada com Dennis em 2026-07-01)*
+**Fiada 6b — Geração automática de recibo** ✓ *(concluída 2026-07-01)*
 
 Escopo refinado após a Fiada "Taxas/impostos/serviços públicos": aquela fiada resolveu o caso de
-entidades que já emitem seu próprio documento de fechamento (fatura vira a terceira via — ver
-`ESTADO.md`). Fiada 6b cobre o caso restante: fornecedor/prestador **sem nenhum documento**
-(mão de obra informal, autônomo sem CREA/CNPJ) — aqui a Laura precisa gerar o recibo, não só
-arquivar algo que já existe.
+entidades que já emitem seu próprio documento de fechamento (fatura vira a terceira via). Fiada 6b
+cobre o caso restante: fornecedor/prestador **sem nenhum documento** (mão de obra informal,
+autônomo sem CNPJ) — aqui a Laura gera o recibo, não só arquiva algo que já existe.
 
-- Recibo só é gerado quando fornecedor está marcado como `emite_nf = false` no cadastro
-  OU quando usuário declara explicitamente que NF-e não será emitida
-- Exceção registrada: motivo + pedido + fornecedor — rastreável para fins de RET
-- Recibo gerado em PDF via Playwright: serviço (do orçamento) + pagamento (do PIX) + partes
+- Botão `📄 Sem NF — gerar recibo` no cockpit quando o pedido está pago sem NF-e (categoria fora
+  de taxa/imposto/serviço, já resolvidas) — usuário declara explicitamente a exceção com motivo
+- Recibo gerado em PDF via Playwright (`_gerar_html_recibo()`): CONTRATANTE é `DELTAD["nome"]`
+  ("Verschoor Investimentos Imobiliários Ltda", dono do empreendimento — não "DeltaD Engenharia",
+  que é só a marca do cabeçalho do PFM), CONTRATADO é o fornecedor/prestador
 - Status novo: `pago_com_recibo`
-- Coluna `emite_nf BOOLEAN` adicionada à tabela `fornecedores`
-- Recibo gerado arquiva em `05 Entrega/` — mesma convenção já implementada
+- Coluna `emite_nf` em `fornecedores` (marcada automaticamente ao gerar o primeiro recibo) e
+  `doc_id_recibo` em `lancamentos`
+- Recibo arquiva em `05 Entrega/` — mesma convenção já implementada; registrado como `documentos`
+  para poder ser visualizado depois pelo cockpit (`📄 Recibo`)
 
 **Fiada 6c — Foto de Entrega + Gestão de Entrega** ✓ *(concluída 2026-06-30)*
 
@@ -240,12 +242,11 @@ Implementar junto com a Fiada 6b.
 
 ## Próximas Fiadas
 
-1. **Fiada 6b — Geração automática de recibo** — combinada com Dennis para avançar a seguir
-   (fornecedor/prestador sem nenhum documento de fechamento, ex: mão de obra informal)
-2. **Colocar a Laura para rodar em produção** — banco migrado e limpo (ver Decisões Recentes em `ESTADO.md`)
-3. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-4. **Usar entrega em produção real** — deixar o fluxo rodar no dia a dia antes de revisitar extração (gatilho na ADR-003)
-5. Validar PC 2.0 em produção + remover DOCX do fluxo principal
+1. **Colocar a Laura para rodar em produção** — banco migrado e limpo (ver Decisões Recentes em `ESTADO.md`)
+2. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+3. **Usar entrega em produção real** — deixar o fluxo rodar no dia a dia antes de revisitar extração (gatilho na ADR-003)
+4. Validar PC 2.0 em produção + remover DOCX do fluxo principal
+5. **Validar o recibo automático com um caso real** — layout/texto do PDF só foi testado com dado fictício
 
 ---
 

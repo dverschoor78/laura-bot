@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-07-01
-> Sessão: Preparação para produção — migração, limpeza, auto-cadastro via Receita, organização automática de arquivos, taxas/impostos/serviços públicos
+> Sessão: Preparação para produção — migração, limpeza, auto-cadastro via Receita, organização automática de arquivos, taxas/impostos/serviços públicos, recibo automático
 
 ---
 
@@ -23,13 +23,15 @@
 - **Taxas, impostos e serviços públicos** (CREA, ONR, prefeitura, Copel, Sanepar) passam pelo
   mesmo fluxo de compra — categoria dispensa NF-e (essas entidades não emitem), fatura arquivada
   como fechamento, campos de entrega ocultos no documento gerado.
+- **Recibo automático (Fiada 6b)**: pedido pago sem NF-e (fornecedor/prestador informal) ganha
+  botão para gerar recibo em PDF — Laura cria o documento, arquiva em `05 Entrega`, fecha o pedido.
 - Módulo Financeiro: fundação criada (`financeiro/`). Sem funcionalidade nova ainda.
 
 ---
 
 ## Versão Atual
 
-**v0.6.5** — Taxas, impostos e serviços públicos no fluxo de compra
+**v0.6.6** — Geração automática de recibo (Fiada 6b)
 
 ---
 
@@ -66,6 +68,32 @@
 ---
 
 ## Última Fiada Implementada
+
+**Fiada 6b — Geração automática de recibo** *(2026-07-01)*
+
+Complementa a fiada anterior: enquanto taxa/imposto/serviço público já tem seu próprio documento
+de fechamento (a fatura), fornecedor/prestador informal (mão de obra autônoma, sem CNPJ) não tem
+documento nenhum — aqui a Laura precisa gerar o recibo, não só arquivar algo que já existe.
+
+**Implementado:**
+- Novo status `pago_com_recibo` (`StatusPedido.PAGO_COM_RECIBO`)
+- Cockpit do pedido pago sem NF-e (fora das categorias taxa/imposto/serviço, já resolvidas)
+  ganha o botão `📄 Sem NF — gerar recibo`
+- Motivo da exceção com sugestões prontas (Autônomo sem CNPJ · Prestador informal · Órgão/entidade
+  sem NF-e · Outro) — mesmo padrão já usado nas observações de entrega
+- `_gerar_html_recibo()` + `_html_para_pdf()` (Playwright): CONTRATANTE é `DELTAD["nome"]`
+  ("Verschoor Investimentos Imobiliários Ltda" — dono real do empreendimento, não "DeltaD
+  Engenharia", que é só o rótulo de marca do cabeçalho do PFM), CONTRATADO é o fornecedor/prestador
+- Recibo arquivado em `05 Entrega/` com a convenção já existente; registrado como `documentos`
+  (tipo `recibo`) para poder ser visualizado depois pelo cockpit (`📄 Recibo`)
+- `fornecedores.emite_nf` marcado automaticamente ao gerar o primeiro recibo do fornecedor
+- Nova coluna `lancamentos.doc_id_recibo`
+
+Testado de ponta a ponta com prestador fictício (Jhonatan Rogowski/MO Pintura): botão aparece só
+quando deveria, PDF gerado e arquivado, status muda pra `pago_com_recibo`, `emite_nf` marcado
+quando o fornecedor existe no cadastro, cockpit atualizado com "Pago · Recibo emitido".
+
+---
 
 **Taxas, impostos e serviços públicos no fluxo de compra** *(2026-07-01)*
 
@@ -352,15 +380,13 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Objetivo da Próxima Sessão
 
-1. **Fiada 6b — Geração automática de recibo** — combinado com Dennis para avançar a seguir;
-   escopo: fornecedor/prestador sem nenhum documento de fechamento (mão de obra informal etc.),
-   Laura gera o recibo em PDF (serviço + pagamento + partes). Diferente das taxas/impostos/serviços
-   públicos resolvidos hoje — aqueles já tinham fatura própria servindo de fechamento
-2. **Colocar a Laura para rodar em produção** — banco migrado e limpo; falta decidir sobre `LAURA_ENV`
-3. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-4. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
+1. **Colocar a Laura para rodar em produção** — banco migrado e limpo; falta decidir sobre `LAURA_ENV`
+2. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+3. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
    no dia a dia antes de qualquer nova decisão sobre extração (ver gatilho da ADR-003)
-5. **Validar PC 2.0** — testar PDF com orçamento real; remover DOCX após validação
+4. **Validar PC 2.0** — testar PDF com orçamento real; remover DOCX após validação
+5. **Usar o recibo automático em produção real** — validar o texto/layout do PDF gerado com um caso
+   real antes de confiar cegamente (nunca foi visto impresso/aberto por Dennis, só testado com dado fictício)
 
 ---
 

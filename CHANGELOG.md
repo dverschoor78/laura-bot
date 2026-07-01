@@ -10,12 +10,38 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Fiada 6b — Geração automática de recibo (fornecedor/prestador sem nenhum documento de fechamento)
-2. Colocar a Laura para rodar em produção
-3. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
-4. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
-5. Validar PDF do PC 2.0 com orçamento real em produção
+1. Colocar a Laura para rodar em produção
+2. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
+3. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
+4. Validar PDF do PC 2.0 com orçamento real em produção
+5. Validar o recibo automático com um caso real (só testado com dado fictício)
 6. Remover DOCX do fluxo principal após validação
+
+---
+
+## [Fiada 6b — Geração automática de recibo] — 2026-07-01
+
+### Recibo em PDF para quem não tem nenhum documento de fechamento
+
+Complementa a fiada de taxas/impostos/serviços públicos: aquela resolveu entidades que já têm seu
+próprio documento (fatura). Esta cobre o caso restante — fornecedor/prestador informal (mão de
+obra autônoma, sem CNPJ) — onde não existe documento nenhum e a Laura precisa gerar o recibo.
+
+- Cockpit do pedido pago sem NF-e ganha o botão "📄 Sem NF — gerar recibo" (fora das categorias
+  já resolvidas automaticamente)
+- Motivo da exceção com sugestões prontas (Autônomo sem CNPJ · Prestador informal · Órgão/entidade
+  sem NF-e · Outro)
+- Recibo gerado em PDF via Playwright — mesmo estilo visual do Pedido de Compra 2.0. CONTRATANTE é
+  `DELTAD["nome"]` ("Verschoor Investimentos Imobiliários Ltda", dono real do empreendimento — não
+  "DeltaD Engenharia", que é só o rótulo de marca do cabeçalho do PFM)
+- Novo status `pago_com_recibo`; nova coluna `lancamentos.doc_id_recibo`
+- `fornecedores.emite_nf` marcado automaticamente ao gerar o primeiro recibo do fornecedor
+- Recibo arquivado em `05 Entrega/`, registrado como documento — pode ser visualizado depois
+  pelo cockpit ("📄 Recibo")
+
+Testado de ponta a ponta com prestador fictício: botão aparece só quando deveria, PDF gerado e
+arquivado, status e cockpit atualizados corretamente, `emite_nf` marcado quando o fornecedor
+já está cadastrado.
 
 ---
 
