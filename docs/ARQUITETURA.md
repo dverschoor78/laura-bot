@@ -1,6 +1,6 @@
 # Arquitetura do Projeto Laura
 
-> Versão: 2026-06-30 — reflete o estado real do sistema (pós ADR-003)
+> Versão: 2026-07-01 — reflete o estado real do sistema (pós ADR-003, auto-cadastro via Receita)
 
 ---
 
@@ -12,8 +12,9 @@ Dennis envia fotos ou PDFs de orçamentos pelo Telegram. O bot extrai os dados
 com IA, apresenta para confirmação, gera o PFM Word numerado, salva no OneDrive
 e registra o lançamento A PAGAR no banco.
 
-**Tecnologias em uso:** Python 3.12 · python-telegram-bot 22 · SQLite · Claude API
-(Anthropic) · python-docx · Playwright Chromium · OneDrive (pasta local mapeada)
+**Tecnologias em uso:** Python 3.12 · python-telegram-bot 22 (+ `job-queue`/APScheduler) · SQLite ·
+Claude API (Anthropic) · python-docx · Playwright Chromium · BrasilAPI (Receita Federal) ·
+OneDrive (pasta local mapeada)
 
 ---
 
@@ -25,15 +26,19 @@ Telegram ──────► bot.py ──────► Claude API (haiku-4-
                    ├──────────► data/laura.db  (SQLite)
                    ├──────────► data/uploads/  (arquivos recebidos)
                    ├──────────► Playwright Chromium (HTML → PDF em memória)
+                   ├──────────► BrasilAPI (consulta CNPJ na Receita Federal)
                    └──────────► OneDrive/GGV03/04 Aquisição e Execução/
                                 (DOCX gerado silenciosamente como backup)
 ```
 
 - **`bot.py`** — monólito único com toda a lógica: banco, IA, PFM, handlers Telegram
-- **`data/laura.db`** — banco SQLite com quatro tabelas (ver seção 3)
+- **`data/laura.db`** — banco SQLite com cinco tabelas (ver seção 3)
 - **`data/uploads/`** — arquivos temporários recebidos pelo bot
 - **Claude API** — extração de dados dos documentos; modelo `claude-haiku-4-5-20251001`
 - **Playwright Chromium** — geração de PDF do Pedido de Compra 2.0 a partir de HTML; roda headless em memória
+- **BrasilAPI** — consulta pública e gratuita de CNPJ na Receita Federal; usada por
+  `_criar_fornecedor_auto()` e pelo job periódico `_sincronizar_receita_pendentes()`; falha
+  silenciosamente (timeout 4s) sem travar o fluxo do bot
 - **OneDrive** — destino final dos PFMs .docx (backup); pasta local acessada via tabela `obras`
 - **`prints/pc_alternativa_a.html`** — protótipo aprovado do PC 2.0; referência de design
 
@@ -87,14 +92,19 @@ sobre por que esse acoplamento entre tabelas de domínios diferentes ainda exist
 
 ---
 
-**`fornecedores`** — cadastro importado dos PFMs do GGV01
+**`fornecedores`** — cadastro de fornecedores, validado contra a Receita Federal (2026-07-01)
 
 Campos relevantes: `nome`, `razao_social`, `cnpj`, `cpf`, `chave_pix`, `email`,
-`whatsapp`, `logradouro`, `bairro`, `cidade`, `uf`, `ramo`.
+`whatsapp`, `logradouro`, `bairro`, `cidade`, `uf`, `ramo`, `receita_pendente`.
 
 Uso: `buscar_fornecedor()` tenta primeiro por CNPJ, depois pelo primeiro token do nome.
 Quando encontrado, os dados do cadastro prevalecem sobre os dados extraídos pelo Claude.
 Campo `ramo` é salvo automaticamente quando extraído do orçamento e o fornecedor ainda não o tem.
+
+Quando um orçamento traz um CNPJ que não bate com nenhum cadastro (`buscar_fornecedor()` retorna
+`None`), `_criar_fornecedor_auto()` cadastra um novo fornecedor automaticamente e tenta enriquecer
+com dado oficial da Receita (BrasilAPI). Se a consulta falhar, `receita_pendente=1` e o job
+`_sincronizar_receita_pendentes()` tenta de novo a cada 6h.
 Sem relação de FK com as demais tabelas.
 
 ---

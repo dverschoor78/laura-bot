@@ -1,6 +1,6 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-01 (produção migrada e limpa — pronta para uso real)
+> Atualizado em: 2026-07-01 (produção migrada e limpa; auto-cadastro de fornecedor via Receita)
 
 ---
 
@@ -197,6 +197,17 @@ Priorizar XML — mais rico e sem necessidade de OCR. Foto é fallback de últim
 Laura monitora pedidos com status `pago` sem NF vinculada há N dias e alerta:
 "GGV03-009 · Sabiá · pago há 7 dias sem nota fiscal."
 Implementar junto com a Fiada 6b.
+
+---
+
+**Auto-cadastro de fornecedor via Receita Federal** ✓ *(concluída 2026-07-01)*
+
+- `_criar_fornecedor_auto()`: fornecedor com CNPJ desconhecido é cadastrado ao gerar o PFM,
+  enriquecido com dado oficial da Receita (BrasilAPI) quando a consulta responde a tempo
+- Falha na consulta não trava a geração do PFM — fornecedor fica marcado `receita_pendente=1`
+- `_sincronizar_receita_pendentes()`: job periódico (6h) tenta de novo os pendentes; avisa
+  Dennis só quando resolve algo de fato
+- Nova dependência: `python-telegram-bot[job-queue]`
 
 ---
 

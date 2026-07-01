@@ -1,9 +1,11 @@
 import os
 import re
+import json
 import shutil
 import hashlib
 import sqlite3
 import base64
+import urllib.request
 import anthropic
 from dataclasses import dataclass, field
 from enum import Enum
@@ -333,7 +335,7 @@ def init_db():
                 UNIQUE(cpf)
             )
         """)
-        for col in ["ramo TEXT"]:
+        for col in ["ramo TEXT", "receita_pendente INTEGER DEFAULT 0"]:
             try:
                 con.execute(f"ALTER TABLE fornecedores ADD COLUMN {col}")
             except Exception:
@@ -520,6 +522,46 @@ def _resumo_gerar(doc_id):
 
 _FORN_COLS = ["nome", "razao_social", "cnpj", "cpf", "chave_pix", "email",
               "whatsapp", "logradouro", "numero", "bairro", "cidade", "uf", "cep", "ramo"]
+
+def _consultar_receita(cnpj_digits: str, timeout: float = 4.0) -> Optional[dict]:
+    """Consulta CNPJ na Receita Federal via BrasilAPI. Nunca levanta — retorna None em qualquer falha."""
+    try:
+        req = urllib.request.Request(
+            f"https://brasilapi.com.br/api/cnpj/v1/{cnpj_digits}",
+            headers={"User-Agent": "laura-bot"}
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return {
+            "razao_social": data.get("razao_social") or None,
+            "cidade":       (data.get("municipio") or "").title() or None,
+            "uf":           data.get("uf") or None,
+        }
+    except Exception:
+        return None
+
+def _criar_fornecedor_auto(nome_claude, cnpj_claude, ramo_claude, doc_id):
+    """Cadastra um fornecedor novo a partir de um orçamento com CNPJ ainda não conhecido.
+    Tenta enriquecer com dado oficial da Receita; se a consulta falhar, marca para sincronizar depois."""
+    if not cnpj_claude or cnpj_claude == "A PREENCHER":
+        return
+    cnpj_digits = re.sub(r"\D", "", cnpj_claude)
+    if len(cnpj_digits) != 14 or cnpj_digits == DELTAD_CNPJ_DIGITS:
+        return
+    receita = _consultar_receita(cnpj_digits)
+    ramo = ramo_claude if ramo_claude and ramo_claude != "A PREENCHER" else None
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute(
+            "INSERT OR IGNORE INTO fornecedores "
+            "(nome, cnpj, razao_social, cidade, uf, ramo, origem, receita_pendente) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (nome_claude, cnpj_claude,
+             receita["razao_social"] if receita else None,
+             receita["cidade"] if receita else None,
+             receita["uf"] if receita else None,
+             ramo, f"Cadastro automático — doc {doc_id}",
+             0 if receita else 1)
+        )
 
 def buscar_fornecedor(nome_claude, cnpj_claude=None):
     """Busca no BD: 1º por CNPJ exato, 2º por prefixo do nome."""
@@ -1062,6 +1104,7 @@ def gerar_pfm(doc_id, categoria=None, pfm_codigo_override=None):
         pix         = _campo(dados, "Chave PIX")
         ramo        = ramo_claude
         forn_logr = forn_bairro = forn_cidade = forn_email = forn_fone = forn_contato = ""
+        _criar_fornecedor_auto(nome_claude, cnpj_claude, ramo_claude, doc_id)
 
     prazo        = _campo(dados, "Prazo de entrega")
     if prazo == "A PREENCHER":
@@ -2102,6 +2145,40 @@ async def _executar_revisao_pfm(query, ctx, doc_id, pfm_codigo_base):
         text=f"✅ {rev_codigo} gerado. Lançamento financeiro mantido.",
         reply_markup=teclado_pedido(doc_id, pfm_codigo_base)
     )
+
+async def _sincronizar_receita_pendentes(ctx: ContextTypes.DEFAULT_TYPE):
+    """Job periódico: tenta de novo os fornecedores que ficaram sem resposta da Receita na hora do cadastro."""
+    with sqlite3.connect(DB_PATH) as con:
+        pendentes = con.execute(
+            "SELECT id, cnpj FROM fornecedores WHERE receita_pendente=1"
+        ).fetchall()
+    if not pendentes:
+        return
+
+    resolvidos = 0
+    for forn_id, cnpj in pendentes:
+        cnpj_digits = re.sub(r"\D", "", cnpj or "")
+        if len(cnpj_digits) != 14:
+            continue
+        receita = _consultar_receita(cnpj_digits)
+        if receita:
+            with sqlite3.connect(DB_PATH) as con:
+                con.execute(
+                    "UPDATE fornecedores SET razao_social=COALESCE(razao_social,?), "
+                    "cidade=COALESCE(cidade,?), uf=COALESCE(uf,?), receita_pendente=0 WHERE id=?",
+                    (receita["razao_social"], receita["cidade"], receita["uf"], forn_id)
+                )
+            resolvidos += 1
+
+    total = len(pendentes)
+    if resolvidos == total:
+        texto = f"📋 Receita sincronizada — {resolvidos} de {total} pendências resolvidas."
+    else:
+        restantes = total - resolvidos
+        verbo = "segue" if restantes == 1 else "seguem"
+        texto = (f"📋 Receita sincronizada — {resolvidos} de {total} pendências resolvidas. "
+                 f"{restantes} {verbo} tentando.")
+    await ctx.bot.send_message(chat_id=DONO_ID, text=texto)
 
 
 # ── Handlers ───────────────────────────────────────────────────────────────
@@ -3274,4 +3351,5 @@ app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, receber_arq
 app.add_handler(CallbackQueryHandler(responder_botao))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receber_texto))
 app.add_handler(MessageHandler(filters.COMMAND, comando_desconhecido))
+app.job_queue.run_repeating(_sincronizar_receita_pendentes, interval=6 * 60 * 60, first=120)
 app.run_polling()

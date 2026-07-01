@@ -18,6 +18,26 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Auto-cadastro de fornecedor via Receita Federal] — 2026-07-01
+
+### Cadastro automático ao gerar PFM
+
+- Fornecedor com CNPJ que não bate com nenhum cadastro existente é criado automaticamente na
+  hora de gerar o PFM, sem esperar por importação manual
+- Consulta à Receita Federal (BrasilAPI, gratuita e sem autenticação) enriquece o cadastro com
+  razão social, cidade e UF oficiais — timeout de 4s, nunca trava a geração do PFM
+- Se a consulta falhar, o fornecedor é criado mesmo assim com o que o Claude extraiu, marcado
+  `receita_pendente=1` para tentar de novo depois
+
+### Sincronização em segundo plano
+
+- Job periódico (`JobQueue`, a cada 6h) tenta de novo os fornecedores pendentes
+- Silencioso quando não há pendência; avisa Dennis só quando sincroniza algo:
+  "📋 Receita sincronizada — N de M pendências resolvidas"
+- Nova dependência: `python-telegram-bot[job-queue]` (traz `apscheduler`)
+
+---
+
 ## [Preparação para produção — migração e limpeza de dados] — 2026-07-01
 
 ### Banco de produção migrado

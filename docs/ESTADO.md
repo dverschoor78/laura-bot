@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-07-01
-> Sessão: Preparação para produção — migração de schema, limpeza de fornecedores e pedidos
+> Sessão: Preparação para produção — migração de schema, limpeza de fornecedores/pedidos, auto-cadastro via Receita
 
 ---
 
@@ -16,13 +16,15 @@
   Fase 4a (faltavam `obras`, `entrega_fotos`, 12 colunas de `lancamentos`); corrigido em 2026-07-01.
 - Cadastro de fornecedores limpo e validado contra a Receita Federal (27 registros).
 - `documentos`/`lancamentos` de produção zerados por decisão — numeração de PFM reinicia do zero.
+- **Fornecedor novo se auto-cadastra a partir do orçamento**, com dado oficial da Receita quando
+  disponível; sincronização automática em segundo plano quando a consulta falha na hora.
 - Módulo Financeiro: fundação criada (`financeiro/`). Sem funcionalidade nova ainda.
 
 ---
 
 ## Versão Atual
 
-**v0.6.2** — Entrega com múltiplas fotos e ADR-003
+**v0.6.3** — Auto-cadastro de fornecedor via Receita Federal
 
 ---
 
@@ -50,11 +52,29 @@
 - Entrega com múltiplas fotos por pedido, cada uma com legenda obrigatória
 - Galeria de arquivos da entrega: visualizar (ícone por tipo) e remover individualmente
 - Navegação padronizada: `← Voltar` e `✖ Fechar` em todos os menus, incluindo Ajuda e Obras
+- Auto-cadastro de fornecedor desconhecido ao gerar PFM, validado contra a Receita Federal
+  (razão social, cidade, UF); sincronização periódica em segundo plano para os que falharam na hora
 - Modo teste isolado via `LAURA_ENV=test`
 
 ---
 
 ## Última Fiada Implementada
+
+**Auto-cadastro de fornecedor via Receita Federal** *(2026-07-01)*
+
+- Coluna `fornecedores.receita_pendente` — marca cadastro que ainda não foi validado
+- `_criar_fornecedor_auto()`: ao gerar PFM com CNPJ que não bate com nenhum fornecedor conhecido,
+  cadastra automaticamente. Tenta a consulta à Receita (BrasilAPI, timeout 4s) na hora; se
+  responder, grava razão social/cidade/UF oficiais; se não, cadastra só com o que o Claude
+  extraiu e marca `receita_pendente=1` — nunca trava a geração do PFM
+- `_sincronizar_receita_pendentes()`: job do `JobQueue` (a cada 6h) tenta de novo só os pendentes.
+  Silencioso quando não há pendência; manda mensagem (Jeito da Laura) só quando sincroniza algo:
+  "📋 Receita sincronizada — N de M pendências resolvidas"
+- Nova dependência: `python-telegram-bot[job-queue]` (traz `apscheduler`) — adicionada ao `pyproject.toml`
+- Testado de ponta a ponta contra as funções reais do bot.py (CNPJ válido resolve na hora, CNPJ
+  inexistente fica pendente sem travar, mensagem de sincronização parcial confere)
+
+---
 
 **Preparação para produção — migração + limpeza de dados** *(2026-07-01)*
 

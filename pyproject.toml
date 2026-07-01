@@ -10,8 +10,8 @@ readme = "README.md"
 requires-python = ">=3.12"
 
 dependencies = [
-    # Bot Telegram — framework principal
-    "python-telegram-bot==22.*",
+    # Bot Telegram — framework principal (job-queue: sincronização periódica com a Receita)
+    "python-telegram-bot[job-queue]==22.*",
 
     # Claude API — extração inteligente de documentos
     "anthropic>=0.111.0",
