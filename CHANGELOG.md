@@ -10,12 +10,56 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Colocar a Laura para rodar em produção
-2. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
-3. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
-4. Validar PDF do PC 2.0 com orçamento real em produção
-5. Validar o recibo automático com um caso real (só testado com dado fictício)
+1. Fechar o ciclo real de assinatura do recibo de GGV03-001 (enviar pro Valdir assinar de verdade)
+2. Colocar a Laura para rodar em produção
+3. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
+4. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
+5. Validar PDF do PC 2.0 com orçamento real em produção
 6. Remover DOCX do fluxo principal após validação
+
+---
+
+## [Pagamento parcelado + ciclo de assinatura de recibo] — 2026-07-01
+
+### Pagamento em parcelas, cada uma com seu próprio recibo assinado
+
+Validando o recibo de GGV03-001 com Dennis, ficou claro que pagamento de mão de obra não é um
+evento único: prestadores recebem em parcelas de valor e período livres até quitar o total, e cada
+parcela paga precisa do seu próprio recibo assinado antes de fechar o ciclo. Por decisão explícita,
+o modelo passou a valer para **todos os pedidos** — à vista é só um caso particular de parcelado.
+
+- Nova tabela `parcelas_pagamento`: cada pagamento parcial vira uma linha vinculada ao
+  `pfm_codigo`, com ciclo próprio `pago` → `aguardando_assinatura` → `assinado`
+- `lancamentos.status` só vira `pago` quando a soma das parcelas atinge o valor do pedido; antes
+  disso mostra progresso: "Aguardando pagamento · R$ 3.500,00 de R$ 70.000,00 pago"
+- `pix_pagar` reescrito: todo comprovante recebido gera uma nova parcela; deduplicação de
+  comprovante agora é por parcela, não mais por pedido inteiro
+- `_gerar_recibo()` passa a ser por parcela — cada parcela paga gera seu próprio PDF, arquivado em
+  `05 Entrega/` como `recibo-parcelaN`
+- Tela "Ver parcelas" no cockpit: lista cada parcela com valor/data/status; ações para gerar
+  recibo, ver o pendente de assinatura, ou anexar a versão assinada de volta
+- Ciclo de assinatura fechado de ponta a ponta: recibo sai da Laura → assinado fora dela (ex:
+  gov.br) → volta e substitui o arquivo em `05 Entrega/`, parcela vira `assinado`
+- Recibo redesenhado em A5 paisagem com espaço de assinatura no rodapé, a partir de feedback
+  direto no PDF gerado para GGV03-001 (cabeçalho simplificado: só "RECIBO" + código + data)
+- Status obsoleto `pago_com_recibo` removido do `StatusPedido` — granularidade correta é a
+  parcela, não o pedido
+
+### Esclarecimento DeltaD × VII
+
+Pesquisa nos CNPJs oficiais (Receita Federal) confirmou: DeltaD Engenharia é a marca da Verschoor
+Construções Civis Ltda (CNPJ 48.494.891/0001-06, responsável técnica pela obra); a constante
+`DELTAD` no código sempre guardou os dados corretos da Verschoor Investimentos Imobiliários Ltda —
+VII (CNPJ 58.358.802/0001-58), dona real dos empreendimentos e CONTRATANTE correta no recibo. Por
+decisão de Dennis, a DeltaD não participa do fluxo de compras — é só mais um fornecedor da VII.
+Nenhuma restruturação de código; apenas um comentário explicativo sobre a constante `DELTAD`.
+
+Testado de ponta a ponta com o pedido real GGV03-001 (Valdir Aparecida Silveira, R$ 70.000,00):
+parcela parcial → progresso exibido → recibo gerado → assinatura simulada → segunda parcela
+completando o total → pedido corretamente marcado `pago`.
+
+**Pendência real, não é da Laura:** o recibo de GGV03-001 ainda não foi enviado pro Valdir assinar
+de verdade — o teste de hoje validou o mecanismo, não o ciclo completo com assinatura real.
 
 ---
 

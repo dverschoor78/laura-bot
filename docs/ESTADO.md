@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-07-01
-> Sessão: Preparação para produção — migração, limpeza, auto-cadastro via Receita, organização automática de arquivos, taxas/impostos/serviços públicos, recibo automático
+> Sessão: Preparação para produção — migração, limpeza, auto-cadastro via Receita, organização automática de arquivos, taxas/impostos/serviços públicos, pagamento parcelado + recibo assinado
 
 ---
 
@@ -23,15 +23,16 @@
 - **Taxas, impostos e serviços públicos** (CREA, ONR, prefeitura, Copel, Sanepar) passam pelo
   mesmo fluxo de compra — categoria dispensa NF-e (essas entidades não emitem), fatura arquivada
   como fechamento, campos de entrega ocultos no documento gerado.
-- **Recibo automático (Fiada 6b)**: pedido pago sem NF-e (fornecedor/prestador informal) ganha
-  botão para gerar recibo em PDF — Laura cria o documento, arquiva em `05 Entrega`, fecha o pedido.
+- **Pagamento parcelado, para todos os pedidos**: cada comprovante vira uma parcela; pedido só
+  fecha quando a soma das parcelas atinge o valor total. Recibo (quando aplicável) é por parcela,
+  em A5 paisagem com espaço de assinatura — Dennis reenvia assinado, Laura substitui o rascunho.
 - Módulo Financeiro: fundação criada (`financeiro/`). Sem funcionalidade nova ainda.
 
 ---
 
 ## Versão Atual
 
-**v0.6.6** — Geração automática de recibo (Fiada 6b)
+**v0.7.0** — Pagamento parcelado + ciclo de assinatura de recibo
 
 ---
 
@@ -68,6 +69,49 @@
 ---
 
 ## Última Fiada Implementada
+
+**Pagamento parcelado + ciclo de assinatura de recibo** *(2026-07-01)*
+
+Testando a Fiada 6b com um orçamento real (Sabiá/Valdir Aparecida Silveira, GGV03-001, R$ 70.000
+de mão de obra), veio à tona que pagamentos de mão de obra normalmente são parcelados — a cada
+~14 dias, valor livre, sem cronograma fixo — e cada parcela paga precisa do próprio recibo,
+assinado pelo prestador via gov.br, antes de fechar. O modelo antigo (1 pedido = 1 pagamento =
+1 recibo) não suportava isso. Dennis pediu para estender pra **todos os pedidos**, não só mão
+de obra — é assim que "à vista" e "parcelado" vão conviver no mesmo mecanismo.
+
+**Implementado:**
+- Nova tabela `parcelas_pagamento`: cada comprovante recebido vira uma parcela própria (valor,
+  data, comprovante, recibo, recibo assinado, status) — não fecha mais o pedido de uma vez
+- Pedido só fica `pago` quando a soma das parcelas atinge o valor total; até lá continua `a_pagar`,
+  mas o cockpit mostra "R$X de R$Y pago" em vez de um "aguardando pagamento" genérico
+- Recibo passou a ser **por parcela**, não por pedido — `_gerar_recibo()`/`_gerar_html_recibo()`
+  reescritos para receber `parcela_id`
+- Tela nova "💰 Ver parcelas": lista cada parcela com status (Pago sem recibo → Aguardando
+  assinatura → Assinado) e a ação disponível para cada uma
+- Fluxo de retorno: botão "📎 Anexar recibo assinado" — Dennis reenvia o PDF/foto assinado, Laura
+  sobrescreve o rascunho em `05 Entrega` com o mesmo nome de arquivo (mesmo padrão já usado nas
+  revisões de PFM) e marca a parcela como `assinado`
+- Recibo em PDF ajustado após feedback direto no teste real: A5 paisagem (não A4), "RECIBO" e o
+  código do pedido em linhas separadas (não concatenados), espaço de assinatura para o prestador,
+  sem o bloco da VII duplicado no cabeçalho (já aparece como CONTRATANTE no corpo)
+- Housekeeping: `StatusPedido.PAGO_COM_RECIBO` (mecanismo antigo, por pedido) removido do código;
+  o único registro real que usava (GGV03-001) foi migrado para uma parcela
+
+**Esclarecimento de identidade societária, mesma sessão:** Dennis explicou que "DeltaD" é o nome
+fantasia de Verschoor Construções Civis Ltda (CNPJ 48.494.891/0001-06, confirmado no cartão CNPJ
+em `OneDrive\DeltaD`), diferente da VII/Verschoor Investimentos Imobiliários Ltda (CNPJ
+58.358.802/0001-58, dona dos empreendimentos, confirmado em `OneDrive\VII`) — a constante `DELTAD`
+no código sempre teve os dados da VII, só com nome histórico errado. Por decisão de Dennis, a
+DeltaD **não participa do fluxo de compras** (é só mais um fornecedor da VII) — nenhuma mudança
+de dado foi necessária, só um comentário no código esclarecendo a confusão de nomes.
+
+Testado de ponta a ponta com pedido real (GGV03-001): parcela parcial, recibo gerado, assinatura
+simulada, segunda parcela completando o valor total, pedido fechando corretamente.
+
+**Pendência real, não é da Laura**: o recibo de GGV03-001 ainda não foi enviado pro Valdir assinar
+de verdade — o teste de hoje validou o mecanismo, não o ciclo completo com assinatura real.
+
+---
 
 **Fiada 6b — Geração automática de recibo** *(2026-07-01)*
 
@@ -380,13 +424,14 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Objetivo da Próxima Sessão
 
-1. **Colocar a Laura para rodar em produção** — banco migrado e limpo; falta decidir sobre `LAURA_ENV`
-2. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-3. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
+1. **Fechar o ciclo real do recibo de GGV03-001** — enviar pro Valdir assinar via gov.br, receber de
+   volta, anexar na Laura ("📎 Anexar recibo assinado"), confirmar que o arquivo em `05 Entrega` é
+   substituído corretamente pelo assinado
+2. **Colocar a Laura para rodar em produção** — banco migrado e limpo; falta decidir sobre `LAURA_ENV`
+3. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+4. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
    no dia a dia antes de qualquer nova decisão sobre extração (ver gatilho da ADR-003)
-4. **Validar PC 2.0** — testar PDF com orçamento real; remover DOCX após validação
-5. **Usar o recibo automático em produção real** — validar o texto/layout do PDF gerado com um caso
-   real antes de confiar cegamente (nunca foi visto impresso/aberto por Dennis, só testado com dado fictício)
+5. **Validar PC 2.0** — testar PDF com orçamento real; remover DOCX após validação
 
 ---
 

@@ -48,6 +48,10 @@ GGVS = ["GGV00", "GGV01", "GGV02", "GGV03"]
 MESES = ["janeiro","fevereiro","março","abril","maio","junho",
          "julho","agosto","setembro","outubro","novembro","dezembro"]
 
+# Nome histórico da constante — contém os dados da VII (Verschoor Investimentos Imobiliários
+# Ltda, dona dos empreendimentos), não da DeltaD (Verschoor Construções Civis Ltda, nome
+# fantasia "DeltaD Engenharia", CNPJ 48.494.891/0001-06). Por decisão de 2026-07-01, a DeltaD
+# não participa do fluxo de compras — é só mais um fornecedor da VII. Ver ESTADO.md.
 DELTAD = {
     "nome":  "Verschoor Investimentos Imobiliários Ltda",
     "cnpj":  "58.358.802/0001-58",
@@ -92,7 +96,6 @@ GGV_CODIGO_RE = re.compile(r"^\s*(GGV\d{2})\s*$", re.IGNORECASE)
 class StatusPedido(str, Enum):
     A_PAGAR          = "a_pagar"
     PAGO             = "pago"
-    PAGO_COM_RECIBO  = "pago_com_recibo"
     PENDENTE_REVISAO = "pendente_revisao"
     SUBSTITUIDO      = "substituido"
     SEM_LANCAMENTO   = "sem_lancamento"
@@ -128,7 +131,8 @@ class Pedido:
     obs_entrega:           Optional[str] = None
     entregue_em:           Optional[str] = None
     categoria:             Optional[str] = None
-    doc_id_recibo:         Optional[int] = None
+    qtd_parcelas:          int = 0
+    total_pago:            float = 0.0
 
     # Arquivos — populados por preparar_visualizacao_pedido()
     caminho_orcamento: Optional[str] = None
@@ -316,6 +320,37 @@ def _arquivar_doc_financeiro(pfm_codigo: str, sufixo: str, caminho_original, dat
     """Copia comprovante/NF-e para '01 Controle financeiro', nome padronizado."""
     _arquivar_documento(pfm_codigo, sufixo, caminho_original, data_str, _pasta_controle_financeiro)
 
+def _total_pago(pfm_codigo: str) -> float:
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT COALESCE(SUM(valor), 0) FROM parcelas_pagamento WHERE pfm_codigo=?", (pfm_codigo,)
+        ).fetchone()
+    return row[0] or 0.0
+
+def _registrar_parcela(pfm_codigo, valor, data_pagamento, doc_id_comprovante, identificador_comprovante) -> int:
+    with sqlite3.connect(DB_PATH) as con:
+        cur = con.execute(
+            "INSERT INTO parcelas_pagamento (pfm_codigo, valor, data_pagamento, doc_id_comprovante, identificador_comprovante) "
+            "VALUES (?,?,?,?,?)",
+            (pfm_codigo, valor, data_pagamento, doc_id_comprovante, identificador_comprovante)
+        )
+        return cur.lastrowid
+
+def _listar_parcelas(pfm_codigo):
+    with sqlite3.connect(DB_PATH) as con:
+        return con.execute(
+            "SELECT id, valor, data_pagamento, doc_id_recibo, doc_id_recibo_assinado, status "
+            "FROM parcelas_pagamento WHERE pfm_codigo=? ORDER BY id",
+            (pfm_codigo,)
+        ).fetchall()
+
+def _buscar_parcela(parcela_id: int):
+    with sqlite3.connect(DB_PATH) as con:
+        return con.execute(
+            "SELECT id, pfm_codigo, valor, data_pagamento, doc_id_recibo, doc_id_recibo_assinado, status "
+            "FROM parcelas_pagamento WHERE id=?", (parcela_id,)
+        ).fetchone()
+
 # ── Banco ──────────────────────────────────────────────────────────────────
 
 def _migrar_obras(con):
@@ -396,6 +431,20 @@ def init_db():
                 doc_id      INTEGER NOT NULL,
                 legenda     TEXT,
                 criado_em   TEXT DEFAULT (datetime('now','localtime'))
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS parcelas_pagamento (
+                id                         INTEGER PRIMARY KEY AUTOINCREMENT,
+                pfm_codigo                 TEXT NOT NULL,
+                valor                      REAL,
+                data_pagamento             TEXT,
+                doc_id_comprovante         INTEGER,
+                identificador_comprovante  TEXT,
+                doc_id_recibo              INTEGER,
+                doc_id_recibo_assinado     INTEGER,
+                status                     TEXT DEFAULT 'pago',
+                criado_em                  TEXT DEFAULT (datetime('now','localtime'))
             )
         """)
         con.execute("""
@@ -1150,18 +1199,22 @@ def _gerar_html_pc(doc_id: int) -> str:
 </body>
 </html>"""
 
-async def _html_para_pdf(html_str: str) -> bytes:
+async def _html_para_pdf(html_str: str, formato: str = "A4", paisagem: bool = False) -> bytes:
     from playwright.async_api import async_playwright
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         page    = await browser.new_page()
         await page.set_content(html_str, wait_until="networkidle")
-        pdf     = await page.pdf(format="A4", print_background=True)
+        pdf     = await page.pdf(format=formato, landscape=paisagem, print_background=True)
         await browser.close()
         return pdf
 
-def _gerar_html_recibo(pfm_codigo: str) -> str:
-    """Recibo de pagamento para fornecedor/prestador sem NF-e — mesmo estilo visual do PC 2.0."""
+def _gerar_html_recibo(parcela_id: int) -> str:
+    """Recibo de pagamento de uma parcela — mesmo estilo visual do PC 2.0, formato A5 paisagem."""
+    parcela = _buscar_parcela(parcela_id)
+    if not parcela:
+        raise ValueError(f"Parcela {parcela_id} não encontrada.")
+    _, pfm_codigo, valor_parcela, data_parcela, *_ = parcela
     pedido = buscar_pedido(pfm_codigo)
     if not pedido:
         raise ValueError(f"Pedido {pfm_codigo} não encontrado.")
@@ -1190,7 +1243,7 @@ def _gerar_html_recibo(pfm_codigo: str) -> str:
 
     now          = datetime.now()
     data_emissao = f"{now.day} de {MESES[now.month-1]} de {now.year}"
-    valor_fmt    = f"R$ {_fmt_brl(pedido.valor_negociado)}"
+    valor_fmt    = f"R$ {_fmt_brl(valor_parcela)}"
 
     def _h(s):
         return _esc_html(str(s)) if s and s != "A PREENCHER" else ""
@@ -1202,23 +1255,28 @@ def _gerar_html_recibo(pfm_codigo: str) -> str:
         contratado_linhas.append(prestador_local)
     contratado_html = "<br>".join(_h(l) for l in contratado_linhas if _h(l))
 
+    _recibo_css_extra = """
+@page { size: A5 landscape; margin: 0; }
+.page { width: 210mm; height: 148mm; min-height: 0; padding: 10mm 16mm; }
+.recibo-titulo { font-size: 26px; font-weight: 700; color: #111827; letter-spacing: -0.02em; }
+.recibo-codigo { font-size: 12px; font-weight: 500; color: #6B7280; margin-top: 3px; }
+.assinatura-bloco { margin-top: auto; padding-top: 10mm; display: flex; justify-content: center; }
+.assinatura-linha { width: 85mm; border-top: 1px solid #111827; padding-top: 6px; text-align: center; }
+.assinatura-nome { font-size: 10.5px; font-weight: 600; color: #111827; }
+.assinatura-doc { font-size: 9px; color: #6B7280; margin-top: 2px; }
+"""
+
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
-<head><meta charset="UTF-8"><style>{_PC_CSS}</style></head>
+<head><meta charset="UTF-8"><style>{_PC_CSS}{_recibo_css_extra}</style></head>
 <body>
 <div class="page">
-  <div class="header">
-    <div>
-      <div class="company-brand">{_h(DELTAD['nome'])}</div>
-      <div class="company-meta">CNPJ {_h(DELTAD['cnpj'])}<br>{_h(DELTAD['end'])}</div>
-    </div>
-    <div class="doc-meta">
-      <div class="doc-tipo">Recibo de Pagamento</div>
-      <div class="doc-number">{_h(pfm_codigo)}</div>
-      <div class="doc-date">{_h(data_emissao)}</div>
-    </div>
+  <div class="header" style="flex-direction:column; align-items:center; text-align:center;">
+    <div class="recibo-titulo">RECIBO</div>
+    <div class="recibo-codigo">Pedido #{_h(pfm_codigo)}</div>
+    <div class="doc-date" style="margin-top:5px;">{_h(data_emissao)}</div>
   </div>
-  <hr class="rule rule-gap">
+  <hr class="rule rule-gap" style="margin: 14px 0;">
   <div class="context-block">
     <div>
       <div class="ctx-label">Contratante</div>
@@ -1229,11 +1287,11 @@ def _gerar_html_recibo(pfm_codigo: str) -> str:
       <div class="ctx-value">{contratado_html}</div>
     </div>
   </div>
-  <div style="margin-top:28px;">
+  <div style="margin-top:16px;">
     <div class="section-label">Serviço Prestado</div>
     <div class="ctx-value">{_h(descricao)}</div>
   </div>
-  <div class="financial-outer" style="margin-top:24px;">
+  <div class="financial-outer" style="margin-top:14px;">
     <div class="financial-inner">
       <div class="fin-total-row">
         <div class="fin-total-l">VALOR RECEBIDO</div>
@@ -1241,18 +1299,22 @@ def _gerar_html_recibo(pfm_codigo: str) -> str:
       </div>
     </div>
   </div>
-  <div class="bottom" style="margin-top:28px;">
+  <div class="bottom" style="margin-top:14px;">
     <div>
-      <div class="bottom-label">Referência</div>
-      <div class="bottom-main">Pedido #{_h(pfm_codigo)}</div>
-      <div class="bottom-detail">Pago em {_h(pedido.data_pagamento) or _h(data_emissao)}</div>
+      <div class="bottom-label">Pago em</div>
+      <div class="bottom-main">{_h(data_parcela) or _h(data_emissao)}</div>
     </div>
     <div>
       <div class="bottom-label">Forma de pagamento</div>
       <div class="bottom-main">PIX</div>
     </div>
   </div>
-  <div class="footer-tagline">Recibo gerado por Laura — controle interno DeltaD</div>
+  <div class="assinatura-bloco">
+    <div class="assinatura-linha">
+      <div class="assinatura-nome">{_h(prestador_nome)}</div>
+      <div class="assinatura-doc">{_h(prestador_doc)}</div>
+    </div>
+  </div>
 </div>
 </body>
 </html>"""
@@ -1893,18 +1955,24 @@ def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
         lanc = con.execute(
             "SELECT fornecedor, valor, data_prevista_entrega, vencimento_pagamento, status, criado_em, "
             "data_pagamento, doc_id_nfe, doc_id_comprovante, identificador_comprovante, "
-            "obs_entrega, entregue_em, categoria, doc_id_recibo "
+            "obs_entrega, entregue_em, categoria "
             "FROM lancamentos WHERE pfm_codigo=?",
             (pfm_codigo,)
         ).fetchone()
         qtd_fotos = con.execute(
             "SELECT COUNT(*) FROM entrega_fotos WHERE pfm_codigo=?", (pfm_codigo,)
         ).fetchone()[0]
+        qtd_parcelas = con.execute(
+            "SELECT COUNT(*) FROM parcelas_pagamento WHERE pfm_codigo=?", (pfm_codigo,)
+        ).fetchone()[0]
+        total_pago_v = con.execute(
+            "SELECT COALESCE(SUM(valor),0) FROM parcelas_pagamento WHERE pfm_codigo=?", (pfm_codigo,)
+        ).fetchone()[0]
 
     forn_lanc = data_prev_ent = venc = status_raw = lanc_criado = data_pgto = None
-    doc_id_nfe = doc_id_comp = ident_comp = obs_ent = entregue_em = categoria_lanc = doc_id_recibo = None
+    doc_id_nfe = doc_id_comp = ident_comp = obs_ent = entregue_em = categoria_lanc = None
     if lanc:
-        forn_lanc, _, data_prev_ent, venc, status_raw, lanc_criado, data_pgto, doc_id_nfe, doc_id_comp, ident_comp, obs_ent, entregue_em, categoria_lanc, doc_id_recibo = lanc
+        forn_lanc, _, data_prev_ent, venc, status_raw, lanc_criado, data_pgto, doc_id_nfe, doc_id_comp, ident_comp, obs_ent, entregue_em, categoria_lanc = lanc
 
     try:
         status = StatusPedido(status_raw) if status_raw else StatusPedido.SEM_LANCAMENTO
@@ -1936,7 +2004,8 @@ def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
         obs_entrega               = obs_ent,
         entregue_em               = entregue_em,
         categoria                 = categoria_lanc,
-        doc_id_recibo             = doc_id_recibo,
+        qtd_parcelas              = qtd_parcelas,
+        total_pago                = total_pago_v,
         caminho_orcamento         = caminho,
     )
 
@@ -1997,20 +2066,23 @@ def _status_pago_label(pedido: "Pedido") -> str:
         return "Pago · NF-e pendente"
     return "Pago · NF-e"
 
+def _status_a_pagar_label(pedido: "Pedido") -> str:
+    if pedido.total_pago and pedido.total_pago > 0.009:
+        return f"Aguardando pagamento · R$ {_fmt_brl(pedido.total_pago)} de R$ {_fmt_brl(pedido.valor_negociado)} pago"
+    return "Aguardando pagamento"
+
 def mostrar_pedido(pedido: Pedido) -> str:
     """Formata o Pedido como mensagem Telegram. Sem IO — apenas formatação."""
     _STATUS_EMOJI = {
         StatusPedido.A_PAGAR:          "🟡",
         StatusPedido.PAGO:             "🟢",
-        StatusPedido.PAGO_COM_RECIBO:  "🟢",
         StatusPedido.PENDENTE_REVISAO: "🔴",
         StatusPedido.SUBSTITUIDO:      "⚫",
         StatusPedido.SEM_LANCAMENTO:   "⚪",
     }
     _STATUS_SHORT = {
-        StatusPedido.A_PAGAR:          "Aguardando pagamento",
+        StatusPedido.A_PAGAR:          _status_a_pagar_label(pedido),
         StatusPedido.PAGO:             _status_pago_label(pedido),
-        StatusPedido.PAGO_COM_RECIBO:  "Pago · Recibo emitido",
         StatusPedido.PENDENTE_REVISAO: "Requer atenção",
         StatusPedido.SUBSTITUIDO:      "Substituído",
         StatusPedido.SEM_LANCAMENTO:   "Sem registro financeiro",
@@ -2062,7 +2134,7 @@ def mostrar_pedido(pedido: Pedido) -> str:
 
 def teclado_pedido(doc_id, pfm_codigo, doc_id_nfe=None, doc_id_comprovante=None,
                    qtd_fotos_entrega=0, obs_entrega=None, status=None, categoria=None,
-                   doc_id_recibo=None):
+                   qtd_parcelas=0):
     ggv = pfm_codigo.rsplit("-", 1)[0]
     botoes = [
         [InlineKeyboardButton("Revisar",      callback_data=f"pfm_revisar:{doc_id}:{pfm_codigo}")],
@@ -2073,11 +2145,11 @@ def teclado_pedido(doc_id, pfm_codigo, doc_id_nfe=None, doc_id_comprovante=None,
         botoes.append([InlineKeyboardButton("💰 Comprovante", callback_data=f"pfm_comp:{doc_id_comprovante}:{pfm_codigo}")])
     if doc_id_nfe:
         botoes.append([InlineKeyboardButton("🧾 NF-e", callback_data=f"pfm_nfe:{doc_id_nfe}:{pfm_codigo}")])
-    if doc_id_recibo:
-        botoes.append([InlineKeyboardButton("📄 Recibo", callback_data=f"pfm_recibo:{doc_id_recibo}:{pfm_codigo}")])
-    elif (status == StatusPedido.PAGO and not doc_id_nfe
-            and categoria not in CATEGORIAS_SEM_NFE_OBRIGATORIA):
-        botoes.append([InlineKeyboardButton("📄 Sem NF — gerar recibo", callback_data=f"recibo_iniciar:{pfm_codigo}")])
+    if qtd_parcelas:
+        botoes.append([InlineKeyboardButton(
+            f"💰 Ver {_rotulo_qtd_arquivos(qtd_parcelas).replace('arquivo', 'parcela')}",
+            callback_data=f"parcelas_ver:{pfm_codigo}"
+        )])
     if obs_entrega:
         if qtd_fotos_entrega:
             botoes.append([InlineKeyboardButton(
@@ -2091,6 +2163,50 @@ def teclado_pedido(doc_id, pfm_codigo, doc_id_nfe=None, doc_id_comprovante=None,
         [InlineKeyboardButton("◀️ Pedidos",   callback_data=f"obra_pedidos:{ggv}")],
         [InlineKeyboardButton("✖ Fechar",     callback_data=f"pfm_fechar:{doc_id}")],
     ]
+    return InlineKeyboardMarkup(botoes)
+
+_STATUS_PARCELA_LABEL = {
+    "pago":                  "🟡 Pago — sem recibo",
+    "aguardando_assinatura": "🟠 Aguardando assinatura",
+    "assinado":              "🟢 Assinado",
+}
+
+def _texto_parcelas(pedido) -> str:
+    parcelas = _listar_parcelas(pedido.codigo)
+    linhas = [f"#{pedido.codigo} — {pedido.fornecedor}", ""]
+    linhas.append(f"Total pago: R$ {_fmt_brl(pedido.total_pago)} de R$ {_fmt_brl(pedido.valor_negociado)}")
+    if pedido.valor_negociado:
+        faltam = pedido.valor_negociado - pedido.total_pago
+        if faltam > 0.01:
+            linhas.append(f"Faltam: R$ {_fmt_brl(faltam)}")
+    linhas.append("")
+    for i, (pid, valor, data, doc_id_rec, doc_id_rec_ass, status) in enumerate(parcelas, start=1):
+        label = _STATUS_PARCELA_LABEL.get(status, status)
+        linhas.append(f"{i}. R$ {_fmt_brl(valor)} — {data or '—'} — {label}")
+    return "\n".join(linhas)
+
+def teclado_parcelas(pfm_codigo):
+    parcelas = _listar_parcelas(pfm_codigo)
+    botoes = []
+    for i, (pid, valor, data, doc_id_rec, doc_id_rec_ass, status) in enumerate(parcelas, start=1):
+        valor_fmt = f"R$ {_fmt_brl(valor)}"
+        if status == "pago":
+            botoes.append([InlineKeyboardButton(
+                f"📄 Gerar recibo — parcela {i} ({valor_fmt})", callback_data=f"recibo_parcela_iniciar:{pid}"
+            )])
+        elif status == "aguardando_assinatura":
+            botoes.append([InlineKeyboardButton(
+                f"👀 Ver recibo — parcela {i}", callback_data=f"pfm_recibo:{doc_id_rec}:{pfm_codigo}"
+            )])
+            botoes.append([InlineKeyboardButton(
+                f"📎 Anexar assinado — parcela {i}", callback_data=f"recibo_assinado_iniciar:{pid}"
+            )])
+        elif status == "assinado":
+            doc_ver = doc_id_rec_ass or doc_id_rec
+            botoes.append([InlineKeyboardButton(
+                f"✅ Ver recibo assinado — parcela {i}", callback_data=f"pfm_recibo:{doc_ver}:{pfm_codigo}"
+            )])
+    botoes.append([InlineKeyboardButton("← Voltar", callback_data=f"pedido_abrir:{pfm_codigo}")])
     return InlineKeyboardMarkup(botoes)
 
 def buscar_pedidos_sem_entrega():
@@ -2128,13 +2244,13 @@ _MOTIVOS_RECIBO = {
     "orgao":    "Órgão/entidade sem NF-e",
 }
 
-def teclado_motivo_recibo(pfm_codigo):
+def teclado_motivo_recibo(parcela_id, pfm_codigo):
     botoes = [
-        [InlineKeyboardButton(label, callback_data=f"recibo_motivo:{pfm_codigo}:{chave}")]
+        [InlineKeyboardButton(label, callback_data=f"recibo_parcela_motivo:{parcela_id}:{chave}")]
         for chave, label in _MOTIVOS_RECIBO.items()
     ]
-    botoes.append([InlineKeyboardButton("✏️ Outro motivo", callback_data=f"recibo_motivo:{pfm_codigo}:outro")])
-    botoes.append([InlineKeyboardButton("✖ Cancelar", callback_data=f"pedido_abrir:{pfm_codigo}")])
+    botoes.append([InlineKeyboardButton("✏️ Outro motivo", callback_data=f"recibo_parcela_motivo:{parcela_id}:outro")])
+    botoes.append([InlineKeyboardButton("✖ Cancelar", callback_data=f"parcelas_ver:{pfm_codigo}")])
     return InlineKeyboardMarkup(botoes)
 
 def _salvar_entrega_db(pfm_codigo, obs):
@@ -2154,7 +2270,7 @@ def _tela_apos_entrega(pfm_codigo):
         mostrar_pedido(pedido),
         teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe,
                        pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega,
-                       pedido.status, pedido.categoria, pedido.doc_id_recibo)
+                       pedido.status, pedido.categoria, pedido.qtd_parcelas)
     )
 
 def _adicionar_foto_entrega(pfm_codigo, doc_id_foto, legenda):
@@ -2410,17 +2526,22 @@ async def _executar_revisao_pfm(query, ctx, doc_id, pfm_codigo_base):
         reply_markup=teclado_pedido(doc_id, pfm_codigo_base)
     )
 
-async def _gerar_recibo(ctx, pfm_codigo: str, motivo: str):
-    """Gera o recibo em PDF para fornecedor/prestador sem NF-e, arquiva e fecha o pedido."""
+async def _gerar_recibo(ctx, parcela_id: int, motivo: str):
+    """Gera o recibo em PDF de uma parcela paga, arquiva e marca aguardando assinatura."""
+    parcela = _buscar_parcela(parcela_id)
+    if not parcela:
+        await ctx.bot.send_message(chat_id=DONO_ID, text="Parcela não encontrada.")
+        return
+    _, pfm_codigo, valor_parcela, data_parcela, *_ = parcela
     pedido = buscar_pedido(pfm_codigo)
     if not pedido:
         await ctx.bot.send_message(chat_id=DONO_ID, text="Pedido não encontrado.")
         return
-    html      = _gerar_html_recibo(pfm_codigo)
-    pdf_bytes = await _html_para_pdf(html)
+    html      = _gerar_html_recibo(parcela_id)
+    pdf_bytes = await _html_para_pdf(html, formato="A5", paisagem=True)
 
     ggv        = pfm_codigo.split("-")[0]
-    nome_base  = _nome_base_pfm(pfm_codigo, pedido.fornecedor, "recibo")
+    nome_base  = _nome_base_pfm(pfm_codigo, pedido.fornecedor, f"recibo-parcela{parcela_id}")
     destino    = _pasta_entrega(ggv) / f"{nome_base}.pdf"
     destino.write_bytes(pdf_bytes)
 
@@ -2429,8 +2550,8 @@ async def _gerar_recibo(ctx, pfm_codigo: str, motivo: str):
 
     with sqlite3.connect(DB_PATH) as con:
         con.execute(
-            "UPDATE lancamentos SET status='pago_com_recibo', doc_id_recibo=? WHERE pfm_codigo=?",
-            (doc_id_recibo, pfm_codigo)
+            "UPDATE parcelas_pagamento SET doc_id_recibo=?, status='aguardando_assinatura' WHERE id=?",
+            (doc_id_recibo, parcela_id)
         )
         con.execute(
             "UPDATE fornecedores SET emite_nf=0 WHERE cnpj=? OR cpf=?",
@@ -2441,18 +2562,14 @@ async def _gerar_recibo(ctx, pfm_codigo: str, motivo: str):
         chat_id=DONO_ID,
         document=pdf_bytes,
         filename=f"{nome_base}.pdf",
-        caption=f"📄 Recibo — Pedido #{pfm_codigo}"
+        caption=(f"📄 Recibo — Pedido #{pfm_codigo} — R$ {_fmt_brl(valor_parcela)}\n\n"
+                 "Envie para o fornecedor assinar. Quando voltar assinado, use "
+                 "\"📎 Anexar recibo assinado\" na tela de parcelas.")
     )
-    pedido_atualizado = buscar_pedido(pfm_codigo)
     await ctx.bot.send_message(
         chat_id=DONO_ID,
-        text=f"🟢 Pedido #{pfm_codigo} — Pago · Recibo emitido.",
-        reply_markup=teclado_pedido(
-            pedido_atualizado.doc_id, pfm_codigo, pedido_atualizado.doc_id_nfe,
-            pedido_atualizado.doc_id_comprovante, pedido_atualizado.qtd_fotos_entrega,
-            pedido_atualizado.obs_entrega, pedido_atualizado.status,
-            pedido_atualizado.categoria, pedido_atualizado.doc_id_recibo
-        )
+        text=f"🟡 Recibo gerado — aguardando assinatura (#{pfm_codigo}, R$ {_fmt_brl(valor_parcela)}).",
+        reply_markup=teclado_parcelas(pfm_codigo)
     )
 
 async def _sincronizar_receita_pendentes(ctx: ContextTypes.DEFAULT_TYPE):
@@ -2615,6 +2732,36 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Legenda do arquivo (ex: nota fiscal, caixa avariada):")
         return
 
+    if ctx.user_data.get("aguardando") == "recibo_assinado_upload":
+        ctx.user_data["aguardando"] = None
+        parcela_id = ctx.user_data.pop("recibo_parcela_id", None)
+        parcela = _buscar_parcela(parcela_id) if parcela_id else None
+        if not parcela:
+            await update.message.reply_text("Parcela não encontrada.")
+            return
+        _, pfm_codigo, valor_parcela, data_parcela, doc_id_recibo_antigo, _, _ = parcela
+        atualizar(doc_id, tipo="recibo_assinado")
+        with sqlite3.connect(DB_PATH) as con:
+            con.execute(
+                "UPDATE parcelas_pagamento SET doc_id_recibo_assinado=?, status='assinado' WHERE id=?",
+                (doc_id, parcela_id)
+            )
+        # Sobrescreve o recibo rascunho em 05 Entrega com a versão assinada, mesmo nome de arquivo
+        if doc_id_recibo_antigo:
+            with sqlite3.connect(DB_PATH) as con:
+                row = con.execute("SELECT caminho FROM documentos WHERE id=?", (doc_id_recibo_antigo,)).fetchone()
+            if row and row[0]:
+                try:
+                    shutil.copy2(caminho, row[0])
+                except OSError:
+                    pass
+        pedido = buscar_pedido(pfm_codigo)
+        await update.message.reply_text(
+            f"✅ Recibo assinado registrado — parcela de R$ {_fmt_brl(valor_parcela)} (#{pfm_codigo}).",
+            reply_markup=teclado_parcelas(pfm_codigo) if pedido else None
+        )
+        return
+
     await update.message.reply_text(
         "O que é este documento?",
         reply_markup=teclado_tipo_inicial(doc_id)
@@ -2660,7 +2807,7 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 preparar_visualizacao_pedido(pedido)
                 await update.message.reply_text(
                     mostrar_pedido(pedido),
-                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status, pedido.categoria, pedido.doc_id_recibo)
+                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status, pedido.categoria, pedido.qtd_parcelas)
                 )
             else:
                 await update.message.reply_text(f"Pedido {pfm_codigo} não encontrado.")
@@ -2753,13 +2900,13 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     elif aguardando == "recibo_motivo_texto":
         motivo = texto.strip()
-        pfm_codigo = ctx.user_data.pop("recibo_pfm_codigo", None)
+        parcela_id = ctx.user_data.pop("recibo_parcela_id", None)
         ctx.user_data["aguardando"] = None
-        if pfm_codigo:
-            await update.message.reply_text(f"Gerando recibo #{pfm_codigo}...")
-            await _gerar_recibo(ctx, pfm_codigo, motivo)
+        if parcela_id:
+            await update.message.reply_text("Gerando recibo...")
+            await _gerar_recibo(ctx, parcela_id, motivo)
         else:
-            await update.message.reply_text("Pedido não encontrado.")
+            await update.message.reply_text("Parcela não encontrada.")
 
     elif aguardando == "edit_contato":
         m_fone = re.search(r'\s+([\d][\d\s\(\)\-\.]{5,})\s*$', texto)
@@ -3032,19 +3179,23 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             _, doc_id_comp, pfm_codigo = partes
             with sqlite3.connect(DB_PATH) as con:
                 comp = con.execute(
-                    "SELECT dados_claude FROM documentos WHERE id=?", (int(doc_id_comp),)
+                    "SELECT dados_claude, caminho FROM documentos WHERE id=?", (int(doc_id_comp),)
                 ).fetchone()
-            if not comp:
-                await query.edit_message_text("Comprovante não encontrado.")
+                lanc = con.execute(
+                    "SELECT valor, categoria, doc_id FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)
+                ).fetchone()
+            if not comp or not lanc:
+                await query.edit_message_text("Dados não encontrados.")
                 return
             dados_comp = parse_comprovante(comp[0])
+            caminho_comp = comp[1]
+            valor_total, categoria_lanc, doc_id_orcamento = lanc
             ident_comp = dados_comp["id_transacao"] if dados_comp["id_transacao"] != "A PREENCHER" else None
             ja_usado = None
             if ident_comp and not TEST_MODE:
                 with sqlite3.connect(DB_PATH) as con:
                     ja_usado = con.execute(
-                        "SELECT pfm_codigo FROM lancamentos "
-                        "WHERE identificador_comprovante=? AND status='pago' LIMIT 1",
+                        "SELECT pfm_codigo FROM parcelas_pagamento WHERE identificador_comprovante=? LIMIT 1",
                         (ident_comp,)
                     ).fetchone()
             if ja_usado:
@@ -3063,37 +3214,49 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 if nome in _data_raw.lower():
                     data_pgto = re.sub(nome, num, _data_raw, flags=re.IGNORECASE)
                     break
+
+            valor_parcela = dados_comp["valor_v"] or 0.0
+            parcela_id = _registrar_parcela(pfm_codigo, valor_parcela, data_pgto, int(doc_id_comp), ident_comp)
+            _arquivar_doc_financeiro(pfm_codigo, f"comprovante-parcela{parcela_id}", caminho_comp, data_pgto)
+
+            total_pago = _total_pago(pfm_codigo)
+            quitado = valor_total and total_pago >= valor_total - 0.01
             with sqlite3.connect(DB_PATH) as con:
-                cur = con.execute(
-                    """UPDATE lancamentos
-                       SET status='pago', valor_pago=?, data_pagamento=?,
-                           doc_id_comprovante=?, identificador_comprovante=?
-                       WHERE pfm_codigo=? AND status='a_pagar'""",
-                    (dados_comp["valor_v"] or None, data_pgto,
-                     int(doc_id_comp), ident_comp, pfm_codigo)
-                )
-                rowcount = cur.rowcount
-            if rowcount == 0:
-                await query.edit_message_text(
-                    "Não foi possível registrar o pagamento.\n"
-                    "O pedido pode já estar pago ou ter sido alterado."
-                )
-                return
-            with sqlite3.connect(DB_PATH) as con:
-                row_comp = con.execute("SELECT caminho FROM documentos WHERE id=?", (int(doc_id_comp),)).fetchone()
-                row_lanc = con.execute(
-                    "SELECT categoria, doc_id FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)
-                ).fetchone()
-            _arquivar_doc_financeiro(pfm_codigo, "comprovante", row_comp[0] if row_comp else None, data_pgto)
-            if row_lanc and row_lanc[0] in CATEGORIAS_SEM_NFE_OBRIGATORIA:
+                if quitado:
+                    con.execute(
+                        "UPDATE lancamentos SET status='pago', valor_pago=?, data_pagamento=? WHERE pfm_codigo=?",
+                        (total_pago, data_pgto, pfm_codigo)
+                    )
+                else:
+                    con.execute(
+                        "UPDATE lancamentos SET valor_pago=? WHERE pfm_codigo=?",
+                        (total_pago, pfm_codigo)
+                    )
+
+            if quitado and categoria_lanc in CATEGORIAS_SEM_NFE_OBRIGATORIA:
                 # Taxa/imposto/serviço público: a fatura já enviada é a "terceira via" — não há NF-e separada
                 with sqlite3.connect(DB_PATH) as con:
-                    row_fatura = con.execute("SELECT caminho FROM documentos WHERE id=?", (row_lanc[1],)).fetchone()
+                    row_fatura = con.execute("SELECT caminho FROM documentos WHERE id=?", (doc_id_orcamento,)).fetchone()
                 _arquivar_doc_financeiro(pfm_codigo, "fatura", row_fatura[0] if row_fatura else None, data_pgto)
-            await query.edit_message_text(
-                f"🟢 Pedido #{pfm_codigo} — pago.\n\n"
-                "Envie a NF-e para fechar este pedido."
-            )
+
+            valor_parcela_fmt = f"R$ {_fmt_brl(valor_parcela)}"
+            botoes = []
+            if categoria_lanc not in CATEGORIAS_SEM_NFE_OBRIGATORIA:
+                botoes.append([InlineKeyboardButton(
+                    "📄 Gerar recibo desta parcela", callback_data=f"recibo_parcela_iniciar:{parcela_id}"
+                )])
+            if quitado:
+                texto = f"🟢 Pedido #{pfm_codigo} — quitado. Parcela: {valor_parcela_fmt}."
+                if categoria_lanc not in CATEGORIAS_SEM_NFE_OBRIGATORIA:
+                    texto += "\n\nEnvie a NF-e para fechar este pedido (se aplicável)."
+            else:
+                faltam = valor_total - total_pago
+                texto = (
+                    f"🟡 Pedido #{pfm_codigo} — parcela registrada: {valor_parcela_fmt}.\n"
+                    f"Total pago: R$ {_fmt_brl(total_pago)} de R$ {_fmt_brl(valor_total)} — "
+                    f"faltam R$ {_fmt_brl(faltam)}."
+                )
+            await query.edit_message_text(texto, reply_markup=InlineKeyboardMarkup(botoes) if botoes else None)
 
         elif acao == "pix_cancelar":
             await query.edit_message_text("Cancelado.")
@@ -3577,23 +3740,46 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         elif acao == "nfe_cancelar":
             await query.edit_message_text("NF-e não vinculada.")
 
-        elif acao == "recibo_iniciar":
+        elif acao == "parcelas_ver":
             pfm_codigo = partes[1]
+            pedido = buscar_pedido(pfm_codigo)
+            if not pedido:
+                await query.answer(f"Pedido {pfm_codigo} não encontrado.", show_alert=True)
+                return
             await query.edit_message_text(
-                f"#{pfm_codigo} — Por que não tem NF-e?",
-                reply_markup=teclado_motivo_recibo(pfm_codigo)
+                _texto_parcelas(pedido),
+                reply_markup=teclado_parcelas(pfm_codigo)
             )
 
-        elif acao == "recibo_motivo":
-            _, pfm_codigo, chave = partes
+        elif acao == "recibo_parcela_iniciar":
+            parcela_id = int(partes[1])
+            parcela = _buscar_parcela(parcela_id)
+            if not parcela:
+                await query.answer("Parcela não encontrada.", show_alert=True)
+                return
+            pfm_codigo = parcela[1]
+            await query.edit_message_text(
+                f"#{pfm_codigo} — Por que não tem NF-e?",
+                reply_markup=teclado_motivo_recibo(parcela_id, pfm_codigo)
+            )
+
+        elif acao == "recibo_parcela_motivo":
+            _, parcela_id_str, chave = partes
+            parcela_id = int(parcela_id_str)
             if chave == "outro":
                 ctx.user_data["aguardando"] = "recibo_motivo_texto"
-                ctx.user_data["recibo_pfm_codigo"] = pfm_codigo
+                ctx.user_data["recibo_parcela_id"] = parcela_id
                 await query.edit_message_text("Descreva o motivo:")
                 return
             motivo = _MOTIVOS_RECIBO.get(chave, chave)
-            await query.edit_message_text(f"Gerando recibo #{pfm_codigo}...")
-            await _gerar_recibo(ctx, pfm_codigo, motivo)
+            await query.edit_message_text("Gerando recibo...")
+            await _gerar_recibo(ctx, parcela_id, motivo)
+
+        elif acao == "recibo_assinado_iniciar":
+            parcela_id = int(partes[1])
+            ctx.user_data["aguardando"] = "recibo_assinado_upload"
+            ctx.user_data["recibo_parcela_id"] = parcela_id
+            await query.edit_message_text("Envie a foto ou PDF do recibo assinado:")
 
         elif acao == "obra_pedidos":
             codigo  = partes[1]
@@ -3610,7 +3796,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 preparar_visualizacao_pedido(pedido)
                 await query.edit_message_text(
                     mostrar_pedido(pedido),
-                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status, pedido.categoria, pedido.doc_id_recibo)
+                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status, pedido.categoria, pedido.qtd_parcelas)
                 )
             else:
                 await query.answer(f"Pedido {pfm_codigo} não encontrado.", show_alert=True)

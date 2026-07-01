@@ -1,6 +1,6 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-01 (produção migrada e limpa; auto-cadastro via Receita; arquivos organizados por obra; taxas/impostos/serviços públicos; recibo automático)
+> Atualizado em: 2026-07-01 (produção migrada e limpa; auto-cadastro via Receita; arquivos organizados por obra; taxas/impostos/serviços públicos; recibo automático; pagamento parcelado)
 
 ---
 
@@ -155,6 +155,55 @@ autônomo sem CNPJ) — aqui a Laura gera o recibo, não só arquiva algo que j�
 - Recibo arquiva em `05 Entrega/` — mesma convenção já implementada; registrado como `documentos`
   para poder ser visualizado depois pelo cockpit (`📄 Recibo`)
 
+> **Superado em 2026-07-01** pela Fiada "Pagamento parcelado" abaixo: o status `pago_com_recibo`
+> e `lancamentos.doc_id_recibo` foram substituídos pelo modelo de parcelas (`parcelas_pagamento`),
+> que trata o recibo por parcela, não por pedido inteiro. O mecanismo de geração descrito acima
+> (PDF via Playwright, CONTRATANTE = VII) continua o mesmo — só a granularidade mudou.
+
+**Pagamento parcelado + ciclo de assinatura de recibo** ✓ *(concluída 2026-07-01)*
+
+Descoberta ao validar o recibo de GGV03-001 com Dennis: pagamento de mão de obra não é um evento
+único. Prestadores como o Valdir recebem em parcelas de valor e período livres ("14 em 14 dias",
+"pode me pagar 3.500 amanhã?") até quitar o total combinado — e cada parcela paga precisa do seu
+próprio recibo assinado. Por decisão explícita, o modelo vale para **todos os pedidos**, não só
+mão de obra: a forma de pagamento já é declarada na criação do pedido, à vista ou parcelado é só
+como a Laura entende o mesmo fluxo.
+
+- Nova tabela `parcelas_pagamento`: cada linha é um pagamento parcial vinculado ao `pfm_codigo`,
+  com seu próprio ciclo `pago` → `aguardando_assinatura` → `assinado`
+- `lancamentos.status` só vira `pago` quando `SUM(parcelas_pagamento.valor) >= lancamentos.valor`;
+  antes disso o pedido continua `a_pagar`, mostrando o progresso: "Aguardando pagamento · R$ 3.500,00
+  de R$ 70.000,00 pago"
+- `pix_pagar` reescrito: cada comprovante recebido vira uma nova parcela (dedup de comprovante
+  agora por parcela, não mais por pedido); ao completar o total, o pedido fecha normalmente
+- `_gerar_recibo()` passa a ser por parcela (`parcela_id`, não `pfm_codigo`) — cada parcela paga
+  gera seu próprio PDF, arquivado em `05 Entrega/` com sufixo `recibo-parcelaN`
+- Tela nova "Ver parcelas" no cockpit do pedido: lista cada parcela com valor, data e status;
+  botão para gerar recibo, ver recibo pendente de assinatura, ou anexar a versão assinada
+- Ciclo de assinatura fechado: Dennis manda o recibo pro prestador assinar fora da Laura (ex:
+  gov.br), recebe de volta assinado e reenvia pra Laura via "📎 Anexar assinado" — o arquivo em
+  `05 Entrega/` é substituído pela versão assinada e a parcela vira `assinado`
+- Recibo em A5 paisagem com espaço de assinatura no rodapé — layout ajustado a partir de feedback
+  direto no PDF gerado para GGV03-001 (cabeçalho só "RECIBO" + código + data; nome/CPF do prestador
+  como linha de assinatura, não no cabeçalho)
+- Status obsoleto `pago_com_recibo` removido do `StatusPedido` (housekeeping — a granularidade
+  correta é a parcela, não o pedido)
+
+**Esclarecimento DeltaD × VII** — confirmado via CNPJ oficial (Receita Federal): DeltaD Engenharia
+é a marca da Verschoor Construções Civis Ltda (CNPJ 48.494.891/0001-06, responsável técnica pela
+obra), enquanto a `DELTAD` no código sempre guardou os dados da Verschoor Investimentos Imobiliários
+Ltda — VII (CNPJ 58.358.802/0001-58), dona real dos empreendimentos e CONTRATANTE correta no recibo.
+Por decisão de Dennis, a DeltaD não participa do fluxo de compras da Laura — é só mais um fornecedor
+da VII quando prestar serviço técnico. Nenhuma restruturação de código, apenas comentário explicativo
+sobre a constante `DELTAD`.
+
+Testado de ponta a ponta com o pedido real GGV03-001 (Valdir Aparecida Silveira, R$ 70.000,00):
+parcela parcial → progresso exibido corretamente → recibo gerado → assinatura simulada → segunda
+parcela completando o total → pedido corretamente marcado `pago`.
+
+**Pendência real, não é da Laura:** o recibo de GGV03-001 ainda não foi enviado pro Valdir assinar
+de verdade — o teste de hoje validou o mecanismo, não o ciclo completo com assinatura real.
+
 **Fiada 6c — Foto de Entrega + Gestão de Entrega** ✓ *(concluída 2026-06-30)*
 
 - Novo tipo de documento `foto_entrega` — sem Claude, direto à seleção do pedido
@@ -242,11 +291,11 @@ Implementar junto com a Fiada 6b.
 
 ## Próximas Fiadas
 
-1. **Colocar a Laura para rodar em produção** — banco migrado e limpo (ver Decisões Recentes em `ESTADO.md`)
-2. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-3. **Usar entrega em produção real** — deixar o fluxo rodar no dia a dia antes de revisitar extração (gatilho na ADR-003)
-4. Validar PC 2.0 em produção + remover DOCX do fluxo principal
-5. **Validar o recibo automático com um caso real** — layout/texto do PDF só foi testado com dado fictício
+1. **Fechar o ciclo real de assinatura de GGV03-001** — enviar o recibo pro Valdir assinar de verdade
+2. **Colocar a Laura para rodar em produção** — banco migrado e limpo (ver Decisões Recentes em `ESTADO.md`)
+3. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+4. **Usar entrega em produção real** — deixar o fluxo rodar no dia a dia antes de revisitar extração (gatilho na ADR-003)
+5. Validar PC 2.0 em produção + remover DOCX do fluxo principal
 
 ---
 
