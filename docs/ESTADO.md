@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-07-01
-> Sessão: Preparação para produção — migração, limpeza, auto-cadastro via Receita, organização automática de arquivos, taxas/impostos/serviços públicos, pagamento parcelado + recibo assinado
+> Sessão: Preparação para produção — migração, limpeza, auto-cadastro via Receita, organização automática de arquivos, taxas/impostos/serviços públicos, pagamento parcelado + recibo assinado, base de insumos SINAPI
 
 ---
 
@@ -27,12 +27,14 @@
   fecha quando a soma das parcelas atinge o valor total. Recibo (quando aplicável) é por parcela,
   em A5 paisagem com espaço de assinatura — Dennis reenvia assinado, Laura substitui o rascunho.
 - Módulo Financeiro: fundação criada (`financeiro/`). Sem funcionalidade nova ainda.
+- **Base de referência de insumos SINAPI** (`insumos_sinapi`, 4.365 materiais, preço PR) importada
+  via script — tabela solta, ainda **sem nenhum vínculo com `bot.py`** (decisão deliberada).
 
 ---
 
 ## Versão Atual
 
-**v0.7.0** — Pagamento parcelado + ciclo de assinatura de recibo
+**v0.7.1** — Base de insumos SINAPI (referência, sem vínculo com o bot ainda)
 
 ---
 
@@ -69,6 +71,46 @@
 ---
 
 ## Última Fiada Implementada
+
+**Base de insumos SINAPI (referência)** *(2026-07-01)*
+
+Dennis quer, no futuro, que a Laura reconheça automaticamente qual insumo de referência (padrão
+nacional) corresponde a um item de orçamento com descrição livre de fornecedor — e mantenha uma
+coluna de fabricante separada, sem perder a especificidade comercial. Antes de qualquer
+implementação, tivemos uma conversa conceitual longa (premissas, entidades do domínio, como ERPs
+de construção resolvem isso, armadilhas de equivalência técnica × comercial) — não repetida aqui,
+mas registrada na conclusão prática abaixo.
+
+**Decisão de arquitetura, com agentes de engenharia/arquitetura invocados antes de implementar:**
+avaliamos usar o projeto open-source `AutoSINAPI`/`autoSINAPI_API` (GitHub, stack Docker com
+Postgres + API REST + Kong) contra baixar a planilha oficial que a Caixa já publica todo mês e
+importar direto pro SQLite. Descartamos o stack Docker: Dennis não tem Docker instalado, o próprio
+AutoSINAPI tem a URL de download quebrada (a Caixa mudou a estrutura de pastas em 2025 e o projeto
+não acompanhou — confirmado baixando de verdade), a variante com API não tem nenhum modo sem
+Docker (7 serviços), e ambos os repositórios são mantidos por uma única pessoa. Nada disso se
+justifica para popular uma tabela de referência que hoje é só leitura.
+
+**Implementado:**
+- `scripts/import_sinapi.py` — mesmo padrão de `scripts/import_fornecedores.py` (script único,
+  roda manualmente, escreve direto no `laura.db`, sem serviço externo)
+- Baixa `SINAPI-{ano}-{mes}-formato-xlsx.zip` direto do site da Caixa (sem login), tenta os últimos
+  6 meses até achar um publicado
+- Lê a aba `ISD` (Insumos **Sem Desoneração** — regime confirmado com Dennis), filtra
+  `Classificação = MATERIAL`, usa a coluna de preço do Paraná
+- Nova tabela `insumos_sinapi(codigo, descricao, unidade, preco_pr, mes_referencia, fabricante,
+  atualizado_em)` — reexecutar o script atualiza preço/descrição por código, mas **nunca sobrescreve
+  `fabricante`**, que fica pra Dennis preencher aos poucos
+- Testado de ponta a ponta contra produção: 4.365 insumos de material importados (referência
+  05/2026), e testada a idempotência (setei um fabricante manualmente, reexecutei o script, valor
+  preservado)
+
+**Deliberadamente não implementado ainda:** nenhum vínculo com `bot.py` — nem matching automático
+de item de orçamento, nem tela no Telegram, nem `FOREIGN KEY` com `documentos`/`lancamentos`. É
+tabela de referência pura por enquanto. Dennis apontou o gatilho real: isso importa de verdade na
+fase que precede o uso operacional da Laura — montar uma **lista de compras** — e essa fase só
+começa depois de subir as informações pendentes de GGV03 (ver Objetivo da Próxima Sessão).
+
+---
 
 **Pagamento parcelado + ciclo de assinatura de recibo** *(2026-07-01)*
 
@@ -424,14 +466,19 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Objetivo da Próxima Sessão
 
-1. **Fechar o ciclo real do recibo de GGV03-001** — enviar pro Valdir assinar via gov.br, receber de
+1. **Subir as informações pendentes de GGV03** — Dennis tem pelo menos 8 compras reais ainda fora
+   da Laura (algumas pagas/entregues/quitadas, outras só compradas); prioridade antes de qualquer
+   coisa nova, e pré-requisito explícito para o item 2
+2. **Montar a fase "lista de compras"** — é aqui que `insumos_sinapi` passa a ser útil de verdade
+   (matching de item de orçamento com insumo de referência); só começa depois do item 1
+3. **Fechar o ciclo real do recibo de GGV03-001** — enviar pro Valdir assinar via gov.br, receber de
    volta, anexar na Laura ("📎 Anexar recibo assinado"), confirmar que o arquivo em `05 Entrega` é
    substituído corretamente pelo assinado
-2. **Colocar a Laura para rodar em produção** — banco migrado e limpo; falta decidir sobre `LAURA_ENV`
-3. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-4. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
+4. **Colocar a Laura para rodar em produção** — banco migrado e limpo; falta decidir sobre `LAURA_ENV`
+5. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+6. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
    no dia a dia antes de qualquer nova decisão sobre extração (ver gatilho da ADR-003)
-5. **Validar PC 2.0** — testar PDF com orçamento real; remover DOCX após validação
+7. **Validar PC 2.0** — testar PDF com orçamento real; remover DOCX após validação
 
 ---
 

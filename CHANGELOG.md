@@ -10,12 +10,50 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Fechar o ciclo real de assinatura do recibo de GGV03-001 (enviar pro Valdir assinar de verdade)
-2. Colocar a Laura para rodar em produção
-3. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
-4. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
-5. Validar PDF do PC 2.0 com orçamento real em produção
-6. Remover DOCX do fluxo principal após validação
+1. Subir as informações pendentes de GGV03 (pelo menos 8 compras reais fora da Laura)
+2. Montar a fase "lista de compras" (primeiro uso real de `insumos_sinapi`)
+3. Fechar o ciclo real de assinatura do recibo de GGV03-001 (enviar pro Valdir assinar de verdade)
+4. Colocar a Laura para rodar em produção
+5. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
+6. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
+7. Validar PDF do PC 2.0 com orçamento real em produção
+8. Remover DOCX do fluxo principal após validação
+
+---
+
+## [Base de insumos SINAPI (referência)] — 2026-07-01
+
+### Tabela de referência de materiais, sem vínculo com o bot ainda
+
+Objetivo de longo prazo declarado por Dennis: reconhecer automaticamente qual insumo de referência
+(padrão nacional) corresponde a um item de orçamento com descrição livre de fornecedor, mantendo
+fabricante como dado comercial separado — sem depender do SINAPI, usando-o só como linguagem comum.
+Antes de qualquer código, tivemos uma sessão longa só de conceito (premissas, entidades do domínio,
+como ERPs de construção resolvem isso, armadilhas de equivalência técnica × comercial).
+
+- Agentes de engenharia/arquitetura invocados antes de decidir a fonte de dado (mesmo processo já
+  usado para a decisão de extrair `entrega/`, ver ADR-003): avaliado usar o projeto open-source
+  `AutoSINAPI`/`autoSINAPI_API` do GitHub (stack Docker com Postgres + API REST + gateway Kong)
+  contra baixar a planilha oficial da Caixa direto. Descartado o stack Docker — Dennis não tem
+  Docker instalado, o próprio `AutoSINAPI` tem a URL de download oficial quebrada (a Caixa mudou a
+  estrutura de pastas em 2025 e o projeto não acompanhou, confirmado baixando de verdade), a
+  variante com API não tem nenhum modo sem Docker (7 serviços), e ambos os repositórios são
+  mantidos por uma única pessoa
+- `scripts/import_sinapi.py`: mesmo padrão de `scripts/import_fornecedores.py` — script único, roda
+  manualmente, sem serviço externo. Baixa `SINAPI-{ano}-{mes}-formato-xlsx.zip` direto do site da
+  Caixa (sem login), tentando os últimos 6 meses até achar um publicado
+- Lê a aba `ISD` (Insumos Sem Desoneração — regime confirmado com Dennis), filtra
+  `Classificação = MATERIAL`, usa a coluna de preço do Paraná
+- Nova tabela `insumos_sinapi(codigo, descricao, unidade, preco_pr, mes_referencia, fabricante,
+  atualizado_em)` — reexecutar o script atualiza preço/descrição por código mas nunca sobrescreve
+  `fabricante`, que fica pra Dennis preencher aos poucos
+- Testado de ponta a ponta contra produção: 4.365 insumos de material importados (referência
+  05/2026); idempotência confirmada (fabricante setado manualmente sobreviveu a uma reimportação)
+
+**Deliberadamente não implementado ainda:** nenhum vínculo com `bot.py` — sem matching automático,
+sem tela no Telegram, sem `FOREIGN KEY` com `documentos`/`lancamentos`. Tabela de referência pura
+por decisão — o gatilho real para conectar isso ao fluxo da Laura é a futura fase "lista de
+compras", que só começa depois de subir as informações pendentes de GGV03.
 
 ---
 

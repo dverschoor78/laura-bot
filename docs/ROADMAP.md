@@ -1,6 +1,6 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-01 (produção migrada e limpa; auto-cadastro via Receita; arquivos organizados por obra; taxas/impostos/serviços públicos; recibo automático; pagamento parcelado)
+> Atualizado em: 2026-07-01 (produção migrada e limpa; auto-cadastro via Receita; arquivos organizados por obra; taxas/impostos/serviços públicos; recibo automático; pagamento parcelado; base de insumos SINAPI)
 
 ---
 
@@ -289,13 +289,38 @@ Implementar junto com a Fiada 6b.
 
 ---
 
+**Base de insumos SINAPI (referência)** ✓ *(concluída 2026-07-01)*
+
+Objetivo de longo prazo: reconhecer automaticamente qual insumo de referência (padrão nacional)
+corresponde a um item de orçamento com descrição livre de fornecedor, mantendo fabricante como
+dado comercial separado. Antes de implementar, houve uma sessão conceitual (não técnica) sobre
+premissas, entidades do domínio e armadilhas de equivalência — decisão prática registrada aqui.
+
+- Agentes de engenharia/arquitetura invocados antes de decidir a fonte de dado: descartado o stack
+  open-source `AutoSINAPI`/`autoSINAPI_API` (Docker + Postgres + API REST) — Dennis não tem Docker
+  instalado, o projeto tem a URL de download oficial quebrada (confirmado testando), a variante API
+  não tem modo sem Docker, e é mantido por uma única pessoa
+- `scripts/import_sinapi.py`: baixa a planilha oficial que a Caixa publica todo mês, sem login,
+  mesmo padrão de `scripts/import_fornecedores.py` (script único, sem serviço externo)
+- Nova tabela `insumos_sinapi`: aba "Sem Desoneração", `Classificação = MATERIAL`, preço do Paraná;
+  reexecutar atualiza preço/descrição por código mas nunca sobrescreve `fabricante`
+- 4.365 materiais importados (referência 05/2026), testado contra produção, idempotência confirmada
+- **Deliberadamente sem vínculo com `bot.py` ainda** — tabela de referência pura; o gatilho real
+  para conectar isso ao fluxo da Laura é a futura fase "lista de compras" (ver Próximas Fiadas)
+
+---
+
 ## Próximas Fiadas
 
-1. **Fechar o ciclo real de assinatura de GGV03-001** — enviar o recibo pro Valdir assinar de verdade
-2. **Colocar a Laura para rodar em produção** — banco migrado e limpo (ver Decisões Recentes em `ESTADO.md`)
-3. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-4. **Usar entrega em produção real** — deixar o fluxo rodar no dia a dia antes de revisitar extração (gatilho na ADR-003)
-5. Validar PC 2.0 em produção + remover DOCX do fluxo principal
+1. **Subir as informações pendentes de GGV03** — pelo menos 8 compras reais ainda fora da Laura;
+   pré-requisito explícito antes da fase "lista de compras"
+2. **Montar a fase "lista de compras"** — primeiro uso real de `insumos_sinapi`; só começa depois
+   do item 1
+3. **Fechar o ciclo real de assinatura de GGV03-001** — enviar o recibo pro Valdir assinar de verdade
+4. **Colocar a Laura para rodar em produção** — banco migrado e limpo (ver Decisões Recentes em `ESTADO.md`)
+5. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+6. **Usar entrega em produção real** — deixar o fluxo rodar no dia a dia antes de revisitar extração (gatilho na ADR-003)
+7. Validar PC 2.0 em produção + remover DOCX do fluxo principal
 
 ---
 
