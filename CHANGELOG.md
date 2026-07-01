@@ -11,10 +11,50 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ### Próximas fiadas (priorizadas)
 1. Colocar a Laura para rodar em produção
-2. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
-3. Fiada 6b — Recibo como exceção (fornecedor sem NF-e)
-4. Validar PDF do PC 2.0 com orçamento real em produção
-5. Remover DOCX do fluxo principal após validação
+2. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
+3. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
+4. Fiada 6b — Recibo como exceção (fornecedor sem NF-e)
+5. Validar PDF do PC 2.0 com orçamento real em produção
+6. Remover DOCX do fluxo principal após validação
+
+---
+
+## [Organização automática de arquivos por obra] — 2026-07-01
+
+### Cada obra passa a saber seus próprios caminhos e nomes
+
+Antes de colocar a Laura para rodar, os documentos passaram a se organizar sozinhos na pasta
+OneDrive de cada obra, seguindo a convenção que Dennis já usava manualmente.
+
+**Fiada 1 — Orçamento + PFM → `04 Compras`**
+- Novo campo "Resumo da compra" no PROMPT (2-4 palavras, ex: "Espelho", "aço")
+- PFM salvo como `GGV03-008 - Fornecedor - Resumo.docx` — e agora também `.pdf`, persistido em
+  disco (antes só era enviado pelo Telegram, nunca gravado)
+- Orçamento original arquivado em `04 Compras/00 Orçamentos/`, mesmo padrão de nome
+- Revisão (`pfm_revisar`) sobrescreve o arquivo principal mantendo o nome correto
+- Nova coluna `documentos.caminho_pfm` — resolve a dívida técnica de reconstruir o caminho a
+  cada consulta
+
+**Fiada 2 — Comprovante + NF-e → `01 Controle financeiro`**
+- Nome com a data real do documento (pagamento / emissão da NF-e), não a data de hoje
+- `_data_para_arquivo()` entende `DD/MM/AAAA` e `DD de mês de AAAA`
+
+**Fiada 3 — Fotos de entrega → `05 Entrega`**
+- Numeração sequencial (`foto01`, `foto02`...), extensão original preservada
+- Recibo (Fiada 6b, ainda não implementado) vai cair no mesmo lugar
+
+### Correção estrutural
+
+- `obras.pasta_onedrive` mudou de significado: guarda a raiz da obra, não mais uma subpasta
+  específica. `_pasta_pfm()`, `_pasta_controle_financeiro()` e `_pasta_entrega()` derivam cada
+  subpasta por convenção.
+
+### Escopo
+
+- GGV03 e GGV00 configuradas com a convenção nova
+- GGV01 **intocada** — regra explícita, nunca escrever na estrutura antiga dela
+- GGV02 (em conclusão) sem `pasta_onedrive` configurada — estrutura própria diferente, decisão
+  de onde arquivar pendente
 
 ---
 

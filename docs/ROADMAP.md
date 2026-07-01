@@ -1,6 +1,6 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-01 (produção migrada e limpa; auto-cadastro de fornecedor via Receita)
+> Atualizado em: 2026-07-01 (produção migrada e limpa; auto-cadastro via Receita; arquivos organizados por obra)
 
 ---
 
@@ -209,14 +209,26 @@ Implementar junto com a Fiada 6b.
   Dennis só quando resolve algo de fato
 - Nova dependência: `python-telegram-bot[job-queue]`
 
+**Organização automática de arquivos por obra** ✓ *(concluída 2026-07-01, em 3 fiadas)*
+
+- `obras.pasta_onedrive` agora guarda a raiz da obra; `_pasta_pfm()`, `_pasta_controle_financeiro()`
+  e `_pasta_entrega()` derivam cada subpasta por convenção (`04 Compras`, `01 Controle financeiro`,
+  `05 Entrega`)
+- Orçamento + PFM arquivados em `04 Compras` com nome `{pfm_codigo} - {Fornecedor} - {Resumo}`;
+  novo campo "Resumo da compra" no PROMPT; nova coluna `documentos.caminho_pfm`
+- Comprovante + NF-e arquivados em `01 Controle financeiro` com data real do documento
+- Fotos de entrega arquivadas em `05 Entrega`, numeração sequencial (`foto01`, `foto02`...)
+- GGV03 e GGV00 configuradas; GGV01 intocável por regra; GGV02 pendente (estrutura própria diferente)
+
 ---
 
 ## Próximas Fiadas
 
 1. **Colocar a Laura para rodar em produção** — banco migrado e limpo (ver Decisões Recentes em `ESTADO.md`)
-2. **Usar entrega em produção real** — deixar o fluxo rodar no dia a dia antes de revisitar extração (gatilho na ADR-003)
-3. Fiada 6b — Recibo como exceção (fornecedor sem NF-e, coluna `emite_nf` em `fornecedores`)
-4. Validar PC 2.0 em produção + remover DOCX do fluxo principal
+2. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+3. **Usar entrega em produção real** — deixar o fluxo rodar no dia a dia antes de revisitar extração (gatilho na ADR-003)
+4. Fiada 6b — Recibo como exceção (fornecedor sem NF-e, coluna `emite_nf` em `fornecedores`) — recibo já cai em `05 Entrega` quando existir
+5. Validar PC 2.0 em produção + remover DOCX do fluxo principal
 
 ---
 
@@ -229,12 +241,13 @@ Implementar junto com a Fiada 6b.
   Dívida futura: migrar domínio interno `ggv` → `obra_codigo` em fiada específica.
 
 - **Média — `gerar_pfm()` acumula responsabilidades**
-  Mistura geração Word, gravação no banco e criação de lançamento.
+  Mistura geração Word, gravação no banco, criação de lançamento e arquivamento em disco.
   Justificativa: dificulta testes e futuras extensões.
 
-- **Média — `pfm_caminho` não existe como coluna**
-  O caminho do arquivo é reconstruído a cada consulta.
-  Justificativa: risco de inconsistência se a estrutura de pastas mudar.
+- **Baixa — GGV02 sem `pasta_onedrive` configurada**
+  Estrutura real da pasta (sem "00 Orçamentos", com "51 Obra - Materiais e serviços") não
+  mapeia direto na convenção nova da GGV03. Justificativa: obra em conclusão, decisão de onde
+  arquivar documentos novos ainda pendente — ver `ESTADO.md`.
 
 - **Média — `mime_type` não gravado no banco**
   Inferido pela extensão do arquivo ao reprocessar.

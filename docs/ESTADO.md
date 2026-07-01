@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-07-01
-> Sessão: Preparação para produção — migração de schema, limpeza de fornecedores/pedidos, auto-cadastro via Receita
+> Sessão: Preparação para produção — migração, limpeza, auto-cadastro via Receita, organização automática de arquivos por obra
 
 ---
 
@@ -18,13 +18,15 @@
 - `documentos`/`lancamentos` de produção zerados por decisão — numeração de PFM reinicia do zero.
 - **Fornecedor novo se auto-cadastra a partir do orçamento**, com dado oficial da Receita quando
   disponível; sincronização automática em segundo plano quando a consulta falha na hora.
+- **Documentos organizados automaticamente na pasta OneDrive de cada obra** — orçamento, PFM,
+  comprovante, NF-e e fotos de entrega arquivados com nome e pasta padronizados, sem ação manual.
 - Módulo Financeiro: fundação criada (`financeiro/`). Sem funcionalidade nova ainda.
 
 ---
 
 ## Versão Atual
 
-**v0.6.3** — Auto-cadastro de fornecedor via Receita Federal
+**v0.6.4** — Organização automática de arquivos por obra
 
 ---
 
@@ -54,11 +56,48 @@
 - Navegação padronizada: `← Voltar` e `✖ Fechar` em todos os menus, incluindo Ajuda e Obras
 - Auto-cadastro de fornecedor desconhecido ao gerar PFM, validado contra a Receita Federal
   (razão social, cidade, UF); sincronização periódica em segundo plano para os que falharam na hora
+- Orçamento, PFM, comprovante, NF-e e foto de entrega arquivados automaticamente na pasta OneDrive
+  da obra (`04 Compras`, `01 Controle financeiro`, `05 Entrega`), com nome padronizado
 - Modo teste isolado via `LAURA_ENV=test`
 
 ---
 
 ## Última Fiada Implementada
+
+**Organização automática de arquivos por obra** *(2026-07-01)*
+
+Antes de colocar a Laura para rodar, Dennis pediu que documentos passassem a se organizar sozinhos
+na pasta OneDrive de cada obra, seguindo a convenção que ele já usa manualmente. Feito em 3 fiadas:
+
+- **Fiada 1 — Orçamento + PFM → `04 Compras`**: novo campo "Resumo da compra" no PROMPT (2-4
+  palavras, ex: "Espelho"); PFM salvo como `GGV03-008 - Fornecedor - Resumo.docx` (+ `.pdf`, que
+  agora também é persistido, não só enviado pelo Telegram); orçamento original arquivado em
+  `04 Compras/00 Orçamentos/`; revisão sobrescreve o arquivo principal mantendo o nome correto.
+  Nova coluna `documentos.caminho_pfm` — resolve a dívida técnica antiga de reconstruir o caminho
+  a cada consulta.
+- **Fiada 2 — Comprovante + NF-e → `01 Controle financeiro`**: nome com data real do documento
+  (pagamento / emissão da NF-e), não a data de hoje — `AAAA-MM-DD GGV03-002 Carlessi - comprovante.pdf`.
+  Corrigido um bug pego durante o próprio teste: datas por extenso ("23 de junho de 2026") caíam
+  no fallback de hoje; NF-e não tinha a mesma normalização que o comprovante já tinha.
+- **Fiada 3 — Fotos de entrega → `05 Entrega`**: numeração sequencial (`foto01`, `foto02`...),
+  extensão original preservada. Recibo (Fiada 6b, ainda não implementado) vai cair no mesmo lugar.
+
+**Correção estrutural no meio do caminho**: `obras.pasta_onedrive` mudou de significado — antes
+apontava direto para uma pasta específica (`04 Compras`), agora guarda a **raiz da obra**
+(`00 Obras/2026-06 GGV03`), da qual `_pasta_pfm()`, `_pasta_controle_financeiro()` e
+`_pasta_entrega()` derivam cada subpasta por convenção. Pego e corrigido durante a própria fiada,
+antes de compor com Fiada 2/3.
+
+**Escopo por obra**: GGV03 totalmente configurada (raiz + convenção nova). GGV00 configurada
+(pasta vazia, cria a estrutura na primeira vez que precisar). GGV01 **intocada** — regra explícita
+de Dennis, nunca mexer na estrutura ou arquivos dela. GGV02 (em conclusão) ainda sem `pasta_onedrive`
+configurada — a pasta real dela usa uma organização bem diferente da GGV03 (sem "00 Orçamentos",
+com "51 Obra - Materiais e serviços"), decisão de onde encaixar fica pendente.
+
+Todas as três fiadas testadas de ponta a ponta com as funções reais do bot.py (sem duplicar lógica
+em script à parte), incluindo múltiplas fotos, revisão de PFM e datas em formatos variados.
+
+---
 
 **Auto-cadastro de fornecedor via Receita Federal** *(2026-07-01)*
 
@@ -229,16 +268,22 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Dívidas Técnicas Conhecidas
 
-- `bot.py` monolítico com 3277 linhas — acima do limite ADR-001 (2.500–3.000); extração do domínio entrega avaliada e **adiada por decisão** (ADR-003), com gatilho de revisão explícito — não é mais "refatoração prioritária", é "aguardando gatilho"
-- `pfm_caminho` não existe como coluna — path reconstruído a cada consulta
-- `gerar_pfm()` acumula responsabilidades: geração Word + gravação no banco + criação de lançamento
+- `bot.py` monolítico com 3277+ linhas — acima do limite ADR-001 (2.500–3.000); extração do domínio entrega avaliada e **adiada por decisão** (ADR-003), com gatilho de revisão explícito — não é mais "refatoração prioritária", é "aguardando gatilho"
+- `gerar_pfm()` acumula responsabilidades: geração Word + gravação no banco + criação de lançamento + arquivamento em disco
 - `mime_type` não gravado no banco — inferido pela extensão do arquivo
 - Deduplicação de comprovante por `identificador_comprovante` não atua quando Claude
   não extrai o ID da transação (comprovante sem número visível)
+- **GGV02 sem `pasta_onedrive` configurada** — estrutura real da pasta é diferente da convenção
+  nova (GGV03); decisão de onde arquivar pendente (ver Fiada "Organização automática" acima)
 
 ---
 
 ## Decisões Recentes
+
+- **Organização automática de arquivos (2026-07-01)** — `obras.pasta_onedrive` passou a guardar a
+  raiz da obra, não mais uma subpasta específica; cada tipo de documento deriva sua pasta por
+  convenção (`04 Compras`, `01 Controle financeiro`, `05 Entrega`). GGV01 permanece intocável por
+  regra explícita; GGV02 aguarda decisão por ter estrutura própria diferente.
 
 - **Reset de produção (2026-07-01)** — `documentos` e `lancamentos` zerados por decisão de Dennis em
   vez de reconciliar 17 PFMs sem lançamento financeiro. Arquivos já gerados no OneDrive preservados;
@@ -266,10 +311,11 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 ## Objetivo da Próxima Sessão
 
 1. **Colocar a Laura para rodar em produção** — banco migrado e limpo; falta decidir sobre `LAURA_ENV`
-2. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
+2. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+3. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
    no dia a dia antes de qualquer nova decisão sobre extração (ver gatilho da ADR-003)
-3. **Fiada 6b — Recibo como exceção** — fornecedor sem NF-e, coluna `emite_nf` em `fornecedores`
-4. **Validar PC 2.0** — testar PDF com orçamento real; remover DOCX após validação
+4. **Fiada 6b — Recibo como exceção** — fornecedor sem NF-e, coluna `emite_nf` em `fornecedores`
+5. **Validar PC 2.0** — testar PDF com orçamento real; remover DOCX após validação
 
 ---
 

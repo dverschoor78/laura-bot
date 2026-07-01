@@ -157,6 +157,7 @@ PASSO 3 — Extraia os dados em português conforme o tipo:
 Se [orcamento]:
 - Fornecedor:
 - Ramo de atividade: (ex: Comércio de Materiais de Construção, Serralheria, Elétrica — informe como aparece no documento ou deduza pelo contexto)
+- Resumo da compra: (2 a 4 palavras que identifiquem o item principal do orçamento — ex: "aço", "tubos caixa d'água", "material elétrico", "portas"; vai virar nome de arquivo)
 - CNPJ/CPF:
 - Chave PIX: (procure em qualquer parte do documento — dados cadastrais, cabeçalho, rodapé, condições de pagamento; pode ser CPF, CNPJ, e-mail ou telefone)
 - Número do orçamento: (número ou código do orçamento emitido pelo fornecedor, se houver)
@@ -206,14 +207,108 @@ Valores aceitos para GGV: GGV00, GGV01, GGV02, GGV03, nao_identificado
 Em seguida, os dados extraídos conforme o tipo identificado acima.
 """
 
+def _raiz_obra(ggv: str) -> Optional[Path]:
+    """Pasta raiz da obra no OneDrive (ex: '00 Obras/2026-06 GGV03'). None se não configurada."""
+    obra = buscar_obra(ggv)
+    raiz = obra.get("pasta_onedrive", "")
+    return Path(raiz) if raiz else None
+
 def _pasta_pfm(ggv: str) -> Path:
     if TEST_MODE:
         pasta = Path("data/test_pfms")
-        pasta.mkdir(parents=True, exist_ok=True)
-        return pasta
-    obra = buscar_obra(ggv)
-    pasta_str = obra.get("pasta_onedrive", "")
-    return Path(pasta_str) if pasta_str else Path("data/pfms")
+    else:
+        raiz  = _raiz_obra(ggv)
+        pasta = (raiz / "04 Compras") if raiz else Path("data/pfms")
+    pasta.mkdir(parents=True, exist_ok=True)
+    return pasta
+
+def _pasta_orcamentos(ggv: str) -> Path:
+    pasta = _pasta_pfm(ggv) / "00 Orçamentos"
+    pasta.mkdir(parents=True, exist_ok=True)
+    return pasta
+
+def _pasta_controle_financeiro(ggv: str) -> Path:
+    if TEST_MODE:
+        pasta = Path("data/test_pfms") / "01 Controle financeiro"
+    else:
+        raiz  = _raiz_obra(ggv)
+        pasta = (raiz / "01 Controle financeiro") if raiz else Path("data/pfms") / "01 Controle financeiro"
+    pasta.mkdir(parents=True, exist_ok=True)
+    return pasta
+
+def _pasta_entrega(ggv: str) -> Path:
+    if TEST_MODE:
+        pasta = Path("data/test_pfms") / "05 Entrega"
+    else:
+        raiz  = _raiz_obra(ggv)
+        pasta = (raiz / "05 Entrega") if raiz else Path("data/pfms") / "05 Entrega"
+    pasta.mkdir(parents=True, exist_ok=True)
+    return pasta
+
+def _nome_arquivo_seguro(s: str, max_len: int = 60) -> str:
+    """Remove caracteres inválidos em nome de arquivo do Windows. Vazio/"A PREENCHER" -> ""."""
+    if not s or s == "A PREENCHER":
+        return ""
+    s = re.sub(r'[<>:"/\\|?*]', "", s).strip()
+    s = re.sub(r"\s+", " ", s)
+    return s[:max_len].strip()
+
+def _nome_base_pfm(pfm_codigo: str, fornecedor: str, resumo: str, prefixo: str = "") -> str:
+    """Monta o nome de arquivo do PFM: 'GGV03-008 - Fornecedor - Resumo'."""
+    partes = [f"{prefixo}{pfm_codigo}"]
+    for campo in (fornecedor, resumo):
+        seguro = _nome_arquivo_seguro(campo)
+        if seguro:
+            partes.append(seguro)
+    return " - ".join(partes)
+
+def _data_para_arquivo(data_str: str) -> str:
+    """Converte data extraída (DD/MM/AAAA ou "DD de mês de AAAA") para AAAA-MM-DD. Usa hoje se não conseguir."""
+    if data_str and data_str != "A PREENCHER":
+        m = re.match(r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})", data_str)
+        if m:
+            d, mth, y = m.groups()
+            if len(y) == 2:
+                y = "20" + y
+            try:
+                return f"{y}-{int(mth):02d}-{int(d):02d}"
+            except ValueError:
+                pass
+        m = re.search(r"(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})", data_str, re.IGNORECASE)
+        if m:
+            d, mes_nome, y = m.groups()
+            if mes_nome.lower() in MESES:
+                mth = MESES.index(mes_nome.lower()) + 1
+                try:
+                    return f"{y}-{mth:02d}-{int(d):02d}"
+                except ValueError:
+                    pass
+    return datetime.now().strftime("%Y-%m-%d")
+
+def _arquivar_documento(pfm_codigo: str, sufixo: str, caminho_original, data_str, pasta_fn):
+    """Copia um documento vinculado a um pedido para a pasta certa, nome padronizado. Falha silenciosa."""
+    if not caminho_original or not Path(caminho_original).exists():
+        return
+    ggv = pfm_codigo.split("-")[0]
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute("SELECT fornecedor FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)).fetchone()
+    fornecedor   = row[0] if row else ""
+    data_arquivo = _data_para_arquivo(data_str)
+    nome = f"{data_arquivo} {pfm_codigo}"
+    forn_seguro = _nome_arquivo_seguro(fornecedor)
+    if forn_seguro:
+        nome += f" {forn_seguro}"
+    nome += f" - {sufixo}"
+    ext = Path(caminho_original).suffix
+    destino = pasta_fn(ggv) / f"{nome}{ext}"
+    try:
+        shutil.copy2(caminho_original, destino)
+    except OSError:
+        pass
+
+def _arquivar_doc_financeiro(pfm_codigo: str, sufixo: str, caminho_original, data_str: str):
+    """Copia comprovante/NF-e para '01 Controle financeiro', nome padronizado."""
+    _arquivar_documento(pfm_codigo, sufixo, caminho_original, data_str, _pasta_controle_financeiro)
 
 # ── Banco ──────────────────────────────────────────────────────────────────
 
@@ -262,7 +357,7 @@ def init_db():
                 criado_em        TEXT DEFAULT (datetime('now','localtime'))
             )
         """)
-        for col in ["tipo", "ggv", "dados_claude", "condicao_pgto", "data_entrega", "endereco_entrega", "desconto_rs TEXT", "pfm_numero INTEGER", "vencimento_pgto TEXT", "encarregado TEXT", "rev_numero INTEGER DEFAULT 0"]:
+        for col in ["tipo", "ggv", "dados_claude", "condicao_pgto", "data_entrega", "endereco_entrega", "desconto_rs TEXT", "pfm_numero INTEGER", "vencimento_pgto TEXT", "encarregado TEXT", "rev_numero INTEGER DEFAULT 0", "caminho_pfm TEXT"]:
             try:
                 con.execute(f"ALTER TABLE documentos ADD COLUMN {col}")
             except Exception:
@@ -1062,17 +1157,18 @@ async def _html_para_pdf(html_str: str) -> bytes:
 def gerar_pfm(doc_id, categoria=None, pfm_codigo_override=None):
     with sqlite3.connect(DB_PATH) as con:
         row = con.execute(
-            "SELECT ggv, dados_claude, condicao_pgto, data_entrega, endereco_entrega, desconto_rs FROM documentos WHERE id=?",
+            "SELECT ggv, dados_claude, condicao_pgto, data_entrega, endereco_entrega, desconto_rs, caminho FROM documentos WHERE id=?",
             (doc_id,)
         ).fetchone()
     if row is None:
         raise ValueError(f"Documento {doc_id} não encontrado no banco.")
-    ggv, dados, condicao, data_entrega_db, endereco, desconto_rs = row
+    ggv, dados, condicao, data_entrega_db, endereco, desconto_rs, caminho_original = row
 
-    nome_claude = _campo(dados, "Fornecedor")
-    cnpj_claude = _campo(dados, "CNPJ/CPF")
-    ramo_claude = _campo(dados, "Ramo de atividade")
-    forn_db     = buscar_fornecedor(nome_claude, cnpj_claude)
+    nome_claude   = _campo(dados, "Fornecedor")
+    cnpj_claude   = _campo(dados, "CNPJ/CPF")
+    ramo_claude   = _campo(dados, "Ramo de atividade")
+    resumo_claude = _campo(dados, "Resumo da compra")
+    forn_db       = buscar_fornecedor(nome_claude, cnpj_claude)
 
     if forn_db:
         fornecedor = forn_db.get("razao_social") or forn_db.get("nome") or nome_claude
@@ -1304,8 +1400,9 @@ def gerar_pfm(doc_id, categoria=None, pfm_codigo_override=None):
 
     pasta = _pasta_pfm(ggv)
     pasta.mkdir(parents=True, exist_ok=True)
-    prefixo = "TESTE-" if TEST_MODE else ""
-    caminho = pasta / f"{prefixo}{pfm_codigo}.docx"
+    prefixo   = "TESTE-" if TEST_MODE else ""
+    nome_base = _nome_base_pfm(pfm_codigo, fornecedor, resumo_claude, prefixo)
+    caminho   = pasta / f"{nome_base}.docx"
     doc.save(caminho)
 
     if pfm_codigo_override:
@@ -1314,6 +1411,15 @@ def gerar_pfm(doc_id, categoria=None, pfm_codigo_override=None):
         lanc_status, ja_existia = registrar_lancamento(
             doc_id, pfm_codigo, ggv, fornecedor, total_final_v, data_entrega_db, categoria
         )
+        atualizar(doc_id, caminho_pfm=str(caminho))
+        # Arquiva o orçamento original em "00 Orçamentos" — só na geração original, não em revisões
+        if caminho_original and Path(caminho_original).exists():
+            ext_original = Path(caminho_original).suffix
+            destino = _pasta_orcamentos(ggv) / f"{nome_base}{ext_original}"
+            try:
+                shutil.copy2(caminho_original, destino)
+            except OSError:
+                pass
     return caminho, pfm_codigo, fornecedor, total_final_v, lanc_status, ja_existia
 
 # ── Comprovante PIX ────────────────────────────────────────────────────────
@@ -1728,10 +1834,10 @@ def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
     if pedido.caminho_orcamento and not Path(pedido.caminho_orcamento).exists():
         pedido.caminho_orcamento = None
 
-    pasta    = _pasta_pfm(pedido.ggv)
-    prefixo  = "TESTE-" if TEST_MODE else ""
-    pfm_docx = pasta / f"{prefixo}{pedido.codigo}.docx"
-    pedido.caminho_docx = str(pfm_docx) if pfm_docx.exists() else None
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute("SELECT caminho_pfm FROM documentos WHERE id=?", (pedido.doc_id,)).fetchone()
+    caminho_pfm = row[0] if row else None
+    pedido.caminho_docx = caminho_pfm if caminho_pfm and Path(caminho_pfm).exists() else None
 
     if pedido.doc_id_nfe:
         with sqlite3.connect(DB_PATH) as con:
@@ -1909,6 +2015,12 @@ def _adicionar_foto_entrega(pfm_codigo, doc_id_foto, legenda):
             "INSERT INTO entrega_fotos (pfm_codigo, doc_id, legenda) VALUES (?,?,?)",
             (pfm_codigo, doc_id_foto, legenda)
         )
+        qtd = con.execute(
+            "SELECT COUNT(*) FROM entrega_fotos WHERE pfm_codigo=?", (pfm_codigo,)
+        ).fetchone()[0]
+        row = con.execute("SELECT caminho FROM documentos WHERE id=?", (doc_id_foto,)).fetchone()
+    caminho_original = row[0] if row else None
+    _arquivar_documento(pfm_codigo, f"foto{qtd:02d}", caminho_original, None, _pasta_entrega)
 
 def _listar_fotos_entrega(pfm_codigo):
     with sqlite3.connect(DB_PATH) as con:
@@ -2097,6 +2209,7 @@ async def _executar_gerar_pfm(query, ctx, doc_id, ggv, categoria):
     caminho, codigo, fornecedor, valor_v, lanc_status, ja_existia = gerar_pfm(doc_id, categoria)
     html      = _gerar_html_pc(doc_id)
     pdf_bytes = await _html_para_pdf(html)
+    caminho.with_suffix(".pdf").write_bytes(pdf_bytes)
     await ctx.bot.send_document(
         chat_id=DONO_ID,
         document=pdf_bytes,
@@ -2128,11 +2241,14 @@ async def _executar_revisao_pfm(query, ctx, doc_id, pfm_codigo_base):
     await query.edit_message_text(f"Gerando revisão {rev_codigo}...")
     caminho_rev, *_ = gerar_pfm(doc_id, pfm_codigo_override=rev_codigo)
     # Sobrescreve o DOCX principal para manter OneDrive sempre atualizado
-    prefixo = "TESTE-" if TEST_MODE else ""
-    caminho_principal = caminho_rev.parent / f"{prefixo}{pfm_codigo_base}.docx"
+    nome_principal    = caminho_rev.name.replace(rev_codigo, pfm_codigo_base, 1)
+    caminho_principal = caminho_rev.parent / nome_principal
     shutil.copy2(caminho_rev, caminho_principal)
+    atualizar(doc_id, caminho_pfm=str(caminho_principal))
     html      = _gerar_html_pc(doc_id)
     pdf_bytes = await _html_para_pdf(html)
+    caminho_rev.with_suffix(".pdf").write_bytes(pdf_bytes)
+    caminho_principal.with_suffix(".pdf").write_bytes(pdf_bytes)
     await ctx.bot.send_document(
         chat_id=DONO_ID,
         document=pdf_bytes,
@@ -2760,6 +2876,9 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     "O pedido pode já estar pago ou ter sido alterado."
                 )
                 return
+            with sqlite3.connect(DB_PATH) as con:
+                row_comp = con.execute("SELECT caminho FROM documentos WHERE id=?", (int(doc_id_comp),)).fetchone()
+            _arquivar_doc_financeiro(pfm_codigo, "comprovante", row_comp[0] if row_comp else None, data_pgto)
             await query.edit_message_text(
                 f"🟢 Pedido #{pfm_codigo} — pago.\n\n"
                 "Envie a NF-e para fechar este pedido."
@@ -3225,6 +3344,16 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             _, doc_id_nfe, pfm_codigo = partes
             ok = vincular_nfe(pfm_codigo, int(doc_id_nfe), DB_PATH)
             if ok:
+                with sqlite3.connect(DB_PATH) as con:
+                    row_nfe = con.execute(
+                        "SELECT caminho, dados_claude FROM documentos WHERE id=?", (int(doc_id_nfe),)
+                    ).fetchone()
+                if row_nfe:
+                    caminho_nfe, dados_nfe = row_nfe
+                    numero_nfe = _campo(dados_nfe, "Número da NF")
+                    data_nfe   = _campo(dados_nfe, "Data de emissão")
+                    sufixo_nfe = f"NFe {numero_nfe}" if numero_nfe != "A PREENCHER" else "NFe"
+                    _arquivar_doc_financeiro(pfm_codigo, sufixo_nfe, caminho_nfe, data_nfe)
                 await query.edit_message_text(
                     f"🟢 #{pfm_codigo} — NF-e vinculada. Ciclo fechado."
                 )

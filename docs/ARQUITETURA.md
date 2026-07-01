@@ -24,23 +24,61 @@ OneDrive (pasta local mapeada)
 Telegram ──────► bot.py ──────► Claude API (haiku-4-5)
                    │
                    ├──────────► data/laura.db  (SQLite)
-                   ├──────────► data/uploads/  (arquivos recebidos)
+                   ├──────────► data/uploads/  (arquivos recebidos, staging)
                    ├──────────► Playwright Chromium (HTML → PDF em memória)
                    ├──────────► BrasilAPI (consulta CNPJ na Receita Federal)
-                   └──────────► OneDrive/GGV03/04 Aquisição e Execução/
-                                (DOCX gerado silenciosamente como backup)
+                   └──────────► OneDrive/00 Obras/{AAAA-MM} {GGVxx}/
+                                (orçamento, PFM, comprovante, NF-e, foto de entrega)
 ```
 
 - **`bot.py`** — monólito único com toda a lógica: banco, IA, PFM, handlers Telegram
 - **`data/laura.db`** — banco SQLite com cinco tabelas (ver seção 3)
-- **`data/uploads/`** — arquivos temporários recebidos pelo bot
+- **`data/uploads/`** — todo arquivo recebido pelo Telegram cai aqui primeiro (pasta única,
+  achatada); é a partir daqui que os documentos são copiados para a pasta certa da obra
 - **Claude API** — extração de dados dos documentos; modelo `claude-haiku-4-5-20251001`
 - **Playwright Chromium** — geração de PDF do Pedido de Compra 2.0 a partir de HTML; roda headless em memória
 - **BrasilAPI** — consulta pública e gratuita de CNPJ na Receita Federal; usada por
   `_criar_fornecedor_auto()` e pelo job periódico `_sincronizar_receita_pendentes()`; falha
   silenciosamente (timeout 4s) sem travar o fluxo do bot
-- **OneDrive** — destino final dos PFMs .docx (backup); pasta local acessada via tabela `obras`
+- **OneDrive** — destino final de todos os documentos de uma obra; ver seção 2.1
 - **`prints/pc_alternativa_a.html`** — protótipo aprovado do PC 2.0; referência de design
+
+---
+
+## 2.1 Organização de arquivos por obra (2026-07-01)
+
+Cada obra tem uma pasta raiz no OneDrive, cadastrada em `obras.pasta_onedrive`
+(ex: `00 Obras/2026-06 GGV03`). A partir dessa raiz, o bot deriva cada subpasta por
+convenção — não há necessidade de configurar cada subpasta manualmente:
+
+| Tipo de documento | Subpasta (derivada por `_pasta_*()`) | Nome do arquivo |
+|---|---|---|
+| Orçamento original | `04 Compras/00 Orçamentos/` | `{pfm_codigo} - {Fornecedor} - {Resumo}.{ext}` |
+| PFM gerado (.docx + .pdf) | `04 Compras/` | `{pfm_codigo} - {Fornecedor} - {Resumo}.docx` |
+| Comprovante de pagamento | `01 Controle financeiro/` | `{AAAA-MM-DD} {pfm_codigo} {Fornecedor} - comprovante.{ext}` |
+| NF-e | `01 Controle financeiro/` | `{AAAA-MM-DD} {pfm_codigo} {Fornecedor} - NFe {numero}.{ext}` |
+| Foto de entrega | `05 Entrega/` | `{AAAA-MM-DD} {pfm_codigo} {Fornecedor} - foto{NN}.{ext}` |
+| Recibo (Fiada 6b, ainda não implementado) | `05 Entrega/` | `{AAAA-MM-DD} {pfm_codigo} {Fornecedor} - recibo.{ext}` |
+
+A data usada é sempre a **data real do documento** (data de pagamento, data de emissão da NF-e),
+não a data em que o arquivo foi processado — `_data_para_arquivo()` entende `DD/MM/AAAA` e
+`DD de mês de AAAA`. "Resumo" vem de um campo novo do PROMPT ("Resumo da compra", 2-4 palavras)
+que resume o item principal do orçamento, ex: "Espelho", "aço".
+
+`_arquivar_documento()` é o helper compartilhado — recebe o `pfm_codigo`, o sufixo do nome, o
+caminho original (em `data/uploads/`) e uma função que resolve a pasta de destino. Falha
+silenciosamente (não bloqueia nenhum fluxo do Telegram) se o arquivo original não existir mais.
+
+**Escopo por obra:**
+- **GGV03** — raiz configurada, convenção nova completa
+- **GGV00** — raiz configurada (pasta vazia; estrutura é criada quando o primeiro documento chegar)
+- **GGV01** — `pasta_onedrive` vazia de propósito. Regra explícita: nunca escrever na estrutura
+  antiga dela
+- **GGV02** — `pasta_onedrive` vazia. Em conclusão; estrutura real da pasta é diferente (sem
+  "00 Orçamentos", com "51 Obra - Materiais e serviços") — decisão de onde arquivar pendente
+
+Se `pasta_onedrive` estiver vazia para uma obra, os documentos caem em `data/pfms/` (local, não
+sincronizado) em vez de falhar — evita gravar no lugar errado por engano.
 
 ---
 
@@ -60,6 +98,7 @@ Telegram ──────► bot.py ──────► Claude API (haiku-4-
 | `encarregado` | Encarregado por documento — sobrescreve padrão do dict `GGV_ENCARREGADO` |
 | `pfm_numero` | Número sequencial por GGV (ex: 9 → GGV03-009) |
 | `status` | Ciclo de vida: recebido → confirmado → pfm_gerado → cancelado |
+| `caminho_pfm` | Caminho real do .docx gerado (2026-07-01) — lido direto, não reconstruído por convenção de nome |
 
 ---
 
