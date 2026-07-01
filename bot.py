@@ -39,7 +39,7 @@ TIPOS = {
     "orcamento":        ("📋", "Orçamento"),
     "comprovante_pix":  ("💰", "Comprovante PIX"),
     "nota_fiscal":      ("🧾", "Nota Fiscal"),
-    "foto_entrega":     ("📦", "Foto de entrega"),
+    "foto_entrega":     ("📦", "Foto/arquivo de entrega"),
     "extrato_mp":       ("🏦", "Extrato MP"),
     "nao_relacionado":  ("🗑", "Não é da obra"),
 }
@@ -61,6 +61,11 @@ DELTAD = {
     "fone":  "(42) 99127-1255",
 }
 DELTAD_CNPJ_DIGITS = re.sub(r"\D", "", DELTAD["cnpj"])  # "58358802000158"
+
+# CNPJs das próprias empresas de Dennis — nunca podem virar "fornecedor" (ex: aparecem como
+# Pagador/Sacado em boletos bancários). VII (dona dos empreendimentos) + DeltaD Engenharia
+# (Verschoor Construções Civis Ltda, responsável técnica, paga boletos como CREA/ONR/prefeitura).
+CNPJS_PROPRIOS_DIGITS = {DELTAD_CNPJ_DIGITS, "48494891000106"}
 
 GGV_ENCARREGADO = {
     "GGV03": "Sabiá",
@@ -165,7 +170,8 @@ nao_identificado — se não conseguir determinar
 PASSO 3 — Extraia os dados em português conforme o tipo:
 
 Se [orcamento]:
-- Fornecedor:
+- Fornecedor: (em boleto bancário, é o Beneficiário/Cedente — NUNCA o Pagador/Sacado, que é
+  sempre a própria empresa que está comprando; não confunda os dois)
 - Ramo de atividade: (ex: Comércio de Materiais de Construção, Serralheria, Elétrica — informe como aparece no documento ou deduza pelo contexto)
 - Resumo da compra: (2 a 4 palavras que identifiquem o item principal do orçamento — ex: "aço", "tubos caixa d'água", "material elétrico", "portas"; vai virar nome de arquivo)
 - CNPJ/CPF:
@@ -206,6 +212,11 @@ Se [extrato_mp]:
 
 Se [nao_relacionado]:
 - Descreva brevemente o que é o documento.
+
+IMPORTANTE: use SOMENTE os campos da lista do tipo que você classificou no PASSO 1. Nunca misture
+campos de outro tipo — por exemplo, se classificou como [orcamento] (inclusive boleto/fatura),
+não escreva "Favorecido", "Chave PIX" ou "Instituição financeira" (esses são só de
+[comprovante_pix]), mesmo que o documento pareça visualmente um recibo de banco.
 
 Responda EXATAMENTE neste formato (sem colchetes, sem barra, escolha um valor de cada):
 TIPO:orcamento
@@ -540,6 +551,48 @@ def atualizar(doc_id, **campos):
     with sqlite3.connect(DB_PATH) as con:
         con.execute(f"UPDATE documentos SET {sets} WHERE id=?", (*campos.values(), doc_id))
 
+def _descartar_documento(doc_id):
+    """Apaga o registro e o arquivo de um documento que não virou nada (cancelado, sem
+    correspondência). Libera o hash para o mesmo arquivo poder ser reenviado depois."""
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute("SELECT caminho FROM documentos WHERE id=?", (doc_id,)).fetchone()
+        con.execute("DELETE FROM documentos WHERE id=?", (doc_id,))
+    if row and row[0]:
+        try:
+            Path(row[0]).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+def _excluir_pedido(pfm_codigo):
+    """Apaga um pedido inteiro (cadastro errado): lançamento, parcelas, fotos de entrega e
+    todos os documentos vinculados (orçamento, comprovantes, NF-e, recibos). Não mexe em
+    arquivos já arquivados no OneDrive — só no registro da Laura e nos uploads originais."""
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT doc_id, doc_id_comprovante, doc_id_nfe, doc_id_recibo FROM lancamentos WHERE pfm_codigo=?",
+            (pfm_codigo,)
+        ).fetchone()
+        doc_ids = set(row) if row else set()
+
+        parcelas = con.execute(
+            "SELECT doc_id_comprovante, doc_id_recibo, doc_id_recibo_assinado FROM parcelas_pagamento WHERE pfm_codigo=?",
+            (pfm_codigo,)
+        ).fetchall()
+        for p in parcelas:
+            doc_ids.update(p)
+
+        fotos = con.execute("SELECT doc_id FROM entrega_fotos WHERE pfm_codigo=?", (pfm_codigo,)).fetchall()
+        doc_ids.update(f[0] for f in fotos)
+
+        doc_ids.discard(None)
+
+        con.execute("DELETE FROM parcelas_pagamento WHERE pfm_codigo=?", (pfm_codigo,))
+        con.execute("DELETE FROM entrega_fotos WHERE pfm_codigo=?", (pfm_codigo,))
+        con.execute("DELETE FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,))
+
+    for doc_id in doc_ids:
+        _descartar_documento(doc_id)
+
 def registrar_lancamento(doc_id, pfm_codigo, ggv, fornecedor, valor_v, data_entrega, categoria=None):
     """Insere lançamento A PAGAR. Idempotente: se pfm_codigo já existe, retorna o existente."""
     forn_ok  = fornecedor and fornecedor != "A PREENCHER"
@@ -718,10 +771,11 @@ def buscar_fornecedor(nome_claude, cnpj_claude=None):
     with sqlite3.connect(DB_PATH) as con:
         sel = f"SELECT {', '.join(_FORN_COLS)} FROM fornecedores"
 
-        # 1. CNPJ — mais confiável; ignora o nosso próprio CNPJ (dado para fatura extraído errado)
+        # 1. CNPJ — mais confiável; ignora os nossos próprios CNPJs (dado de fatura extraído errado,
+        # ex: Pagador de um boleto confundido com Fornecedor)
         if cnpj_claude and cnpj_claude != "A PREENCHER":
             cnpj_digits = re.sub(r"\D", "", cnpj_claude)
-            if cnpj_digits != DELTAD_CNPJ_DIGITS:
+            if cnpj_digits not in CNPJS_PROPRIOS_DIGITS:
                 row = con.execute(
                     f"{sel} WHERE REPLACE(REPLACE(REPLACE(cnpj,'.','' ),'/',''),'-','') = ? LIMIT 1",
                     (cnpj_digits,)
@@ -842,7 +896,7 @@ def _recalcular_itens(dados: str) -> str:
     return resultado
 
 ITEM_RE = re.compile(
-    r"^\d+\.\s+(.+?)\s+\(([0-9,.]+)\s+([A-Za-z]{1,4})\)\s*[—–\-]+\s*R\$\s*([0-9.,]+)"
+    r"^\d+\.\s+(.+?)\s+\(([0-9,.]+)\s+([A-Za-zÀ-ÿ]{1,4}[²³0-9]{0,2})\)\s*[—–\-]+\s*R\$\s*([0-9.,]+)"
     r"(?:\s*cada\s*=\s*R\$\s*([0-9.,]+))?",
     re.IGNORECASE,
 )
@@ -851,6 +905,11 @@ def _parse_brl(s):
     s = s.strip().replace(" ", "")
     if "," in s:
         return float(s.replace(".", "").replace(",", "."))
+    if "." in s:
+        # sem vírgula: "." é separador de milhar quando o último grupo tem 3 dígitos
+        # (ex: "5.000" = 5000,0), senão é decimal (ex: "5.5" = 5,5, "10.99" = 10,99)
+        if len(s.rsplit(".", 1)[1]) == 3:
+            return float(s.replace(".", ""))
     return float(s.replace(",", "."))
 
 def _fmt_brl(v):
@@ -1782,7 +1841,7 @@ def mostrar_ajuda():
         "<b>Incluir nota fiscal</b>\n"
         "Envie o PDF ou foto da NF-e.\n\n"
         "<b>Registrar entrega</b>\n"
-        "Envie a foto ou use /entrega. Também disponível no botão 📦 Entregue dentro do pedido.\n\n"
+        "Envie a foto ou arquivo, ou use /entrega. Também disponível no botão 📦 Entregue dentro do pedido.\n\n"
         "<b>Consultas diretas</b>\n"
         "Digite o código da obra (GGV03) ou do pedido (GGV03-009)."
     )
@@ -1903,10 +1962,10 @@ def teclado_candidatos_pix(doc_id_comp: int, candidatos: list):
 
 def teclado_tipo_inicial(doc_id):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📋 Orçamento / Cotação",  callback_data=f"sel_tipo_inicial:{doc_id}:orcamento")],
+        [InlineKeyboardButton("📋 Orçamento / Fatura",    callback_data=f"sel_tipo_inicial:{doc_id}:orcamento")],
         [InlineKeyboardButton("💰 Comprovante PIX",       callback_data=f"sel_tipo_inicial:{doc_id}:comprovante_pix")],
         [InlineKeyboardButton("🧾 Nota Fiscal",           callback_data=f"sel_tipo_inicial:{doc_id}:nota_fiscal")],
-        [InlineKeyboardButton("📦 Foto de entrega",       callback_data=f"sel_tipo_inicial:{doc_id}:foto_entrega")],
+        [InlineKeyboardButton("📦 Foto/arquivo de entrega", callback_data=f"sel_tipo_inicial:{doc_id}:foto_entrega")],
         [InlineKeyboardButton("🏦 Extrato Mercado Pago", callback_data=f"sel_tipo_inicial:{doc_id}:extrato_mp")],
         [InlineKeyboardButton("Não é da obra",            callback_data=f"sel_tipo_inicial:{doc_id}:nao_relacionado")],
     ])
@@ -1936,6 +1995,22 @@ def _fmt_data_curta(dt_str):
         return f"{dt_str[8:10]}/{dt_str[5:7]}"
     except Exception:
         return dt_str[:10] if dt_str else "—"
+
+_DATA_BR_RE = re.compile(r"^(\d{1,2})/(\d{1,2})/\d{2,4}")
+
+def _fmt_data_flexivel(dt_str):
+    """Aceita 'D/M/AAAA...' (dia/mês sem zero à esquerda, ex: comprovante extraído pelo Claude)
+    ou ISO 'AAAA-MM-DD...'. Sempre retorna 'DD/MM' com zero à esquerda, ou '—' se não reconhecer."""
+    if not dt_str:
+        return "—"
+    m = _DATA_BR_RE.match(dt_str)
+    if m:
+        d, mth = m.groups()
+        try:
+            return f"{int(d):02d}/{int(mth):02d}"
+        except ValueError:
+            pass
+    return _fmt_data_curta(dt_str)
 
 def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
     """Consulta o banco e retorna um Pedido com dados brutos e cálculos financeiros, ou None."""
@@ -2032,11 +2107,7 @@ def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
     if pedido.lanc_criado_em:
         historico.append((_fmt_data_curta(pedido.lanc_criado_em), "Pedido criado"))
     if pedido.data_pagamento:
-        dt = pedido.data_pagamento
-        if len(dt) >= 5 and dt[2:3] == "/":
-            data_fmt = dt[:5]
-        else:
-            data_fmt = _fmt_data_curta(dt)
+        data_fmt = _fmt_data_flexivel(pedido.data_pagamento)
         pago_label = "Pago"
         if pedido.identificador_comprovante:
             cod = pedido.identificador_comprovante[:12]
@@ -2160,6 +2231,7 @@ def teclado_pedido(doc_id, pfm_codigo, doc_id_nfe=None, doc_id_comprovante=None,
     else:
         botoes.append([InlineKeyboardButton("📦 Entregue", callback_data=f"pfm_entregue:{doc_id}:{pfm_codigo}")])
     botoes += [
+        [InlineKeyboardButton("🗑 Excluir pedido", callback_data=f"pedido_excluir_confirmar:{pfm_codigo}")],
         [InlineKeyboardButton("◀️ Pedidos",   callback_data=f"obra_pedidos:{ggv}")],
         [InlineKeyboardButton("✖ Fechar",     callback_data=f"pfm_fechar:{doc_id}")],
     ]
@@ -3038,8 +3110,8 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(f"Confirmado: {label}")
 
         elif acao == "cancelar":
-            atualizar(int(partes[1]), status="cancelado")
-            await query.edit_message_text("Cancelado.")
+            _descartar_documento(int(partes[1]))
+            await query.edit_message_text("Cancelado. Pode reenviar o arquivo se precisar.")
 
         elif acao == "sel_tipo":
             _, doc_id, tipo, ggv = partes
@@ -3120,11 +3192,16 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     )
                 else:
                     candidatos = buscar_candidatos_pix(dados["valor_v"], dados["favorecido"], dados["cnpj"])
-                    markup     = teclado_candidatos_pix(int(doc_id), candidatos) if candidatos else None
-                    await query.edit_message_text(
-                        mostrar_comprovante_candidatos(dados, candidatos),
-                        reply_markup=markup
-                    )
+                    texto_resultado = mostrar_comprovante_candidatos(dados, candidatos)
+                    if not candidatos:
+                        _descartar_documento(int(doc_id))
+                        texto_resultado += "\n\nArquivo descartado — pode reenviar depois de corrigir o pedido."
+                        await query.edit_message_text(texto_resultado)
+                    else:
+                        await query.edit_message_text(
+                            texto_resultado,
+                            reply_markup=teclado_candidatos_pix(int(doc_id), candidatos)
+                        )
             elif tipo == "nota_fiscal":
                 dados_nfe = _parse_nfe(corpo)
                 candidatos = buscar_candidatos_nfe(dados_nfe["cnpj"], dados_nfe["valor_v"], DB_PATH)
@@ -3800,6 +3877,29 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
             else:
                 await query.answer(f"Pedido {pfm_codigo} não encontrado.", show_alert=True)
+
+        elif acao == "pedido_excluir_confirmar":
+            pfm_codigo = partes[1]
+            await query.edit_message_text(
+                f"Excluir #{pfm_codigo}?\n\n"
+                "Apaga o pedido, parcelas, entrega e todos os documentos vinculados na Laura. "
+                "Não apaga arquivos já arquivados no OneDrive. Não pode ser desfeito.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🗑 Sim, excluir", callback_data=f"pedido_excluir_ok:{pfm_codigo}"),
+                    InlineKeyboardButton("← Voltar",       callback_data=f"pedido_abrir:{pfm_codigo}"),
+                ]])
+            )
+
+        elif acao == "pedido_excluir_ok":
+            pfm_codigo = partes[1]
+            ggv = pfm_codigo.rsplit("-", 1)[0]
+            _excluir_pedido(pfm_codigo)
+            await query.edit_message_text(
+                f"#{pfm_codigo} excluído.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("◀️ Pedidos", callback_data=f"obra_pedidos:{ggv}")
+                ]])
+            )
 
         elif acao == "obra_ver":
             codigo = partes[1]

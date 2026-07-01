@@ -243,6 +243,11 @@ Referências para navegação no arquivo (3277 linhas):
 - **BD fornecedores com dados incorretos** — MO Construção com CNPJ errado;
   PRUDENTÓPOLIS com split incorreto. Afeta `buscar_fornecedor()`.
 
+- **Camada de parsing frágil contra variação real do Claude** — vários bugs de 2026-07-01
+  (template misturado, unidade com dígito, valor com milhar ambíguo, data sem zero à esquerda)
+  nasceram de suposições de formato fixo. Catálogo completo e lição geral em
+  `docs/LICOES_EXTRACAO.md` — ler antes de mexer em PROMPT ou qualquer regex de extração.
+
 ---
 
 ## 7. Decisões Arquiteturais Registradas

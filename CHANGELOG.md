@@ -10,14 +10,59 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Subir as informações pendentes de GGV03 (pelo menos 8 compras reais fora da Laura)
+1. Continuar o cadastro retroativo de GGV03 (faltam pelo menos 6 das 8+ compras pendentes)
 2. Montar a fase "lista de compras" (primeiro uso real de `insumos_sinapi`)
-3. Fechar o ciclo real de assinatura do recibo de GGV03-001 (enviar pro Valdir assinar de verdade)
-4. Colocar a Laura para rodar em produção
-5. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
-6. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
-7. Validar PDF do PC 2.0 com orçamento real em produção
-8. Remover DOCX do fluxo principal após validação
+3. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
+4. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
+5. Validar PDF do PC 2.0 com orçamento real em produção
+6. Remover DOCX do fluxo principal após validação
+7. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
+
+---
+
+## [Produção ativada + correções de cadastro ao vivo] — 2026-07-01
+
+### Primeira vez rodando de verdade, e o que isso revelou
+
+`LAURA_ENV=prod` ativado. Banco de produção zerado de novo por decisão de Dennis (incluindo o
+GGV03-001 de teste do Valdir/Sabiá) — cadastro retroativo das compras pendentes de GGV03 passou a
+ser feito 100% pelo Telegram, ao vivo, com acompanhamento em paralelo direto no banco. Isso expôs
+bugs reais de parsing que nunca tinham aparecido com dado fictício.
+
+### 6 bugs de extração/parsing corrigidos (catálogo completo em `docs/LICOES_EXTRACAO.md`)
+
+- **Template de campos misturado**: um boleto (classificado como orçamento) voltou com campos de
+  comprovante_pix E de orçamento concatenados — PROMPT agora proíbe explicitamente misturar
+- **Fornecedor confundido com CNPJ da própria empresa**: guard que ignora CNPJ próprio em
+  `buscar_fornecedor()` só cobria a VII; ampliado pra um conjunto (`CNPJS_PROPRIOS_DIGITS`) que
+  também cobre a DeltaD — boletos frequentemente mostram uma das duas como Pagador
+- **Unidade com dígito quebrava item**: "100,0 m2" (sem superíndice) não batia com `ITEM_RE`
+  (só aceitava letras); ampliado pra aceitar dígito/superíndice no final da unidade
+- **`_parse_brl` interpretava milhar como decimal**: "R$ 5.000" (sem vírgula) virava 5,00 em vez
+  de 5000,00 — nova heurística: sem vírgula, "." com 3 dígitos depois é separador de milhar
+- **Data sem zero à esquerda ilegível**: "5/06/2026" virava "6 /20" no histórico — parser trocado
+  de fatiamento de índice fixo pra regex tolerante a 1 ou 2 dígitos
+- **Documento que falha travava o hash**: comprovante sem pedido correspondente, ou cancelado,
+  ficava permanentemente bloqueado pra reenvio — `_descartar_documento()` agora limpa registro e
+  arquivo automaticamente nesses casos
+
+### Novo — excluir pedido
+
+- Botão "🗑 Excluir pedido" no cockpit, com tela de confirmação — apaga lançamento, parcelas,
+  fotos de entrega e todos os documentos vinculados na Laura (nunca toca em arquivo já arquivado
+  no OneDrive). Testado com pedido fictício antes de liberar em produção.
+
+### Operacional
+
+- Descoberto e corrigido: dois processos `bot.py` rodando ao mesmo tempo causam conflito de
+  polling no Telegram (efeito "bot fora de serviço") — só uma instância deve rodar por vez
+- Botões renomeados pra refletir que aceitam foto ou arquivo, não sugerir só um dos dois
+  ("📋 Orçamento / Fatura", "📦 Foto/arquivo de entrega")
+- `docs/LICOES_EXTRACAO.md` criado — catálogo vivo de armadilhas de parsing, leitura obrigatória
+  antes de mexer em PROMPT/regex (linkado em `docs/PROCESSO.md`)
+
+Testado ao vivo com dois pedidos reais completos: GGV03-001 (CREA, R$108,39) e GGV03-002 (DeltaD,
+projetos de engenharia, R$5.000,00) — ambos pagos corretamente depois das correções.
 
 ---
 

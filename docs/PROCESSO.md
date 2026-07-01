@@ -56,6 +56,8 @@ Leia nesta ordem:
 3. `docs/CONSTITUICAO.md` — se for a primeira sessão ou após longa pausa
 4. `docs/ARQUITETURA.md` — obrigatório quando envolve estrutura ou banco
 5. `docs/decisoes/` — ADR relacionada, se existir
+6. `docs/LICOES_EXTRACAO.md` — obrigatório antes de mexer em PROMPT, `_campo()`, regex de
+   item/valor/data, ou `buscar_fornecedor()` — catálogo de armadilhas já corrigidas
 
 ### Sessão de Produto
 

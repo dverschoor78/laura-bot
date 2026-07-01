@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-07-01
-> Sessão: Preparação para produção — migração, limpeza, auto-cadastro via Receita, organização automática de arquivos, taxas/impostos/serviços públicos, pagamento parcelado + recibo assinado, base de insumos SINAPI
+> Sessão: Preparação para produção — migração, limpeza, auto-cadastro via Receita, organização automática de arquivos, taxas/impostos/serviços públicos, pagamento parcelado + recibo assinado, base de insumos SINAPI, **ativação em produção + cadastro retroativo ao vivo de GGV03**
 
 ---
 
@@ -29,12 +29,22 @@
 - Módulo Financeiro: fundação criada (`financeiro/`). Sem funcionalidade nova ainda.
 - **Base de referência de insumos SINAPI** (`insumos_sinapi`, 4.365 materiais, preço PR) importada
   via script — tabela solta, ainda **sem nenhum vínculo com `bot.py`** (decisão deliberada).
+- **`LAURA_ENV=prod` ativado** — bot rodando em produção pela primeira vez nesta sessão.
+  `documentos`/`lancamentos`/`parcelas_pagamento`/`entrega_fotos` zerados de novo (incluindo o
+  GGV03-001/Valdir de teste) por decisão explícita, pra começar o cadastro retroativo do zero,
+  100% pelo Telegram ao vivo — sem se preocupar com a numeração manual dos arquivos antigos.
+- **Cadastro retroativo de GGV03 em andamento**: GGV03-001 (CREA, taxa, R$108,39, pago) e
+  GGV03-002 (DeltaD/Verschoor Construções Civis — projetos de engenharia, R$5.000, pago) já
+  registrados ao vivo. Faltam as demais compras pendentes (pelo menos mais 6, de um total de 8+).
+- **`docs/LICOES_EXTRACAO.md` criado** — catálogo de armadilhas de parsing/extração, alimentado
+  pelos 6 bugs reais encontrados durante o cadastro ao vivo de hoje; leitura obrigatória antes de
+  mexer em PROMPT/regex, referenciado em `docs/PROCESSO.md`.
 
 ---
 
 ## Versão Atual
 
-**v0.7.1** — Base de insumos SINAPI (referência, sem vínculo com o bot ainda)
+**v0.8.0** — Produção ativada + 8 correções encontradas em cadastro ao vivo
 
 ---
 
@@ -71,6 +81,47 @@
 ---
 
 ## Última Fiada Implementada
+
+**Ativação em produção + cadastro retroativo ao vivo de GGV03** *(2026-07-01)*
+
+Depois de fechar a base de insumos SINAPI, Dennis pediu pra começar o cadastro retroativo de
+GGV03 direto pelo Telegram, em produção de verdade, comigo acompanhando o banco em paralelo. Isso
+expôs, um por um, uma série de bugs reais de extração/parsing que só apareciam com documentos de
+produção de verdade (boletos, comprovantes com formatação variável) — nunca tinham surgido nos
+testes com dado fictício.
+
+**Ativação:**
+- `LAURA_ENV=prod` no `.env`; banco zerado de novo por decisão explícita (incluindo o GGV03-001
+  de teste do Valdir) — cadastro passa a ser 100% via Telegram ao vivo, sem numeração manual
+- Achado e corrigido em seguida: dois processos `bot.py` rodando ao mesmo tempo (um meu, um aberto
+  manualmente por Dennis) causavam conflito de polling no Telegram ("fora de serviço"); só uma
+  instância deve rodar por vez durante a sessão
+
+**Bugs reais encontrados e corrigidos (catálogo completo em `docs/LICOES_EXTRACAO.md`):**
+1. Claude mistura template de campos de tipos diferentes (boleto virou comprovante_pix +
+   orçamento ao mesmo tempo) — PROMPT agora proíbe explicitamente
+2. Fornecedor confundido com CNPJ da própria empresa em boleto (Pagador × Beneficiário) — guard
+   de CNPJ próprio ampliado de um único CNPJ (VII) pra um conjunto (VII + DeltaD)
+3. Unidade de medida com dígito ("m2" sem superíndice) quebrava o regex de item — ampliado pra
+   aceitar dígito/superíndice
+4. `_parse_brl()` interpretava "R$ 5.000" (sem vírgula) como 5,00 em vez de 5000,00 — heurística
+   de 3 dígitos após o ponto pra distinguir milhar de decimal
+5. Data extraída sem zero à esquerda ("5/06/2026") virava data ilegível no histórico — parser
+   trocado de fatiamento de índice fixo pra regex tolerante
+6. Documento que falha (cancelado, comprovante sem correspondência) ficava travado pelo hash,
+   impedindo reenvio — `_descartar_documento()` limpa registro + arquivo automaticamente
+
+**Duas melhorias de produto, pedidas durante o cadastro:**
+- Botões renomeados pra refletir que aceitam foto OU arquivo ("📋 Orçamento / Fatura",
+  "📦 Foto/arquivo de entrega") — rótulo antigo sugeria só cotação/foto
+- **Botão "🗑 Excluir pedido"** no cockpit, com tela de confirmação — apaga lançamento, parcelas,
+  entrega e documentos vinculados na Laura (nunca mexe em arquivo já arquivado no OneDrive);
+  testado com pedido fictício antes de liberar
+
+Testado ao vivo com dois pedidos reais completos (GGV03-001 CREA R$108,39, GGV03-002 DeltaD
+R$5.000,00) — ambos pagos corretamente depois das correções.
+
+---
 
 **Base de insumos SINAPI (referência)** *(2026-07-01)*
 
@@ -466,19 +517,18 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Objetivo da Próxima Sessão
 
-1. **Subir as informações pendentes de GGV03** — Dennis tem pelo menos 8 compras reais ainda fora
-   da Laura (algumas pagas/entregues/quitadas, outras só compradas); prioridade antes de qualquer
-   coisa nova, e pré-requisito explícito para o item 2
+1. **Continuar o cadastro retroativo de GGV03** — 2 de pelo menos 8 compras reais já registradas
+   (GGV03-001 CREA, GGV03-002 DeltaD/projetos); faltam as demais. Nota: o GGV03-001 antigo (teste
+   com Valdir/Sabiá) foi apagado no reset de produção — se aquele recibo ainda precisar ser
+   assinado de verdade pelo Valdir, precisa ser recadastrado do zero como um novo pedido
 2. **Montar a fase "lista de compras"** — é aqui que `insumos_sinapi` passa a ser útil de verdade
-   (matching de item de orçamento com insumo de referência); só começa depois do item 1
-3. **Fechar o ciclo real do recibo de GGV03-001** — enviar pro Valdir assinar via gov.br, receber de
-   volta, anexar na Laura ("📎 Anexar recibo assinado"), confirmar que o arquivo em `05 Entrega` é
-   substituído corretamente pelo assinado
-4. **Colocar a Laura para rodar em produção** — banco migrado e limpo; falta decidir sobre `LAURA_ENV`
-5. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-6. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
+   (matching de item de orçamento com insumo de referência); só começa depois do item 1 completo
+3. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+4. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
    no dia a dia antes de qualquer nova decisão sobre extração (ver gatilho da ADR-003)
-7. **Validar PC 2.0** — testar PDF com orçamento real; remover DOCX após validação
+5. **Validar PC 2.0** — testar PDF com orçamento real; remover DOCX após validação
+6. **Alimentar `docs/LICOES_EXTRACAO.md`** sempre que aparecer um novo bug de parsing/extração —
+   não só corrigir e seguir (ver [[feedback_documentar_padroes_bugs]] na memória)
 
 ---
 
