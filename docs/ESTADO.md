@@ -1,18 +1,21 @@
 # Estado do Projeto Laura
 
-> Atualizado em: 2026-06-30
-> Sessão: Fase 6 — Fiada 6c++ — Múltiplas fotos de entrega, navegação + ADR-003
+> Atualizado em: 2026-07-01
+> Sessão: Preparação para produção — migração de schema, limpeza de fornecedores e pedidos
 
 ---
 
 ## Saúde do Projeto
 
-🟡 Amarelo
+🟢 Verde
 
 - Fundação concluída.
 - Ciclo documental completo: orçamento → PFM → A PAGAR → PIX → PAGO → NF-e vinculada.
 - PC 2.0 (PDF) implementado mas ainda não validado em produção — DOCX continua funcionando.
-- Modo teste operacional e isolado de produção.
+- **`data/laura.db` (produção) migrado e pronto** — schema estava desatualizado desde antes da
+  Fase 4a (faltavam `obras`, `entrega_fotos`, 12 colunas de `lancamentos`); corrigido em 2026-07-01.
+- Cadastro de fornecedores limpo e validado contra a Receita Federal (27 registros).
+- `documentos`/`lancamentos` de produção zerados por decisão — numeração de PFM reinicia do zero.
 - Módulo Financeiro: fundação criada (`financeiro/`). Sem funcionalidade nova ainda.
 
 ---
@@ -52,6 +55,29 @@
 ---
 
 ## Última Fiada Implementada
+
+**Preparação para produção — migração + limpeza de dados** *(2026-07-01)*
+
+- **Migração de schema em produção**: `data/laura.db` estava rodando com schema anterior à Fase 4a
+  (bot só era testado via `LAURA_ENV=test`). Aplicado o mesmo `init_db()` do bot.py — criou `obras`
+  (populada com GGV00-03), `entrega_fotos`, e todas as colunas de `lancamentos`/`documentos`/
+  `fornecedores` que faltavam. Aditivo, sem perda de dado. Backup em `data/laura.db.backup-2026-07-01`.
+- **Fornecedores validados contra a Receita Federal** (API pública BrasilAPI): 28 → 27 cadastros
+  (1 duplicata removida). Corrigido CNPJ da MO Construção (estava com o CNPJ da própria DeltaD —
+  é pessoa física, CPF de Valdir Aparecido Silveira), chave PIX da Costa Ferro (estava com CNPJ da
+  Base Forte) e do Jhonatan Rogowski (valor inválido "pix:"), cidade/UF de 22 cadastros (UF estava
+  100% vazia; 9 cadastros tinham cidade poluída com o nome do próprio Dennis/DeltaD), razão social
+  truncada em 6 casos, e 6 nomes que eram descrição de item em vez de fornecedor (ex: "Aco 6_3" →
+  "Frísia"; "Tubo concreto 400" → "Roma Pré-Moldados"). Cadastro de Claudemir Bueno completado com
+  CNPJ confirmado pelo próprio Dennis.
+- **`documentos` e `lancamentos` de produção zerados por decisão de Dennis** — os 38 documentos e
+  2 lançamentos existentes eram uma mistura de teste inicial (bugs de fase 1, uploads abandonados)
+  com 19 PFMs reais sem rastreamento financeiro completo (17 deles nunca ganharam lançamento, pois
+  `registrar_lancamento()` não existia ainda quando foram criados). Em vez de reconciliar,
+  Dennis optou por começar limpo. **Os arquivos .docx/.pdf já gerados na pasta OneDrive do GGV03
+  não foram apagados** — só o rastreamento interno do banco. Numeração de PFM reinicia em 001.
+
+---
 
 **Fase 6 — Fiada 6c++ — Múltiplas fotos de entrega + navegação** *(2026-06-30)*
 
@@ -184,7 +210,6 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 ## Dívidas Técnicas Conhecidas
 
 - `bot.py` monolítico com 3277 linhas — acima do limite ADR-001 (2.500–3.000); extração do domínio entrega avaliada e **adiada por decisão** (ADR-003), com gatilho de revisão explícito — não é mais "refatoração prioritária", é "aguardando gatilho"
-- BD fornecedores: MO Construção com CNPJ errado; PRUDENTÓPOLIS com split incorreto
 - `pfm_caminho` não existe como coluna — path reconstruído a cada consulta
 - `gerar_pfm()` acumula responsabilidades: geração Word + gravação no banco + criação de lançamento
 - `mime_type` não gravado no banco — inferido pela extensão do arquivo
@@ -194,6 +219,11 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 ---
 
 ## Decisões Recentes
+
+- **Reset de produção (2026-07-01)** — `documentos` e `lancamentos` zerados por decisão de Dennis em
+  vez de reconciliar 17 PFMs sem lançamento financeiro. Arquivos já gerados no OneDrive preservados;
+  só o rastreamento interno reinicia. Fornecedores (27, validados via Receita Federal) e obras
+  (GGV00-03) não foram tocados.
 
 - **ADR-003 (2026-06-30)** — Extração do domínio entrega de `bot.py` avaliada e **adiada**. Motivo: os
   dados de entrega não são independentes hoje (amarrados a `lancamentos`, do domínio Financeiro, e a
@@ -215,10 +245,11 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Objetivo da Próxima Sessão
 
-1. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
+1. **Colocar a Laura para rodar em produção** — banco migrado e limpo; falta decidir sobre `LAURA_ENV`
+2. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
    no dia a dia antes de qualquer nova decisão sobre extração (ver gatilho da ADR-003)
-2. **Fiada 6b — Recibo como exceção** — fornecedor sem NF-e, coluna `emite_nf` em `fornecedores`
-3. **Validar PC 2.0** — testar PDF com orçamento real; remover DOCX após validação
+3. **Fiada 6b — Recibo como exceção** — fornecedor sem NF-e, coluna `emite_nf` em `fornecedores`
+4. **Validar PC 2.0** — testar PDF com orçamento real; remover DOCX após validação
 
 ---
 
@@ -238,6 +269,6 @@ Arquitetura detalhada:
 
 ---
 
-*Última atualização: 2026-06-30*
+*Última atualização: 2026-07-01*
 *Responsáveis: Dennis + Claude*
 *Próxima revisão: ao final da próxima sessão*

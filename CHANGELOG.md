@@ -10,10 +10,41 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
-2. Fiada 6b — Recibo como exceção (fornecedor sem NF-e)
-3. Validar PDF do PC 2.0 com orçamento real em produção
-4. Remover DOCX do fluxo principal após validação
+1. Colocar a Laura para rodar em produção
+2. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
+3. Fiada 6b — Recibo como exceção (fornecedor sem NF-e)
+4. Validar PDF do PC 2.0 com orçamento real em produção
+5. Remover DOCX do fluxo principal após validação
+
+---
+
+## [Preparação para produção — migração e limpeza de dados] — 2026-07-01
+
+### Banco de produção migrado
+
+- `data/laura.db` estava com schema desatualizado desde antes da Fase 4a — bot só era testado via
+  `LAURA_ENV=test`. Aplicado o `init_db()` atual: tabela `obras` criada e populada (GGV00-03),
+  `entrega_fotos` criada, colunas de `lancamentos`/`documentos`/`fornecedores` atualizadas.
+  Migração aditiva — nenhum dado existente alterado.
+
+### Fornecedores validados contra a Receita Federal
+
+- 28 → 27 cadastros (1 duplicata removida — Reginaldo Wendler importado duas vezes)
+- CNPJ da MO Construção corrigido: estava gravado com o CNPJ da própria DeltaD; é pessoa física
+  (CPF de Valdir Aparecido Silveira)
+- Chave PIX da Costa Ferro corrigida (estava com o CNPJ da Base Forte); Jhonatan Rogowski
+  (estava com valor inválido "pix:")
+- Cidade/UF corrigidos em 22 cadastros via API pública da Receita (BrasilAPI) — UF estava 100%
+  vazia; 9 cadastros tinham cidade poluída com o nome do próprio Dennis/DeltaD
+- Razão social oficial completa em 6 cadastros com valor truncado
+- 6 nomes que eram descrição de item, não de fornecedor, corrigidos (ex: "Aco 6_3" → "Frísia")
+
+### Pedidos zerados por decisão
+
+- `documentos` e `lancamentos` de produção zerados — eram uma mistura de teste inicial (bugs de
+  fase 1) com 19 PFMs reais, 17 dos quais sem lançamento financeiro (criados antes de
+  `registrar_lancamento()` existir). Arquivos já gerados na pasta OneDrive **preservados**;
+  numeração de PFM reinicia em 001.
 
 ---
 

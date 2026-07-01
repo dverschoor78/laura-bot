@@ -1,6 +1,6 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-06-30 (Fiada 6c++ concluída; ADR-003 registrada)
+> Atualizado em: 2026-07-01 (produção migrada e limpa — pronta para uso real)
 
 ---
 
@@ -202,10 +202,10 @@ Implementar junto com a Fiada 6b.
 
 ## Próximas Fiadas
 
-1. **Usar entrega em produção real** — deixar o fluxo rodar no dia a dia antes de revisitar extração (gatilho na ADR-003)
-2. Fiada 6b — Recibo como exceção (fornecedor sem NF-e, coluna `emite_nf` em `fornecedores`)
-3. Validar PC 2.0 em produção + remover DOCX do fluxo principal
-4. Corrigir BD fornecedores (MO Construção CNPJ, PRUDENTÓPOLIS split)
+1. **Colocar a Laura para rodar em produção** — banco migrado e limpo (ver Decisões Recentes em `ESTADO.md`)
+2. **Usar entrega em produção real** — deixar o fluxo rodar no dia a dia antes de revisitar extração (gatilho na ADR-003)
+3. Fiada 6b — Recibo como exceção (fornecedor sem NF-e, coluna `emite_nf` em `fornecedores`)
+4. Validar PC 2.0 em produção + remover DOCX do fluxo principal
 
 ---
 
@@ -216,10 +216,6 @@ Implementar junto com a Fiada 6b.
   Interface já usa "Obra GGV03"; banco mantém coluna `ggv` por compatibilidade.
   `pfm_codigo` (ex: GGV03-009), arquivos `.docx` e links existentes não serão alterados.
   Dívida futura: migrar domínio interno `ggv` → `obra_codigo` em fiada específica.
-
-- **Alta — BD fornecedores inconsistente**
-  MO Construção com CNPJ errado; PRUDENTÓPOLIS com split incorreto.
-  Justificativa: dados incorretos afetam a busca de fornecedores em cada geração de PFM.
 
 - **Média — `gerar_pfm()` acumula responsabilidades**
   Mistura geração Word, gravação no banco e criação de lançamento.
