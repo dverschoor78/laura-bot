@@ -126,6 +126,7 @@ class Pedido:
     qtd_fotos_entrega:     int = 0
     obs_entrega:           Optional[str] = None
     entregue_em:           Optional[str] = None
+    categoria:             Optional[str] = None
 
     # Arquivos — populados por preparar_visualizacao_pedido()
     caminho_orcamento: Optional[str] = None
@@ -139,7 +140,10 @@ PROMPT = """
 Você recebeu um arquivo enviado para um sistema de gestão de obras de construção civil.
 
 PASSO 1 — Classifique o documento:
-[orcamento]        — cotação, orçamento, pedido de compra, lista de materiais com preços
+[orcamento]        — cotação, orçamento, pedido de compra, lista de materiais com preços;
+                     também boleto, fatura ou conta a pagar de taxa/imposto/serviço público
+                     (ex: anuidade CREA, emolumentos de cartório/ONR, IPTU e taxas de prefeitura,
+                     conta de energia Copel, conta de água/esgoto Sanepar)
 [comprovante_pix]  — comprovante de pagamento PIX ou transferência bancária
 [nota_fiscal]      — Nota Fiscal eletrônica (NF-e), DANFE, NFS-e ou recibo fiscal
 [extrato_mp]       — extrato do Mercado Pago ou extrato bancário
@@ -1345,10 +1349,13 @@ def gerar_pfm(doc_id, categoria=None, pfm_codigo_override=None):
     tbl_b.style = "Table Grid"
     _set_col_widths(tbl_b, [8.5, 8.5])
 
+    sem_entrega = bool(categoria) and categoria.value in CATEGORIAS_SEM_NFE_OBRIGATORIA
+
     # — Esquerda: Prazo e Condições —
     c_prazo = tbl_b.rows[0].cells[0]
     p = c_prazo.paragraphs[0]
-    r = p.add_run("PRAZO PARA ENTREGA E CONDIÇÕES DE PAGAMENTO")
+    titulo_prazo = "CONDIÇÕES DE PAGAMENTO" if sem_entrega else "PRAZO PARA ENTREGA E CONDIÇÕES DE PAGAMENTO"
+    r = p.add_run(titulo_prazo)
     r.bold = True; r.font.size = Pt(8)
     _cell_bg(c_prazo, "D9D9D9")
 
@@ -1360,9 +1367,10 @@ def gerar_pfm(doc_id, categoria=None, pfm_codigo_override=None):
 
     _kv_p(c_prazo, "CONDIÇÕES DE PAGAMENTO", condicao)
     _kv_p(c_prazo, "CHAVE PIX", pix)
-    _kv_p(c_prazo, "DATA DE ENTREGA", data_entrega)
+    if not sem_entrega:
+        _kv_p(c_prazo, "DATA DE ENTREGA", data_entrega)
     obs_partes = []
-    prazo_texto = prazo if prazo and prazo not in ("A PREENCHER",) and prazo != data_entrega else None
+    prazo_texto = prazo if not sem_entrega and prazo and prazo not in ("A PREENCHER",) and prazo != data_entrega else None
     if prazo_texto:
         obs_partes.append(prazo_texto)
     if obs and obs != prazo_texto:
@@ -1370,13 +1378,14 @@ def gerar_pfm(doc_id, categoria=None, pfm_codigo_override=None):
     if obs_partes:
         _kv_p(c_prazo, "OBSERVAÇÃO", " | ".join(obs_partes))
 
-    # Nota de foto
-    p_foto = c_prazo.add_paragraph()
-    p_foto.add_run(
-        "FAVOR TIRAR FOTOS DO MATERIAL DESCARREGADO E ENVIAR POR WHATSAPP PARA DENNIS – (42) 99127-1255"
-    ).font.size = Pt(7)
+    if not sem_entrega:
+        # Nota de foto
+        p_foto = c_prazo.add_paragraph()
+        p_foto.add_run(
+            "FAVOR TIRAR FOTOS DO MATERIAL DESCARREGADO E ENVIAR POR WHATSAPP PARA DENNIS – (42) 99127-1255"
+        ).font.size = Pt(7)
 
-    # — Direita: Dados para Fatura e Entrega —
+    # — Direita: Dados para Fatura (+ Entrega, quando aplicável) —
     c_dados = tbl_b.rows[0].cells[1]
     p_fatura = c_dados.paragraphs[0]
     r_f = p_fatura.add_run("DADOS PARA FATURA")
@@ -1392,11 +1401,12 @@ def gerar_pfm(doc_id, categoria=None, pfm_codigo_override=None):
     _linha(c_dados, f"CNPJ: {DELTAD['cnpj']}", size=9)
     _linha(c_dados, DELTAD["end"], size=8)
     _linha(c_dados, DELTAD["email"], size=8)
-    _linha(c_dados, "")
-    p_ent = c_dados.add_paragraph()
-    p_ent.add_run("DADOS PARA ENTREGA").bold = True
-    p_ent.runs[0].font.size = Pt(8)
-    _linha(c_dados, endereco or "A PREENCHER", size=9)
+    if not sem_entrega:
+        _linha(c_dados, "")
+        p_ent = c_dados.add_paragraph()
+        p_ent.add_run("DADOS PARA ENTREGA").bold = True
+        p_ent.runs[0].font.size = Pt(8)
+        _linha(c_dados, endereco or "A PREENCHER", size=9)
 
     pasta = _pasta_pfm(ggv)
     pasta.mkdir(parents=True, exist_ok=True)
@@ -1784,7 +1794,7 @@ def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
         lanc = con.execute(
             "SELECT fornecedor, valor, data_prevista_entrega, vencimento_pagamento, status, criado_em, "
             "data_pagamento, doc_id_nfe, doc_id_comprovante, identificador_comprovante, "
-            "obs_entrega, entregue_em "
+            "obs_entrega, entregue_em, categoria "
             "FROM lancamentos WHERE pfm_codigo=?",
             (pfm_codigo,)
         ).fetchone()
@@ -1793,9 +1803,9 @@ def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
         ).fetchone()[0]
 
     forn_lanc = data_prev_ent = venc = status_raw = lanc_criado = data_pgto = None
-    doc_id_nfe = doc_id_comp = ident_comp = obs_ent = entregue_em = None
+    doc_id_nfe = doc_id_comp = ident_comp = obs_ent = entregue_em = categoria_lanc = None
     if lanc:
-        forn_lanc, _, data_prev_ent, venc, status_raw, lanc_criado, data_pgto, doc_id_nfe, doc_id_comp, ident_comp, obs_ent, entregue_em = lanc
+        forn_lanc, _, data_prev_ent, venc, status_raw, lanc_criado, data_pgto, doc_id_nfe, doc_id_comp, ident_comp, obs_ent, entregue_em, categoria_lanc = lanc
 
     try:
         status = StatusPedido(status_raw) if status_raw else StatusPedido.SEM_LANCAMENTO
@@ -1826,6 +1836,7 @@ def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
         qtd_fotos_entrega         = qtd_fotos,
         obs_entrega               = obs_ent,
         entregue_em               = entregue_em,
+        categoria                 = categoria_lanc,
         caminho_orcamento         = caminho,
     )
 
@@ -1873,6 +1884,19 @@ def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
 
     return pedido
 
+# Categorias cujo fechamento fiscal é a própria fatura (CREA, ONR, prefeitura, Copel, Sanepar
+# não emitem NF-e separada) — não exibir "NF-e pendente" nem exigir vínculo de NF-e
+CATEGORIAS_SEM_NFE_OBRIGATORIA = {"taxa", "imposto", "servicos"}
+
+def _status_pago_label(pedido: "Pedido") -> str:
+    if pedido.nfe_numero:
+        return f"Pago · NF-e {pedido.nfe_numero}"
+    if pedido.categoria in CATEGORIAS_SEM_NFE_OBRIGATORIA:
+        return "Pago"
+    if not pedido.doc_id_nfe:
+        return "Pago · NF-e pendente"
+    return "Pago · NF-e"
+
 def mostrar_pedido(pedido: Pedido) -> str:
     """Formata o Pedido como mensagem Telegram. Sem IO — apenas formatação."""
     _STATUS_EMOJI = {
@@ -1884,7 +1908,7 @@ def mostrar_pedido(pedido: Pedido) -> str:
     }
     _STATUS_SHORT = {
         StatusPedido.A_PAGAR:          "Aguardando pagamento",
-        StatusPedido.PAGO:             f"Pago · NF-e {pedido.nfe_numero}" if pedido.nfe_numero else ("Pago · NF-e pendente" if not pedido.doc_id_nfe else "Pago · NF-e"),
+        StatusPedido.PAGO:             _status_pago_label(pedido),
         StatusPedido.PENDENTE_REVISAO: "Requer atenção",
         StatusPedido.SUBSTITUIDO:      "Substituído",
         StatusPedido.SEM_LANCAMENTO:   "Sem registro financeiro",
@@ -2878,7 +2902,15 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 return
             with sqlite3.connect(DB_PATH) as con:
                 row_comp = con.execute("SELECT caminho FROM documentos WHERE id=?", (int(doc_id_comp),)).fetchone()
+                row_lanc = con.execute(
+                    "SELECT categoria, doc_id FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)
+                ).fetchone()
             _arquivar_doc_financeiro(pfm_codigo, "comprovante", row_comp[0] if row_comp else None, data_pgto)
+            if row_lanc and row_lanc[0] in CATEGORIAS_SEM_NFE_OBRIGATORIA:
+                # Taxa/imposto/serviço público: a fatura já enviada é a "terceira via" — não há NF-e separada
+                with sqlite3.connect(DB_PATH) as con:
+                    row_fatura = con.execute("SELECT caminho FROM documentos WHERE id=?", (row_lanc[1],)).fetchone()
+                _arquivar_doc_financeiro(pfm_codigo, "fatura", row_fatura[0] if row_fatura else None, data_pgto)
             await query.edit_message_text(
                 f"🟢 Pedido #{pfm_codigo} — pago.\n\n"
                 "Envie a NF-e para fechar este pedido."

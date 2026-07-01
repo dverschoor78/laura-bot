@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-07-01
-> Sessão: Preparação para produção — migração, limpeza, auto-cadastro via Receita, organização automática de arquivos por obra
+> Sessão: Preparação para produção — migração, limpeza, auto-cadastro via Receita, organização automática de arquivos, taxas/impostos/serviços públicos
 
 ---
 
@@ -20,13 +20,16 @@
   disponível; sincronização automática em segundo plano quando a consulta falha na hora.
 - **Documentos organizados automaticamente na pasta OneDrive de cada obra** — orçamento, PFM,
   comprovante, NF-e e fotos de entrega arquivados com nome e pasta padronizados, sem ação manual.
+- **Taxas, impostos e serviços públicos** (CREA, ONR, prefeitura, Copel, Sanepar) passam pelo
+  mesmo fluxo de compra — categoria dispensa NF-e (essas entidades não emitem), fatura arquivada
+  como fechamento, campos de entrega ocultos no documento gerado.
 - Módulo Financeiro: fundação criada (`financeiro/`). Sem funcionalidade nova ainda.
 
 ---
 
 ## Versão Atual
 
-**v0.6.4** — Organização automática de arquivos por obra
+**v0.6.5** — Taxas, impostos e serviços públicos no fluxo de compra
 
 ---
 
@@ -63,6 +66,45 @@
 ---
 
 ## Última Fiada Implementada
+
+**Taxas, impostos e serviços públicos no fluxo de compra** *(2026-07-01)*
+
+Dennis levantou a dúvida de como tratar despesas sem orçamento negociado — CREA, ONR
+(matrícula/emolumentos), prefeitura (IPTU/taxas), Copel (energia), Sanepar (água/esgoto). A
+decisão foi reaproveitar o pipeline de compra inteiro (orçamento → PFM → pagamento), em vez de
+criar um fluxo paralelo — mudando só a categoria e o critério de fechamento.
+
+**Pesquisa antes de decidir:** antes de mudar a exigência de NF-e (regra existente por causa do
+RET), pesquisei o que cada entidade realmente emite. Achado principal: **nenhuma delas tem um
+documento fiscal separado da fatura** — Copel já é a própria NF (NF3e, obrigatória desde 2021);
+Sanepar, CREA e prefeitura não emitem nota fiscal, só fatura/boleto/guia; ONR disponibiliza
+recibo de emolumentos. Ou seja, a fatura que Dennis já envia como orçamento **é** o documento de
+fechamento dessas categorias — não falta nada, só não deve ser tratada como se faltasse NF-e.
+Fonte: pesquisa web, não é orientação tributária — Dennis vai confirmar com o contador se
+necessário, risco avaliado como baixo.
+
+**Implementado:**
+- Prompt reconhece boleto/fatura/conta de consumo como `[orcamento]` (antes só reconhecia cotação
+  de material — corria risco de cair em "não relacionado")
+- Categorias `taxa`/`imposto`/`servicos` (`CATEGORIAS_SEM_NFE_OBRIGATORIA`) fecham o pedido com
+  "Pago" simples — sem cobrar NF-e que a entidade não emite
+- Ao confirmar o pagamento dessas categorias, a fatura original é arquivada de novo em
+  `01 Controle financeiro` como "fatura" (a terceira via), junto do comprovante
+- Documento do Pedido de Compra oculta campos de entrega (DATA DE ENTREGA, DADOS PARA ENTREGA,
+  aviso de foto, título muda para "CONDIÇÕES DE PAGAMENTO") quando a categoria é taxa/imposto/
+  serviço — não faz sentido pedir endereço de entrega pra uma anuidade do CREA
+- Novo campo `categoria` no `Pedido` (antes não existia, cockpit não sabia a categoria do pedido)
+
+Testado de ponta a ponta com fatura fictícia de CREA: rótulo de status, arquivamento da fatura
+como terceira via, e documento gerado sem os campos de entrega — comparado lado a lado com um
+pedido de material pra garantir zero regressão.
+
+**Próximo passo natural, ainda não implementado:** geração automática de recibo (Fiada 6b) para
+os casos onde não existe NENHUM documento de fechamento — ex: mão de obra informal sem CREA/CNPJ.
+Diferente do que foi resolvido hoje (entidades que têm seu próprio documento), aqui é a Laura que
+precisa criar o recibo (PDF via Playwright: serviço + pagamento + partes).
+
+---
 
 **Organização automática de arquivos por obra** *(2026-07-01)*
 
@@ -310,11 +352,14 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Objetivo da Próxima Sessão
 
-1. **Colocar a Laura para rodar em produção** — banco migrado e limpo; falta decidir sobre `LAURA_ENV`
-2. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-3. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
+1. **Fiada 6b — Geração automática de recibo** — combinado com Dennis para avançar a seguir;
+   escopo: fornecedor/prestador sem nenhum documento de fechamento (mão de obra informal etc.),
+   Laura gera o recibo em PDF (serviço + pagamento + partes). Diferente das taxas/impostos/serviços
+   públicos resolvidos hoje — aqueles já tinham fatura própria servindo de fechamento
+2. **Colocar a Laura para rodar em produção** — banco migrado e limpo; falta decidir sobre `LAURA_ENV`
+3. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+4. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
    no dia a dia antes de qualquer nova decisão sobre extração (ver gatilho da ADR-003)
-4. **Fiada 6b — Recibo como exceção** — fornecedor sem NF-e, coluna `emite_nf` em `fornecedores`
 5. **Validar PC 2.0** — testar PDF com orçamento real; remover DOCX após validação
 
 ---

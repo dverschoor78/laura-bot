@@ -1,6 +1,6 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-01 (produção migrada e limpa; auto-cadastro via Receita; arquivos organizados por obra)
+> Atualizado em: 2026-07-01 (produção migrada e limpa; auto-cadastro via Receita; arquivos organizados por obra; taxas/impostos/serviços públicos)
 
 ---
 
@@ -137,7 +137,13 @@ cadastro como `emite_nf = false` para Laura gerar recibo automaticamente, sem pe
 - Revisão do Pedido de Compra implementada: `pfm_revisar` → rev01, rev02...
 - PROMPT de comprovante: prefere EndToEnd PIX (`E10573521...`) ao número MP
 
-**Fiada 6b — Recibo como Exceção** *(planejada)*
+**Fiada 6b — Geração automática de recibo** *(próxima — combinada com Dennis em 2026-07-01)*
+
+Escopo refinado após a Fiada "Taxas/impostos/serviços públicos": aquela fiada resolveu o caso de
+entidades que já emitem seu próprio documento de fechamento (fatura vira a terceira via — ver
+`ESTADO.md`). Fiada 6b cobre o caso restante: fornecedor/prestador **sem nenhum documento**
+(mão de obra informal, autônomo sem CREA/CNPJ) — aqui a Laura precisa gerar o recibo, não só
+arquivar algo que já existe.
 
 - Recibo só é gerado quando fornecedor está marcado como `emite_nf = false` no cadastro
   OU quando usuário declara explicitamente que NF-e não será emitida
@@ -145,6 +151,7 @@ cadastro como `emite_nf = false` para Laura gerar recibo automaticamente, sem pe
 - Recibo gerado em PDF via Playwright: serviço (do orçamento) + pagamento (do PIX) + partes
 - Status novo: `pago_com_recibo`
 - Coluna `emite_nf BOOLEAN` adicionada à tabela `fornecedores`
+- Recibo gerado arquiva em `05 Entrega/` — mesma convenção já implementada
 
 **Fiada 6c — Foto de Entrega + Gestão de Entrega** ✓ *(concluída 2026-06-30)*
 
@@ -220,14 +227,24 @@ Implementar junto com a Fiada 6b.
 - Fotos de entrega arquivadas em `05 Entrega`, numeração sequencial (`foto01`, `foto02`...)
 - GGV03 e GGV00 configuradas; GGV01 intocável por regra; GGV02 pendente (estrutura própria diferente)
 
+**Taxas, impostos e serviços públicos no fluxo de compra** ✓ *(concluída 2026-07-01)*
+
+- Prompt reconhece boleto/fatura/conta de consumo (CREA, ONR, prefeitura, Copel, Sanepar) como `[orcamento]`
+- Categorias `taxa`/`imposto`/`servicos` fecham com "Pago" — sem exigir NF-e que essas entidades
+  não emitem (pesquisado: nenhuma tem documento fiscal separado da fatura; Copel já é a própria NF)
+- Fatura arquivada de novo em `01 Controle financeiro` como "fatura" (terceira via) ao confirmar pagamento
+- Documento do Pedido de Compra oculta campos de entrega para essas categorias
+- Novo campo `categoria` no `Pedido`; nova constante `CATEGORIAS_SEM_NFE_OBRIGATORIA`
+
 ---
 
 ## Próximas Fiadas
 
-1. **Colocar a Laura para rodar em produção** — banco migrado e limpo (ver Decisões Recentes em `ESTADO.md`)
-2. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-3. **Usar entrega em produção real** — deixar o fluxo rodar no dia a dia antes de revisitar extração (gatilho na ADR-003)
-4. Fiada 6b — Recibo como exceção (fornecedor sem NF-e, coluna `emite_nf` em `fornecedores`) — recibo já cai em `05 Entrega` quando existir
+1. **Fiada 6b — Geração automática de recibo** — combinada com Dennis para avançar a seguir
+   (fornecedor/prestador sem nenhum documento de fechamento, ex: mão de obra informal)
+2. **Colocar a Laura para rodar em produção** — banco migrado e limpo (ver Decisões Recentes em `ESTADO.md`)
+3. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+4. **Usar entrega em produção real** — deixar o fluxo rodar no dia a dia antes de revisitar extração (gatilho na ADR-003)
 5. Validar PC 2.0 em produção + remover DOCX do fluxo principal
 
 ---

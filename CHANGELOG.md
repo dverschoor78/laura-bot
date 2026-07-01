@@ -10,12 +10,37 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Colocar a Laura para rodar em produção
-2. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
-3. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
-4. Fiada 6b — Recibo como exceção (fornecedor sem NF-e)
+1. Fiada 6b — Geração automática de recibo (fornecedor/prestador sem nenhum documento de fechamento)
+2. Colocar a Laura para rodar em produção
+3. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
+4. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
 5. Validar PDF do PC 2.0 com orçamento real em produção
 6. Remover DOCX do fluxo principal após validação
+
+---
+
+## [Taxas, impostos e serviços públicos no fluxo de compra] — 2026-07-01
+
+### CREA, ONR, prefeitura, Copel, Sanepar reaproveitam o pipeline de compra
+
+Em vez de um fluxo paralelo para despesas sem orçamento negociado, essas entidades passam pelo
+mesmo caminho de sempre (orçamento → PFM → pagamento), só com categoria e fechamento diferentes.
+
+- Prompt reconhece boleto/fatura/conta de consumo como `[orcamento]` — antes só reconhecia
+  cotação de material, risco de cair em "não relacionado"
+- Categorias `taxa`/`imposto`/`servicos` fecham o pedido com "Pago" — sem cobrar NF-e
+- Fatura original arquivada de novo em `01 Controle financeiro` como "fatura" (terceira via) ao
+  confirmar o pagamento, junto do comprovante
+- Documento do Pedido de Compra oculta campos de entrega (data, endereço, aviso de foto) para
+  essas categorias — não fazem sentido para uma anuidade ou conta de consumo
+- Novo campo `categoria` no `Pedido`; nova constante `CATEGORIAS_SEM_NFE_OBRIGATORIA`
+
+### Pesquisa antes de mudar a regra do RET
+
+Antes de dispensar a exigência de NF-e (regra existente por causa do Regime Especial de
+Tributação), pesquisamos o que cada entidade realmente emite: nenhuma tem documento fiscal
+separado da fatura — Copel já é a própria nota fiscal (NF3e), as demais não emitem NF-e, só
+fatura/boleto/guia. A fatura que já era enviada como orçamento já é o documento de fechamento.
 
 ---
 
