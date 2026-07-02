@@ -206,6 +206,27 @@ que carreguei o dado, algum lugar deve estar usando".
 
 ---
 
+## 11. Unidade por extenso (palavra inteira, não abreviação) quebra o regex de item
+
+**Sintoma:** item "1. Bloco cerâmico 9x14x24 cm (8000 blocos) — R$ 6.960,00" não teve o valor
+unitário calculado — mesmo sintoma do item #3 (fallback de texto cru), mas causa diferente.
+
+**Causa raiz:** o grupo de unidade do `ITEM_RE` (corrigido no item #3 para aceitar dígito/
+superíndice) ainda limitava a **quantidade de letras** a `{1,4}` — cobre "UND", "M3", "KG", mas não
+palavras por extenso que o Claude às vezes usa em vez de abreviação ("blocos", "sacos",
+"unidades").
+
+**Correção:** grupo de unidade ampliado para `[A-Za-zÀ-ÿ]{1,15}[²³0-9]{0,2}` — mesma estrutura do
+item #3, só com limite de letras maior.
+
+**Lição geral:** o item #3 já generalizava "unidade sem superíndice", mas a lição real era mais
+ampla: o Claude não segue um vocabulário fixo de abreviações de unidade. Qualquer limite de
+tamanho num regex de unidade extraída por IA deveria ser generoso por padrão (uma palavra inteira
+razoável, não 3-4 caracteres), não ajustado reativamente cada vez que aparece uma palavra nova.
+Confirmado contra o pedido real GGV03-010 (Cerâmica Tio Nardo, teste em 2026-07-02).
+
+---
+
 ## Padrão geral por trás de tudo isso
 
 Duas famílias de bug, não uma só.

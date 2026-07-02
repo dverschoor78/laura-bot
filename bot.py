@@ -7,6 +7,7 @@ import sqlite3
 import base64
 import urllib.request
 import anthropic
+from num2words import num2words
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -15,14 +16,10 @@ from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
-from docx import Document
-from docx.shared import Pt, Cm, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml.ns import qn
-from docx.oxml import OxmlElement
 
 from financeiro.lancamento import (init_db_financeiro, sugerir_categoria, CategoriaLancamento,
                                    vincular_nfe, buscar_candidatos_nfe)
+from nfe import parse_nfe, mostrar_nfe, teclado_candidatos_nfe
 
 load_dotenv()
 TOKEN       = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -142,8 +139,7 @@ class Pedido:
 
     # Arquivos — populados por preparar_visualizacao_pedido()
     caminho_orcamento: Optional[str] = None
-    caminho_docx:      Optional[str] = None
-    caminho_pdf:       Optional[str] = None   # futuro
+    caminho_pfm:       Optional[str] = None
 
     # Histórico — populado por preparar_visualizacao_pedido()
     historico: list = field(default_factory=list)
@@ -457,6 +453,20 @@ def init_db():
                 doc_id_recibo_assinado     INTEGER,
                 status                     TEXT DEFAULT 'pago',
                 criado_em                  TEXT DEFAULT (datetime('now','localtime'))
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS itens_pedido (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                pfm_codigo            TEXT NOT NULL,
+                numero                INTEGER,
+                descricao             TEXT NOT NULL,
+                unidade               TEXT,
+                quantidade            REAL,
+                valor_unitario        REAL,
+                valor_total           REAL,
+                insumo_sinapi_codigo  INTEGER,
+                criado_em             TEXT DEFAULT (datetime('now','localtime'))
             )
         """)
         con.execute("""
@@ -897,6 +907,9 @@ def _bloco_itens(dados):
         stripped = linha.strip().lstrip("- *")
         if re.match(r"^(itens|materiais)", stripped, re.IGNORECASE) and ":" in stripped:
             capturando = True
+            inline = stripped.split(":", 1)[1].strip().strip("*").strip()
+            if inline:
+                resultado.append(inline)
             continue
         if capturando:
             if stripped and not re.match(r"^\d+\.", stripped) and ":" in stripped and not stripped.startswith("http"):
@@ -940,7 +953,7 @@ def _recalcular_itens(dados: str) -> str:
             m = ITEM_RE.match(stripped)
             if m:
                 desc, qtde_str, und, val1, val2 = m.groups()
-                qtde_v = _parse_brl(qtde_str)
+                qtde_v = _parse_qtde(qtde_str)
                 num_m = re.match(r"^(\d+)\.", stripped)
                 num = num_m.group(1) if num_m else "?"
                 if val2:
@@ -962,7 +975,7 @@ def _recalcular_itens(dados: str) -> str:
     return resultado
 
 ITEM_RE = re.compile(
-    r"^\d+\.\s+(.+?)\s+\(([0-9,.]+)\s+([A-Za-zÀ-ÿ]{1,4}[²³0-9]{0,2})\)\s*[—–\-]+\s*R\$\s*([0-9.,]+)"
+    r"^\d+\.\s+(.+?)\s+\(([0-9,.]+)\s+([A-Za-zÀ-ÿ]{1,15}[²³0-9]{0,2})\)\s*[—–\-]+\s*R\$\s*([0-9.,]+)"
     r"(?:\s*cada\s*=\s*R\$\s*([0-9.,]+))?",
     re.IGNORECASE,
 )
@@ -978,18 +991,44 @@ def _parse_brl(s):
             return float(s.replace(".", ""))
     return float(s.replace(",", "."))
 
+def _parse_qtde(s):
+    """Quantidade de item de compra — diferente de valor monetário, "." aqui é sempre separador
+    decimal, nunca de milhar (ex: '12.000' significa doze, não doze mil — o Claude às vezes usa
+    ponto com 3 casas decimais pra escrever quantidade inteira). Compra de material de obra nunca
+    tem quantidade real na casa dos milhares num item só."""
+    s = s.strip().replace(" ", "")
+    if not s:
+        return 0.0
+    if "," in s:
+        return float(s.replace(".", "").replace(",", "."))
+    return float(s)
+
 def _fmt_brl(v):
     s = f"{v:,.2f}"                                        # "6,292.93"
     return s.replace(",", "X").replace(".", ",").replace("X", ".")  # "6.292,93"
 
+def _fmt_qtde(v: float) -> str:
+    if float(v).is_integer():
+        return f"{int(v):,}".replace(",", ".")
+    return _fmt_brl(v)
+
+def _valor_por_extenso(valor: float) -> str:
+    """'R$ 6.960,00' -> 'seis mil, novecentos e sessenta reais'; trata reais e centavos."""
+    return num2words(valor, lang="pt_BR", to="currency")
+
 def _itens(dados):
-    """Retorna lista de dicts {desc, und, qtde, unit, total, _total_v} ou strings como fallback."""
+    """Retorna lista de dicts {desc, und, qtde, unit, total, _total_v} ou strings como fallback.
+    Aceita tanto item(ns) na mesma linha do rótulo 'Itens:' (comum quando há um item só) quanto o
+    formato usual de vários itens em linhas separadas abaixo do rótulo."""
     resultado, capturando = [], False
     for linha in dados.splitlines():
         stripped = linha.strip().lstrip("- *")
         if re.match(r"^(itens|materiais)", stripped, re.IGNORECASE) and ":" in stripped:
             capturando = True
-            continue
+            inline = stripped.split(":", 1)[1].strip().strip("*").strip()
+            if not inline:
+                continue
+            stripped = inline
         if capturando:
             if not stripped:
                 continue
@@ -998,7 +1037,7 @@ def _itens(dados):
             m = ITEM_RE.match(stripped)
             if m:
                 desc, qtde_str, und, val1, val2 = m.groups()
-                qtde_v = _parse_brl(qtde_str)
+                qtde_v = _parse_qtde(qtde_str)
                 if val2:
                     unit_v  = _parse_brl(val1)
                     total_v = round(qtde_v * unit_v, 2)
@@ -1016,6 +1055,27 @@ def _itens(dados):
             elif stripped:
                 resultado.append(stripped)
     return resultado
+
+def _salvar_itens_pedido(pfm_codigo, itens):
+    """Substitui os itens estruturados de um pedido (`itens_pedido`) — usado na geração inicial
+    e em toda revisão, sempre refletindo a lista mais recente. Itens que o ITEM_RE não conseguiu
+    parsear (fallback string) ainda são salvos, só sem os campos numéricos."""
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("DELETE FROM itens_pedido WHERE pfm_codigo=?", (pfm_codigo,))
+        for i, item in enumerate(itens, start=1):
+            if isinstance(item, dict):
+                con.execute(
+                    "INSERT INTO itens_pedido "
+                    "(pfm_codigo, numero, descricao, unidade, quantidade, valor_unitario, valor_total) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (pfm_codigo, i, item["desc"], item["und"],
+                     _parse_qtde(item["qtde"]), _parse_brl(item["unit"]), item["_total_v"])
+                )
+            else:
+                con.execute(
+                    "INSERT INTO itens_pedido (pfm_codigo, numero, descricao) VALUES (?,?,?)",
+                    (pfm_codigo, i, str(item))
+                )
 
 def _obs(dados):
     """Extrai o texto de Observações — aceita tanto 'Observações: texto' na mesma linha
@@ -1053,49 +1113,6 @@ def _calcular_totais(dados, desconto_rs):
         except Exception:
             desconto_v = 0.0
     return subtotal_v, desconto_v, subtotal_v - desconto_v
-
-def _data_extenso(dt):
-    return f"Carambeí, {dt.day} de {MESES[dt.month-1]} de {dt.year}."
-
-def _cell_bg(cell, hex_color):
-    tcPr = cell._tc.get_or_add_tcPr()
-    shd = OxmlElement("w:shd")
-    shd.set(qn("w:val"), "clear")
-    shd.set(qn("w:color"), "auto")
-    shd.set(qn("w:fill"), hex_color)
-    tcPr.append(shd)
-
-def _set_col_widths(tbl, widths_cm):
-    tbl.autofit = False
-    for i, w in enumerate(widths_cm):
-        for cell in tbl.columns[i].cells:
-            cell.width = Cm(w)
-
-def _secao_row(tbl, texto, ncols, bg="1F3864"):
-    """Linha de cabeçalho de seção (fundo azul, texto branco)."""
-    row = tbl.add_row()
-    cell = row.cells[0]
-    for i in range(1, ncols):
-        cell.merge(row.cells[i])
-    _cell_bg(cell, bg)
-    p = cell.paragraphs[0]
-    r = p.add_run(texto)
-    r.bold = True
-    r.font.size = Pt(9)
-    r.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-    return row
-
-def _kv_row(tbl, label, valor, label_bg="D9D9D9"):
-    """Linha label | valor em 2 colunas."""
-    row = tbl.add_row()
-    c_l = row.cells[0]
-    _cell_bg(c_l, label_bg)
-    r = c_l.paragraphs[0].add_run(label)
-    r.bold = True
-    r.font.size = Pt(8)
-    c_r = row.cells[1]
-    c_r.paragraphs[0].add_run(str(valor or "")).font.size = Pt(9)
-    return row
 
 def proximo_pfm_numero(ggv):
     with sqlite3.connect(DB_PATH) as con:
@@ -1369,13 +1386,26 @@ def _gerar_html_recibo(parcela_id: int) -> str:
 
     itens = _itens(dados)
     if itens:
-        descricao = "; ".join(i.get("desc", str(i)) if isinstance(i, dict) else str(i) for i in itens)
+        def _desc_item(i):
+            if not isinstance(i, dict):
+                return str(i)
+            if i.get("qtde") and i.get("und"):
+                return f"{_fmt_qtde(_parse_qtde(i['qtde']))} {i['und']} de {i['desc']}"
+            return i["desc"]
+        descricao = "; ".join(_desc_item(i) for i in itens)
     else:
         descricao = pedido.fornecedor
 
     now          = datetime.now()
     data_emissao = f"{now.day} de {MESES[now.month-1]} de {now.year}"
     valor_fmt    = f"R$ {_fmt_brl(valor_parcela)}"
+    valor_extenso = _valor_por_extenso(valor_parcela)
+    texto_recibo = (
+        f"Recebi de {DELTAD['nome']}, CNPJ {DELTAD['cnpj']}, a importância supra de {valor_fmt} "
+        f"( {valor_extenso} ), referente à compra de {descricao} — Pedido de Compra #{pfm_codigo}. "
+        "Por ser a expressão da verdade, dou quitação pela importância recebida e pela etapa de "
+        "serviços/materiais prestados, firmando o presente recibo nesta data."
+    )
 
     def _h(s):
         return _esc_html(str(s)) if s and s != "A PREENCHER" else ""
@@ -1420,8 +1450,8 @@ def _gerar_html_recibo(parcela_id: int) -> str:
     </div>
   </div>
   <div style="margin-top:16px;">
-    <div class="section-label">Serviço Prestado</div>
-    <div class="ctx-value">{_h(descricao)}</div>
+    <div class="section-label">Declaração</div>
+    <div class="ctx-value" style="line-height:1.7;">{_h(texto_recibo)}</div>
   </div>
   <div class="financial-outer" style="margin-top:14px;">
     <div class="financial-inner">
@@ -1525,197 +1555,20 @@ def gerar_pfm(doc_id, categoria=None, pfm_codigo_override=None):
         pfm_codigo = f"{ggv}-{pfm_num:03d}"
         atualizar(doc_id, pfm_numero=pfm_num, status="pfm_gerado")
 
-    now = datetime.now()
-    doc = Document()
-    for s in doc.sections:
-        s.top_margin    = Cm(1.5)
-        s.bottom_margin = Cm(1.5)
-        s.left_margin   = Cm(2)
-        s.right_margin  = Cm(2)
-    # Largura útil: 21 - 4 = 17 cm
+    # itens_pedido sempre reflete o pedido base, mesmo quando esta chamada é uma revisão
+    # (pfm_codigo aqui pode vir como "GGV03-007-R01" — nunca deve virar uma chave separada)
+    pfm_codigo_base_itens = re.sub(r"-R\d+$", "", pfm_codigo)
+    _salvar_itens_pedido(pfm_codigo_base_itens, itens)
 
-    # ── CABEÇALHO ────────────────────────────────────────────────────────────
-    tbl_h = doc.add_table(rows=1, cols=2)
-    tbl_h.style = "Table Grid"
-    _set_col_widths(tbl_h, [11, 6])
-    for c in tbl_h.rows[0].cells:
-        _cell_bg(c, "D9E2F3")
-
-    c_l = tbl_h.rows[0].cells[0]
-    r = c_l.paragraphs[0].add_run("DeltaD Engenharia")
-    r.bold = True; r.font.size = Pt(13)
-    p2 = c_l.add_paragraph("Pedido de Compra")
-    p2.runs[0].font.size = Pt(9)
-
-    c_r = tbl_h.rows[0].cells[1]
-    c_r.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    r2 = c_r.paragraphs[0].add_run(f"Nº: {pfm_codigo}")
-    r2.bold = True; r2.font.size = Pt(12)
-    p3 = c_r.add_paragraph(_data_extenso(now))
-    p3.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    p3.runs[0].font.size = Pt(8)
-
-    # ── FORNECEDOR ───────────────────────────────────────────────────────────
-    doc.add_paragraph()
-    tbl_f = doc.add_table(rows=0, cols=2)
-    tbl_f.style = "Table Grid"
-    _set_col_widths(tbl_f, [5, 12])
-    _secao_row(tbl_f, "FORNECEDOR", 2)
-    _kv_row(tbl_f, "RAZÃO SOCIAL / NOME", fornecedor)
-    _kv_row(tbl_f, "CNPJ/CPF", cnpj)
-    _kv_row(tbl_f, "I.E.", "ISENTO")
-    if forn_logr:
-        _kv_row(tbl_f, "LOGRADOURO / Nº", forn_logr)
-    if forn_bairro:
-        _kv_row(tbl_f, "BAIRRO", forn_bairro)
-    if forn_cidade:
-        _kv_row(tbl_f, "CIDADE / UF / CEP", forn_cidade)
-    if forn_contato:
-        _kv_row(tbl_f, "CONTATO", forn_contato)
-    if forn_email:
-        _kv_row(tbl_f, "E-MAIL", forn_email)
-    if forn_fone:
-        _kv_row(tbl_f, "WHATSAPP", forn_fone)
-    _kv_row(tbl_f, "CHAVE PIX", pix)
-
-    # ── EMPREENDIMENTO ───────────────────────────────────────────────────────
-    doc.add_paragraph()
-    tbl_e = doc.add_table(rows=0, cols=2)
-    tbl_e.style = "Table Grid"
-    _set_col_widths(tbl_e, [5, 12])
-    _secao_row(tbl_e, "EMPREENDIMENTO", 2)
-    _kv_row(tbl_e, ggv, GGV_DESC.get(ggv, ggv))
-
-    # ── MATERIAIS ────────────────────────────────────────────────────────────
-    doc.add_paragraph()
-    tbl_m = doc.add_table(rows=0, cols=6)
-    tbl_m.style = "Table Grid"
-    _set_col_widths(tbl_m, [1.2, 7.3, 1.5, 1.5, 2.75, 2.75])
-    _secao_row(tbl_m, "MATERIAIS", 6)
-
-    # Cabeçalho de colunas
-    row_hdr = tbl_m.add_row()
-    for i, h in enumerate(["ID", "DESCRIÇÃO", "UND", "QTDE", "R$ UNIT", "R$ TOTAL"]):
-        c = row_hdr.cells[i]
-        _cell_bg(c, "D9D9D9")
-        p = c.paragraphs[0]
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        r = p.add_run(h)
-        r.bold = True; r.font.size = Pt(8)
-
-    # Itens
-    lista_itens = itens if itens else [dados[:200]]
-    for idx, item in enumerate(lista_itens, 1):
-        ri = tbl_m.add_row()
-        ri.cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-        ri.cells[0].paragraphs[0].add_run(f"{idx:02d}").font.size = Pt(9)
-        if isinstance(item, dict):
-            ri.cells[1].paragraphs[0].add_run(item["desc"]).font.size = Pt(9)
-            for j, key in [(2, "und"), (3, "qtde"), (4, "unit"), (5, "total")]:
-                ri.cells[j].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                ri.cells[j].paragraphs[0].add_run(str(item[key])).font.size = Pt(9)
-        else:
-            ri.cells[1].paragraphs[0].add_run(str(item).lstrip("- ")).font.size = Pt(9)
-            for j in [2, 3, 4, 5]:
-                ri.cells[j].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                ri.cells[j].paragraphs[0].add_run("—").font.size = Pt(9)
-
-    # Totais — subtotal + desconto (se houver) + total final
-    def _total_row(tbl, label, valor_str, bg="D9D9D9"):
-        r = tbl.add_row()
-        c_label = r.cells[0]
-        for i in range(1, 5):
-            c_label.merge(r.cells[i])
-        _cell_bg(c_label, bg)
-        p = c_label.paragraphs[0]
-        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        run = p.add_run(label)
-        run.bold = True; run.font.size = Pt(9)
-        c_v = r.cells[5]
-        _cell_bg(c_v, bg)
-        p_v = c_v.paragraphs[0]
-        p_v.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        run_v = p_v.add_run(valor_str)
-        run_v.bold = True; run_v.font.size = Pt(9)
-
-    if desconto_v > 0 and subtotal_v > 0:
-        pct = desconto_v / subtotal_v * 100
-        _total_row(tbl_m, "SUBTOTAL:", f"R$ {_fmt_brl(subtotal_v)}", "F2F2F2")
-        _total_row(tbl_m, f"DESCONTO ({pct:.2f}%):", f"-R$ {_fmt_brl(desconto_v)}", "F2F2F2")
-
-    _total_row(tbl_m, "TOTAL DO PEDIDO:", valor)
-
-    # ── PARTE INFERIOR: PRAZO | DADOS ────────────────────────────────────────
-    doc.add_paragraph()
-    tbl_b = doc.add_table(rows=1, cols=2)
-    tbl_b.style = "Table Grid"
-    _set_col_widths(tbl_b, [8.5, 8.5])
-
-    sem_entrega = bool(categoria) and categoria.value in CATEGORIAS_SEM_NFE_OBRIGATORIA
-
-    # — Esquerda: Prazo e Condições —
-    c_prazo = tbl_b.rows[0].cells[0]
-    p = c_prazo.paragraphs[0]
-    titulo_prazo = "CONDIÇÕES DE PAGAMENTO" if sem_entrega else "PRAZO PARA ENTREGA E CONDIÇÕES DE PAGAMENTO"
-    r = p.add_run(titulo_prazo)
-    r.bold = True; r.font.size = Pt(8)
-    _cell_bg(c_prazo, "D9D9D9")
-
-    def _kv_p(cell, label, val):
-        p = cell.add_paragraph()
-        rl = p.add_run(f"{label}: ")
-        rl.bold = True; rl.font.size = Pt(8)
-        p.add_run(str(val or "A PREENCHER")).font.size = Pt(9)
-
-    _kv_p(c_prazo, "CONDIÇÕES DE PAGAMENTO", condicao)
-    _kv_p(c_prazo, "CHAVE PIX", pix)
-    if not sem_entrega:
-        _kv_p(c_prazo, "DATA DE ENTREGA", data_entrega)
-    obs_partes = []
-    prazo_texto = prazo if not sem_entrega and prazo and prazo not in ("A PREENCHER",) and prazo != data_entrega else None
-    if prazo_texto:
-        obs_partes.append(prazo_texto)
-    if obs and obs != prazo_texto:
-        obs_partes.append(obs)
-    if obs_partes:
-        _kv_p(c_prazo, "OBSERVAÇÃO", " | ".join(obs_partes))
-
-    if not sem_entrega:
-        # Nota de foto
-        p_foto = c_prazo.add_paragraph()
-        p_foto.add_run(
-            "FAVOR TIRAR FOTOS DO MATERIAL DESCARREGADO E ENVIAR POR WHATSAPP PARA DENNIS – (42) 99127-1255"
-        ).font.size = Pt(7)
-
-    # — Direita: Dados para Fatura (+ Entrega, quando aplicável) —
-    c_dados = tbl_b.rows[0].cells[1]
-    p_fatura = c_dados.paragraphs[0]
-    r_f = p_fatura.add_run("DADOS PARA FATURA")
-    r_f.bold = True; r_f.font.size = Pt(8)
-    _cell_bg(c_dados, "EBF3F0")
-
-    def _linha(cell, txt, bold=False, size=9):
-        p = cell.add_paragraph()
-        r = p.add_run(txt)
-        r.bold = bold; r.font.size = Pt(size)
-
-    _linha(c_dados, DELTAD["nome"], bold=True, size=9)
-    _linha(c_dados, f"CNPJ: {DELTAD['cnpj']}", size=9)
-    _linha(c_dados, DELTAD["end"], size=8)
-    _linha(c_dados, DELTAD["email"], size=8)
-    if not sem_entrega:
-        _linha(c_dados, "")
-        p_ent = c_dados.add_paragraph()
-        p_ent.add_run("DADOS PARA ENTREGA").bold = True
-        p_ent.runs[0].font.size = Pt(8)
-        _linha(c_dados, endereco or "A PREENCHER", size=9)
+    # NOTE: o DOCX deixou de ser gerado (2026-07-02) — o PDF (via _gerar_html_pc/_html_para_pdf)
+    # é o único documento entregue. Esta função continua responsável por definir o código do
+    # pedido, salvar os itens e registrar o lançamento financeiro.
 
     pasta = _pasta_pfm(ggv)
     pasta.mkdir(parents=True, exist_ok=True)
     prefixo   = "TESTE-" if TEST_MODE else ""
     nome_base = _nome_base_pfm(pfm_codigo, fornecedor, resumo_claude, prefixo)
-    caminho   = pasta / f"{nome_base}.docx"
-    doc.save(caminho)
+    caminho   = pasta / f"{nome_base}.pdf"
 
     if pfm_codigo_override:
         lanc_status, ja_existia = "a_pagar", True
@@ -1756,7 +1609,9 @@ def parse_comprovante(dados_claude: str) -> dict:
     }
 
 def buscar_candidatos_pix(valor_v: float, favorecido: str, cnpj: str) -> list:
-    """Pontua lançamentos A PAGAR e retorna os 3 melhores candidatos."""
+    """Pontua TODOS os lançamentos A PAGAR com saldo em aberto e retorna a lista completa,
+    ordenada por relevância (score, depois proximidade de valor) — não só os 3 melhores.
+    Serve também como visão gerencial do que está pendente, não só como matching de comprovante."""
     cnpj_digits = re.sub(r"\D", "", cnpj) if cnpj and cnpj != "A PREENCHER" else ""
     fav_token   = favorecido.strip().upper().split()[0] if favorecido and favorecido != "A PREENCHER" else ""
 
@@ -1799,17 +1654,20 @@ def buscar_candidatos_pix(valor_v: float, favorecido: str, cnpj: str) -> list:
         elif fav_token and forn_token == fav_token:
             score += 2
 
-        if score > 0:
+        if saldo > 0:
             candidatos.append({
                 "pfm_codigo": pfm_codigo,
                 "ggv":        ggv,
                 "fornecedor": fornecedor,
                 "valor_lanc": valor_lanc,
+                "saldo":      saldo,
                 "score":      score,
             })
 
-    candidatos.sort(key=lambda c: c["score"], reverse=True)
-    return candidatos[:3]
+    # Desempate por proximidade de valor — dentro do mesmo score, o saldo mais perto do valor
+    # pago vem primeiro (em vez de ordem de inserção, que sempre favorecia os pedidos mais antigos)
+    candidatos.sort(key=lambda c: (-c["score"], abs(valor_v - c["saldo"]) if valor_v > 0 else 0))
+    return candidatos
 
 def mostrar_comprovante_candidatos(dados: dict, candidatos: list) -> str:
     """Formata a mensagem de comprovante + candidatos para o Telegram. Sem IO."""
@@ -1833,9 +1691,10 @@ def mostrar_comprovante_candidatos(dados: dict, candidatos: list) -> str:
         linhas.append("Nenhum pedido em aberto corresponde a este pagamento.")
         return "\n".join(linhas)
 
-    linhas.append("Qual pedido este pagamento quita?\n")
+    total_pendente = sum(c["saldo"] for c in candidatos)
+    linhas.append(f"Qual pedido este pagamento quita? (total pendente: R$ {_fmt_brl(total_pendente)})\n")
     for c in candidatos:
-        valor_fmt = f"R$ {_fmt_brl(c['valor_lanc'])}" if c["valor_lanc"] else "—"
+        valor_fmt = f"R$ {_fmt_brl(c['saldo'])}" if c["saldo"] else "—"
         conf = _conf(c["score"])
         linha = f"🟡 #{c['pfm_codigo']} · {c['fornecedor']} · {valor_fmt}"
         if conf:
@@ -2180,7 +2039,7 @@ def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
     with sqlite3.connect(DB_PATH) as con:
         row = con.execute("SELECT caminho_pfm FROM documentos WHERE id=?", (pedido.doc_id,)).fetchone()
     caminho_pfm = row[0] if row else None
-    pedido.caminho_docx = caminho_pfm if caminho_pfm and Path(caminho_pfm).exists() else None
+    pedido.caminho_pfm = caminho_pfm if caminho_pfm and Path(caminho_pfm).exists() else None
 
     if pedido.doc_id_nfe:
         with sqlite3.connect(DB_PATH) as con:
@@ -2273,7 +2132,7 @@ def mostrar_pedido(pedido: Pedido) -> str:
     arq = []
     if pedido.caminho_orcamento:
         arq.append("📎 Orçamento original")
-    if pedido.caminho_docx:
+    if pedido.caminho_pfm:
         arq.append("📄 Pedido de Compra")
     if pedido.doc_id_comprovante:
         arq.append("💰 Comprov. pagamento")
@@ -2578,59 +2437,6 @@ def _teclado_categoria(doc_id, ggv, cat):
         ])
     return _teclado_selecao_categorias(doc_id, ggv)
 
-def _parse_nfe(corpo: str) -> dict:
-    """Extrai campos da NF-e do texto retornado pelo Claude."""
-    valor_str = _campo(corpo, "Valor total")
-    try:
-        valor_v = float(valor_str.replace("R$", "").replace(".", "").replace(",", ".").strip())
-    except Exception:
-        valor_v = None
-    return {
-        "numero":    _campo(corpo, "Número da NF"),
-        "cnpj":      _campo(corpo, "CNPJ/CPF do emitente"),
-        "emitente":  _campo(corpo, "Nome do emitente"),
-        "valor_fmt": valor_str,
-        "valor_v":   valor_v,
-        "data":      _campo(corpo, "Data de emissão"),
-        "descricao": _campo(corpo, "Descrição do serviço/produto"),
-    }
-
-def _mostrar_nfe(dados: dict, candidatos: list) -> str:
-    linhas = ["NF-e identificada.\n"]
-    if dados["emitente"] != "A PREENCHER":
-        linhas.append(f"{dados['emitente']} — {dados['valor_fmt']}")
-    else:
-        linhas.append(dados["valor_fmt"])
-    if dados["numero"]   != "A PREENCHER": linhas.append(f"NF {dados['numero']}")
-    if dados["data"]     != "A PREENCHER": linhas.append(dados["data"])
-    if dados["descricao"] != "A PREENCHER": linhas.append(dados["descricao"])
-    linhas.append("")
-    if not candidatos:
-        linhas.append("Nenhum pedido pago sem NF-e encontrado.")
-        return "\n".join(linhas)
-    fortes = [c for c in candidatos if c["score"] > 0]
-    if fortes:
-        linhas.append("A qual pedido vincular esta NF-e?\n")
-        for c in fortes:
-            valor_fmt = f"R$ {_fmt_brl(c['valor_lanc'])}" if c["valor_lanc"] else "—"
-            linhas.append(f"🟢 #{c['pfm_codigo']} · {c['fornecedor']} · {valor_fmt}")
-    else:
-        linhas.append("Escolha o pedido manualmente:\n")
-        for c in candidatos:
-            valor_fmt = f"R$ {_fmt_brl(c['valor_lanc'])}" if c["valor_lanc"] else "—"
-            linhas.append(f"🟢 #{c['pfm_codigo']} · {c['fornecedor']} · {valor_fmt}")
-    return "\n".join(linhas)
-
-def _teclado_candidatos_nfe(doc_id: int, candidatos: list):
-    botoes = []
-    for c in candidatos:
-        botoes.append([InlineKeyboardButton(
-            f"#{c['pfm_codigo']}",
-            callback_data=f"nfe_confirmar:{doc_id}:{c['pfm_codigo']}"
-        )])
-    botoes.append([InlineKeyboardButton("Nenhum destes", callback_data="nfe_cancelar")])
-    return InlineKeyboardMarkup(botoes)
-
 async def _executar_gerar_pfm(query, ctx, doc_id, ggv, categoria):
     await query.edit_message_text("Gerando Pedido de Compra...")
     caminho, codigo, fornecedor, valor_v, lanc_status, ja_existia = gerar_pfm(doc_id, categoria)
@@ -2667,10 +2473,8 @@ async def _executar_revisao_pfm(query, ctx, doc_id, pfm_codigo_base):
     rev_codigo = f"{pfm_codigo_base}-R{rev_num:02d}"
     await query.edit_message_text(f"Gerando revisão {rev_codigo}...")
     caminho_rev, *_ = gerar_pfm(doc_id, pfm_codigo_override=rev_codigo)
-    # Sobrescreve o DOCX principal para manter OneDrive sempre atualizado
     nome_principal    = caminho_rev.name.replace(rev_codigo, pfm_codigo_base, 1)
     caminho_principal = caminho_rev.parent / nome_principal
-    shutil.copy2(caminho_rev, caminho_principal)
     atualizar(doc_id, caminho_pfm=str(caminho_principal))
     html      = _gerar_html_pc(doc_id)
     pdf_bytes = await _html_para_pdf(html)
@@ -3185,6 +2989,1046 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ctx.user_data["aguardando"] = None
             await update.message.reply_text("Contexto perdido. Envie o código da obra novamente.")
 
+async def _cb_ok(query, ctx, partes):
+    _, doc_id, tipo, ggv = partes
+    atualizar(int(doc_id), status="confirmado")
+    if tipo == "orcamento":
+        ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": None})
+        texto, markup = _resumo_gerar(int(doc_id))
+        await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
+    elif tipo == "comprovante_pix":
+        dados_claude = _dados_doc(int(doc_id))
+        dados        = parse_comprovante(dados_claude)
+        candidatos   = buscar_candidatos_pix(dados["valor_v"], dados["favorecido"], dados["cnpj"])
+        await query.edit_message_text(mostrar_comprovante_candidatos(dados, candidatos))
+    else:
+        emoji, label = TIPOS.get(tipo, ("📄", tipo))
+        await query.edit_message_text(f"Confirmado: {label}")
+
+
+async def _cb_cancelar(query, ctx, partes):
+    doc_id_cancelar = int(partes[1])
+    if _descartar_documento(doc_id_cancelar):
+        await query.edit_message_text("Cancelado. Pode reenviar o arquivo se precisar.")
+    else:
+        # Mensagem antiga de um documento que já virou pedido — abre o cockpit direto,
+        # sem etapa intermediária
+        with sqlite3.connect(DB_PATH) as con:
+            row = con.execute(
+                "SELECT ggv, pfm_numero FROM documentos WHERE id=?", (doc_id_cancelar,)
+            ).fetchone()
+        pfm_codigo_atual = f"{row[0]}-{row[1]:03d}" if row and row[1] else None
+        pedido = buscar_pedido(pfm_codigo_atual) if pfm_codigo_atual else None
+        if pedido:
+            preparar_visualizacao_pedido(pedido)
+            await query.edit_message_text(
+                mostrar_pedido(pedido),
+                reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo_atual, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status, pedido.categoria, pedido.qtd_parcelas)
+            )
+        else:
+            await query.answer("Esse documento já virou um pedido — não dá mais pra cancelar por aqui.", show_alert=True)
+
+
+async def _cb_sel_tipo(query, ctx, partes):
+    _, doc_id, tipo, ggv = partes
+    botoes = [[InlineKeyboardButton(f"{e} {l}", callback_data=f"set_tipo:{doc_id}:{t}:{ggv}")]
+              for t, (e, l) in TIPOS.items()]
+    await query.edit_message_reply_markup(InlineKeyboardMarkup(botoes))
+
+
+async def _cb_set_tipo(query, ctx, partes):
+    _, doc_id, novo_tipo, ggv = partes
+    atualizar(int(doc_id), tipo=novo_tipo)
+    with sqlite3.connect(DB_PATH) as con:
+        status = con.execute("SELECT status FROM documentos WHERE id=?", (int(doc_id),)).fetchone()[0]
+    if status == "confirmado":
+        texto, markup = _resumo_gerar(int(doc_id))
+        await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
+    else:
+        texto, markup = _resumo_gerar(int(doc_id))
+        await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
+
+
+async def _cb_sel_tipo_inicial(query, ctx, partes):
+    _, doc_id, tipo = partes
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute("SELECT caminho FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
+    if not row:
+        await query.edit_message_text("Documento não encontrado.")
+        return
+    caminho_doc = row[0]
+
+    if tipo == "foto_entrega":
+        atualizar(int(doc_id), tipo=tipo)
+        pedidos = buscar_pedidos_sem_entrega()
+        if not pedidos:
+            await query.edit_message_text("Nenhum pedido sem entrega registrada.")
+            return
+        ctx.user_data["entrega_doc_id_foto"] = int(doc_id)
+        await query.edit_message_text(
+            _mostrar_pedidos_entrega(pedidos),
+            reply_markup=_teclado_pedidos_entrega(pedidos)
+        )
+        return
+
+    mime_inf = "application/pdf" if caminho_doc.lower().endswith(".pdf") else "image/jpeg"
+    tipo_conteudo = "document" if mime_inf == "application/pdf" else "image"
+    conteudo = Path(caminho_doc).read_bytes()
+    dados_b64 = base64.standard_b64encode(conteudo).decode()
+    await query.edit_message_text("Analisando...")
+    resposta = claude.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=4096,
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": tipo_conteudo, "source": {"type": "base64", "media_type": mime_inf, "data": dados_b64}},
+                {"type": "text", "text": PROMPT}
+            ]
+        }]
+    )
+    _, ggv, corpo = parse_resposta(resposta.content[0].text)
+    atualizar(int(doc_id), tipo=tipo, ggv=ggv, dados_claude=corpo)
+    if tipo == "orcamento":
+        _autopreencher_endereco(int(doc_id), ggv)
+    emoji, label_tipo = TIPOS.get(tipo, ("📄", tipo))
+    label_ggv = ggv if ggv != "nao_identificado" else "Obra não identificada"
+    if tipo == "comprovante_pix":
+        dados = parse_comprovante(corpo)
+        ident = dados["id_transacao"] if dados["id_transacao"] != "A PREENCHER" else None
+        ja_pago = None
+        if ident and not TEST_MODE:
+            with sqlite3.connect(DB_PATH) as con:
+                ja_pago = con.execute(
+                    "SELECT pfm_codigo FROM lancamentos "
+                    "WHERE identificador_comprovante=? AND status='pago' LIMIT 1",
+                    (ident,)
+                ).fetchone()
+        if ja_pago:
+            await query.edit_message_text(
+                f"Comprovante já registrado.\n\n"
+                f"Pedido #{ja_pago[0]} — 🟢 Pago\n\n"
+                "Cada comprovante pode ser usado apenas uma vez."
+            )
+        else:
+            candidatos = buscar_candidatos_pix(dados["valor_v"], dados["favorecido"], dados["cnpj"])
+            texto_resultado = mostrar_comprovante_candidatos(dados, candidatos)
+            if not candidatos:
+                _descartar_documento(int(doc_id))
+                texto_resultado += "\n\nArquivo descartado — pode reenviar depois de corrigir o pedido."
+                await query.edit_message_text(texto_resultado)
+            else:
+                await query.edit_message_text(
+                    texto_resultado,
+                    reply_markup=teclado_candidatos_pix(int(doc_id), candidatos)
+                )
+    elif tipo == "nota_fiscal":
+        dados_nfe = parse_nfe(corpo)
+        candidatos = buscar_candidatos_nfe(dados_nfe["cnpj"], dados_nfe["valor_v"], DB_PATH)
+        await query.edit_message_text(
+            mostrar_nfe(dados_nfe, candidatos),
+            reply_markup=teclado_candidatos_nfe(int(doc_id), candidatos)
+        )
+    elif tipo == "orcamento":
+        texto, markup = _resumo_gerar(int(doc_id))
+        await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
+    else:
+        await query.edit_message_text(
+            f"{label_tipo}\n\n{corpo}\n\nConfirmar?",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Confirmar", callback_data=f"ok:{doc_id}:{tipo}:{ggv}"),
+                InlineKeyboardButton("← Voltar",    callback_data=f"cancelar:{doc_id}"),
+            ]])
+        )
+
+
+async def _cb_pix_confirmar(query, ctx, partes):
+    _, doc_id_comp, pfm_codigo = partes
+    with sqlite3.connect(DB_PATH) as con:
+        comp = con.execute(
+            "SELECT dados_claude FROM documentos WHERE id=?", (int(doc_id_comp),)
+        ).fetchone()
+        lanc = con.execute(
+            "SELECT fornecedor, valor, status FROM lancamentos WHERE pfm_codigo=?",
+            (pfm_codigo,)
+        ).fetchone()
+    if not comp or not lanc:
+        await query.edit_message_text("Dados não encontrados.")
+        return
+    dados_comp   = parse_comprovante(comp[0])
+    forn, valor_lanc, status_lanc = lanc
+    status_label = {"a_pagar": "🟡 Aguardando pagamento", "pago": "🟢 Pago"}.get(status_lanc, status_lanc)
+    valor_lanc_fmt = f"R$ {_fmt_brl(valor_lanc)}" if valor_lanc else "—"
+    texto = (
+        f"Confirmar pagamento?\n\n"
+        f"Comprovante:  R$ {dados_comp['valor_fmt']}  {dados_comp['data']}\n"
+        f"Pedido:       #{pfm_codigo} — {forn}\n"
+        f"Valor:        {valor_lanc_fmt}\n"
+        f"Status:       {status_label}"
+    )
+    await query.edit_message_text(texto, reply_markup=InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Confirmar pagamento",
+                             callback_data=f"pix_pagar:{doc_id_comp}:{pfm_codigo}")],
+        [InlineKeyboardButton("↩️ Voltar",
+                             callback_data="pix_cancelar")],
+    ]))
+
+
+async def _cb_pix_pagar(query, ctx, partes):
+    _, doc_id_comp, pfm_codigo = partes
+    with sqlite3.connect(DB_PATH) as con:
+        comp = con.execute(
+            "SELECT dados_claude, caminho FROM documentos WHERE id=?", (int(doc_id_comp),)
+        ).fetchone()
+        lanc = con.execute(
+            "SELECT valor, categoria, doc_id FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)
+        ).fetchone()
+    if not comp or not lanc:
+        await query.edit_message_text("Dados não encontrados.")
+        return
+    dados_comp = parse_comprovante(comp[0])
+    caminho_comp = comp[1]
+    valor_total, categoria_lanc, doc_id_orcamento = lanc
+    ident_comp = dados_comp["id_transacao"] if dados_comp["id_transacao"] != "A PREENCHER" else None
+    ja_usado = None
+    if ident_comp and not TEST_MODE:
+        with sqlite3.connect(DB_PATH) as con:
+            ja_usado = con.execute(
+                "SELECT pfm_codigo FROM parcelas_pagamento WHERE identificador_comprovante=? LIMIT 1",
+                (ident_comp,)
+            ).fetchone()
+    if ja_usado:
+        await query.edit_message_text(
+            f"Comprovante já registrado no Pedido #{ja_usado[0]}.\n"
+            "Cada comprovante pode ser usado apenas uma vez."
+        )
+        return
+    _MESES = {"janeiro":"01","fevereiro":"02","março":"03","abril":"04",
+              "maio":"05","junho":"06","julho":"07","agosto":"08",
+              "setembro":"09","outubro":"10","novembro":"11","dezembro":"12"}
+    _data_raw = dados_comp["data"] if dados_comp["data"] != "A PREENCHER" \
+                else datetime.now().strftime("%d/%m/%Y")
+    data_pgto = _data_raw
+    for nome, num in _MESES.items():
+        if nome in _data_raw.lower():
+            data_pgto = re.sub(nome, num, _data_raw, flags=re.IGNORECASE)
+            break
+
+    valor_parcela = dados_comp["valor_v"] or 0.0
+    parcela_id = _registrar_parcela(pfm_codigo, valor_parcela, data_pgto, int(doc_id_comp), ident_comp)
+    _arquivar_doc_financeiro(pfm_codigo, f"comprovante-parcela{parcela_id}", caminho_comp, data_pgto)
+
+    total_pago = _total_pago(pfm_codigo)
+    quitado = valor_total and total_pago >= valor_total - 0.01
+    with sqlite3.connect(DB_PATH) as con:
+        if quitado:
+            con.execute(
+                "UPDATE lancamentos SET status='pago', valor_pago=?, data_pagamento=? WHERE pfm_codigo=?",
+                (total_pago, data_pgto, pfm_codigo)
+            )
+        else:
+            con.execute(
+                "UPDATE lancamentos SET valor_pago=? WHERE pfm_codigo=?",
+                (total_pago, pfm_codigo)
+            )
+
+    if quitado and categoria_lanc in CATEGORIAS_SEM_NFE_OBRIGATORIA:
+        # Taxa/imposto/serviço público: a fatura já enviada é a "terceira via" — não há NF-e separada
+        with sqlite3.connect(DB_PATH) as con:
+            row_fatura = con.execute("SELECT caminho FROM documentos WHERE id=?", (doc_id_orcamento,)).fetchone()
+        _arquivar_doc_financeiro(pfm_codigo, "fatura", row_fatura[0] if row_fatura else None, data_pgto)
+
+    valor_parcela_fmt = f"R$ {_fmt_brl(valor_parcela)}"
+    botoes = []
+    if categoria_lanc not in CATEGORIAS_SEM_NFE_OBRIGATORIA:
+        botoes.append([InlineKeyboardButton(
+            "📄 Gerar recibo desta parcela", callback_data=f"recibo_parcela_iniciar:{parcela_id}"
+        )])
+    if quitado:
+        texto = f"🟢 Pedido #{pfm_codigo} — quitado. Parcela: {valor_parcela_fmt}."
+        if categoria_lanc not in CATEGORIAS_SEM_NFE_OBRIGATORIA:
+            texto += "\n\nEnvie a NF-e para fechar este pedido (se aplicável)."
+    else:
+        faltam = valor_total - total_pago
+        texto = (
+            f"🟡 Pedido #{pfm_codigo} — parcela registrada: {valor_parcela_fmt}.\n"
+            f"Total pago: R$ {_fmt_brl(total_pago)} de R$ {_fmt_brl(valor_total)} — "
+            f"faltam R$ {_fmt_brl(faltam)}."
+        )
+    await query.edit_message_text(texto, reply_markup=InlineKeyboardMarkup(botoes) if botoes else None)
+
+
+async def _cb_pix_cancelar(query, ctx, partes):
+    await query.edit_message_text("Cancelado.")
+
+
+async def _cb_sel_ggv(query, ctx, partes):
+    _, doc_id, tipo, ggv = partes
+    botoes = [[InlineKeyboardButton(g, callback_data=f"set_ggv:{doc_id}:{tipo}:{g}")] for g in GGVS]
+    botoes.append([InlineKeyboardButton("❓ Não identificado",
+                                        callback_data=f"set_ggv:{doc_id}:{tipo}:nao_identificado")])
+    botoes.append([InlineKeyboardButton("◀️ Voltar",
+                                        callback_data=f"voltar_edit:{doc_id}:{tipo}:{ggv}")])
+    await query.edit_message_reply_markup(InlineKeyboardMarkup(botoes))
+
+
+async def _cb_set_ggv(query, ctx, partes):
+    _, doc_id, tipo, novo_ggv = partes
+    atualizar(int(doc_id), ggv=novo_ggv)
+    if tipo == "orcamento":
+        _autopreencher_endereco(int(doc_id), novo_ggv)
+    with sqlite3.connect(DB_PATH) as con:
+        status = con.execute("SELECT status FROM documentos WHERE id=?", (int(doc_id),)).fetchone()[0]
+    if status == "confirmado":
+        texto, markup = _resumo_gerar(int(doc_id))
+        await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
+    else:
+        texto, markup = _resumo_gerar(int(doc_id))
+        await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
+
+
+async def _cb_pgto(query, ctx, partes):
+    _, doc_id, ggv, escolha = partes
+    if escolha == "outro":
+        ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": "condicao_pgto"})
+        await query.edit_message_text("Condição de pagamento:")
+        return
+    label_pgto = CONDICOES.get(escolha, escolha)
+    atualizar(int(doc_id), condicao_pgto=label_pgto)
+    ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": None})
+    texto, markup = _resumo_gerar(int(doc_id))
+    await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
+
+
+async def _cb_end(query, ctx, partes):
+    _, doc_id, ggv, escolha = partes
+    if escolha == "outro":
+        ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": "endereco_entrega"})
+        await query.edit_message_text("Endereço de entrega:")
+        return
+    if escolha.startswith("obra_"):
+        ggv_key = escolha[5:]
+        endereco = buscar_obra(ggv_key).get("endereco_entrega") or ENDERECOS.get(escolha, escolha)
+    else:
+        endereco = ENDERECOS.get(escolha, escolha)
+    atualizar(int(doc_id), endereco_entrega=endereco)
+    texto, markup = _resumo_gerar(int(doc_id))
+    await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
+
+
+async def _cb_sel_edit(query, ctx, partes):
+    _, doc_id, tipo, ggv = partes
+    botoes = [
+        [InlineKeyboardButton("👤 Fornecedor",    callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:fornecedor")],
+        [InlineKeyboardButton("🔢 CNPJ/CPF",      callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:cnpj")],
+        [InlineKeyboardButton("💲 Valor total",   callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:valor")],
+        [InlineKeyboardButton("🔑 Chave PIX",     callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:pix")],
+        [InlineKeyboardButton("📦 Itens",         callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:itens")],
+        [InlineKeyboardButton("🏷️ Desconto",     callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:desconto")],
+        [InlineKeyboardButton("💰 Condição pgto", callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:pgto")],
+        [InlineKeyboardButton("📅 Data entrega",  callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:data")],
+        [InlineKeyboardButton("📍 Endereço",      callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:endereco")],
+        [InlineKeyboardButton("📅 Vencimento pgto", callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:vencimento")],
+        [InlineKeyboardButton("👷 Encarregado",     callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:encarregado")],
+        [InlineKeyboardButton("📞 Contato vendedor", callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:contato")],
+        [InlineKeyboardButton("📝 Observações",     callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:obs")],
+        [InlineKeyboardButton("🏗 GGV",             callback_data=f"sel_ggv:{doc_id}:{tipo}:{ggv}")],
+        [InlineKeyboardButton("📋 Tipo doc.",      callback_data=f"sel_tipo:{doc_id}:{tipo}:{ggv}")],
+        [InlineKeyboardButton("◀️ Voltar",         callback_data=f"voltar_edit:{doc_id}:{tipo}:{ggv}")],
+    ]
+    await query.edit_message_reply_markup(InlineKeyboardMarkup(botoes))
+
+
+async def _cb_edit_campo(query, ctx, partes):
+    _, doc_id, tipo, ggv, campo = partes
+    ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "tipo": tipo})
+
+    if campo == "pgto":
+        ctx.user_data["aguardando"] = None
+        await query.edit_message_text(
+            "Condição de pagamento:",
+            reply_markup=teclado_condicao(doc_id, tipo, ggv)
+        )
+    elif campo == "endereco":
+        ctx.user_data["aguardando"] = None
+        await query.edit_message_text(
+            "Endereço de entrega:",
+            reply_markup=teclado_endereco(doc_id, tipo, ggv)
+        )
+    elif campo == "vencimento":
+        ctx.user_data["aguardando"] = "vencimento_pgto"
+        with sqlite3.connect(DB_PATH) as con:
+            row = con.execute("SELECT vencimento_pgto FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
+        atual = row[0] if row and row[0] else "Não informado"
+        await query.edit_message_text(
+            f"Atual: {atual}\n\nNovo vencimento (ex: Parcela única até 15/07/2026):"
+        )
+    elif campo == "encarregado":
+        ctx.user_data["aguardando"] = "edit_encarregado"
+        with sqlite3.connect(DB_PATH) as con:
+            row = con.execute("SELECT encarregado FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
+        atual = (row[0] if row and row[0] else None) or buscar_obra(ggv).get("encarregado_nome", "Não definido")
+        await query.edit_message_text(
+            f"Atual: {atual}\n\nNovo encarregado:"
+        )
+    elif campo == "contato":
+        ctx.user_data["aguardando"] = "edit_contato"
+        with sqlite3.connect(DB_PATH) as con:
+            row = con.execute("SELECT dados_claude FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
+        dados_atuais = row[0] if row else ""
+        nome_v = _campo(dados_atuais, "Vendedor")
+        fone_v = _campo(dados_atuais, "Telefone do vendedor")
+        if nome_v == "A PREENCHER": nome_v = "Não informado"
+        if fone_v == "A PREENCHER": fone_v = ""
+        atual = f"{nome_v}  {fone_v}".strip() if fone_v else nome_v
+        await query.edit_message_text(
+            f"Atual: {atual}\n\nNome e telefone do vendedor (ex: Flávio 42 99912-7781):"
+        )
+    elif campo == "itens":
+        ctx.user_data["aguardando"] = "edit_itens"
+        with sqlite3.connect(DB_PATH) as con:
+            row = con.execute("SELECT dados_claude FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
+        bloco = _bloco_itens(row[0] if row else "")
+        await query.edit_message_text(
+            f"Itens atuais:\n\n{bloco}\n\n"
+            "Novos itens:\n"
+            "Use o formato para cálculo automático:\n"
+            "1. Descrição (qtde UN) — R$ valor_total\n"
+            "Ex: 1. Cimento 50kg (10 sc) — R$ 350,00"
+        )
+    else:
+        aguardando_campo = "data_entrega" if campo == "data" else f"edit_{campo}"
+        ctx.user_data["aguardando"] = aguardando_campo
+        labels = {
+            "fornecedor": "nome do fornecedor",
+            "cnpj":       "CNPJ ou CPF",
+            "valor":      "valor total (ex: R$ 1.500,00)",
+            "pix":        "chave PIX",
+            "desconto":   "valor do desconto em R$ (ex: 80 ou 80,00) — ou 0 para remover",
+            "data":       "data de entrega (ex: 01/08/2026, 7 dias úteis, A combinar)",
+            "obs":        "observação",
+        }
+        campo_doc = {
+            "fornecedor": "Fornecedor",
+            "cnpj":       "CNPJ/CPF",
+            "valor":      "Valor total",
+            "pix":        "Chave PIX",
+        }
+        with sqlite3.connect(DB_PATH) as con:
+            row = con.execute(
+                "SELECT dados_claude, desconto_rs, data_entrega FROM documentos WHERE id=?", (int(doc_id),)
+            ).fetchone()
+        dados_atuais, desconto_atual, data_atual = row if row else ("", None, None)
+        if campo == "desconto":
+            atual = f"R$ {_fmt_brl(_parse_brl(re.sub(r'[^\d,.]', '', str(desconto_atual))))}" if desconto_atual else "Não informado"
+        elif campo == "data":
+            atual = data_atual or "Não informada"
+        elif campo == "obs":
+            atual = _obs(dados_atuais) or "Não informada"
+        else:
+            atual = _campo(dados_atuais, campo_doc.get(campo, campo))
+        await query.edit_message_text(
+            f"Atual: {atual}\n\nNovo valor:"
+        )
+
+
+async def _cb_voltar_edit(query, ctx, partes):
+    _, doc_id, tipo, ggv = partes
+    texto, markup = _resumo_gerar(int(doc_id))
+    await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
+
+
+async def _cb_ver_itens(query, ctx, partes):
+    _, doc_id, tipo, ggv = partes
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute("SELECT dados_claude FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
+    bloco = _bloco_itens(row[0] if row else "")
+    await query.edit_message_text(
+        bloco,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ Voltar ao resumo", callback_data=f"voltar_edit:{doc_id}:{tipo}:{ggv}")]
+        ])
+    )
+
+
+async def _cb_pfm(query, ctx, partes):
+    _, doc_id, ggv = partes
+    pfm_codigo_revisao = ctx.user_data.get("modo_revisao")
+    if pfm_codigo_revisao:
+        await _executar_revisao_pfm(query, ctx, int(doc_id), pfm_codigo_revisao)
+    else:
+        atualizar(int(doc_id), status="confirmado")
+        ramo = _campo(_dados_doc(int(doc_id)), "Ramo de atividade")
+        cat  = sugerir_categoria(ramo)
+        await query.edit_message_text(
+            _tela_categoria(cat, ramo),
+            reply_markup=_teclado_categoria(int(doc_id), ggv, cat)
+        )
+
+
+async def _cb_cat_confirmar(query, ctx, partes):
+    _, doc_id, ggv, cat_val = partes
+    await _executar_gerar_pfm(query, ctx, int(doc_id), ggv, CategoriaLancamento(cat_val))
+
+
+async def _cb_cat_corrigir(query, ctx, partes):
+    _, doc_id, ggv = partes
+    await query.edit_message_text(
+        "Selecione a categoria:",
+        reply_markup=_teclado_selecao_categorias(int(doc_id), ggv)
+    )
+
+
+async def _cb_cat_sel(query, ctx, partes):
+    _, doc_id, ggv, cat_val = partes
+    await _executar_gerar_pfm(query, ctx, int(doc_id), ggv, CategoriaLancamento(cat_val))
+
+
+async def _cb_pfm_revisar(query, ctx, partes):
+    _, doc_id, pfm_codigo = partes
+    ctx.user_data["doc_id"]       = int(doc_id)
+    ctx.user_data["tipo"]         = "orcamento"
+    ctx.user_data["modo_revisao"] = pfm_codigo
+    texto_resumo, markup = _resumo_gerar(int(doc_id))
+    try:
+        await query.edit_message_text(texto_resumo, reply_markup=markup, parse_mode="HTML")
+    except Exception:
+        await query.answer("Tela de revisão já está aberta.")
+
+
+async def _cb_pfm_ver(query, ctx, partes):
+    _, doc_id, pfm_codigo = partes
+    await query.answer()
+    html      = _gerar_html_pc(int(doc_id))
+    pdf_bytes = await _html_para_pdf(html)
+    await ctx.bot.send_document(
+        chat_id=DONO_ID,
+        document=pdf_bytes,
+        filename=f"{pfm_codigo}.pdf",
+        caption=f"📄 {pfm_codigo}"
+    )
+
+
+async def _cb_pfm_orc(query, ctx, partes):
+    _, doc_id, pfm_codigo = partes
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute("SELECT caminho FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
+    caminho = row[0] if row else None
+    if not caminho or not Path(caminho).exists():
+        await query.answer("Orçamento original não encontrado.", show_alert=True)
+        return
+    path = Path(caminho)
+    await query.answer()
+    dados = path.read_bytes()
+    ext = path.suffix.lower()
+    if ext in (".jpg", ".jpeg", ".png", ".webp"):
+        await ctx.bot.send_photo(chat_id=query.message.chat_id, photo=dados)
+    else:
+        await ctx.bot.send_document(chat_id=query.message.chat_id, document=dados, filename=path.name)
+
+
+async def _cb_pfm_nfe(query, ctx, partes):
+    _, doc_id_arquivo, pfm_codigo = partes
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute("SELECT caminho FROM documentos WHERE id=?", (int(doc_id_arquivo),)).fetchone()
+    caminho = row[0] if row else None
+    label = {"pfm_nfe": "NF-e", "pfm_comp": "comprovante", "pfm_recibo": "recibo"}.get(acao, acao)
+    if not caminho or not Path(caminho).exists():
+        await query.answer(f"Arquivo de {label} não encontrado.", show_alert=True)
+        return
+    path = Path(caminho)
+    await query.answer()
+    dados = path.read_bytes()
+    ext = path.suffix.lower()
+    if ext in (".jpg", ".jpeg", ".png", ".webp"):
+        await ctx.bot.send_photo(chat_id=query.message.chat_id, photo=dados)
+    else:
+        await ctx.bot.send_document(chat_id=query.message.chat_id, document=dados, filename=path.name)
+
+
+async def _cb_pfm_entregue(query, ctx, partes):
+    _, doc_id, pfm_codigo = partes
+    ctx.user_data["entrega_pfm_codigo"] = pfm_codigo
+    ctx.user_data["entrega_doc_id_foto"] = None
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute("SELECT fornecedor FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)).fetchone()
+    forn = row[0] if row else pfm_codigo
+    await query.edit_message_text(
+        _texto_obs_entrega(pfm_codigo, forn),
+        reply_markup=_teclado_obs_com_cancelar()
+    )
+
+
+async def _cb_entrega_sel(query, ctx, partes):
+    _, pfm_codigo = partes
+    ctx.user_data["entrega_pfm_codigo"] = pfm_codigo
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute("SELECT fornecedor FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)).fetchone()
+    forn = row[0] if row else pfm_codigo
+    await query.edit_message_text(
+        _texto_obs_entrega(pfm_codigo, forn),
+        reply_markup=_teclado_obs_com_cancelar()
+    )
+
+
+async def _cb_entrega_obs(query, ctx, partes):
+    _, chave = partes
+    OBS_MAP = {
+        "completa":  "Entrega completa",
+        "parcial":   "Entrega parcial — aguardando restante",
+        "avaria":    "Material com avaria",
+        "diferente": "Produto diferente do pedido",
+    }
+    if chave == "outro":
+        ctx.user_data["aguardando"] = "obs_entrega_texto"
+        await query.edit_message_text("Descreva a observação:")
+        return
+    obs = OBS_MAP.get(chave, chave)
+    pfm_codigo = ctx.user_data.pop("entrega_pfm_codigo", None)
+    doc_id_foto = ctx.user_data.pop("entrega_doc_id_foto", None)
+    legenda_foto = ctx.user_data.pop("entrega_legenda_foto", None)
+    if not pfm_codigo:
+        await query.answer("Pedido não encontrado. Tente novamente.", show_alert=True)
+        return
+    _salvar_entrega_db(pfm_codigo, obs)
+    if doc_id_foto:
+        _adicionar_foto_entrega(pfm_codigo, doc_id_foto, legenda_foto)
+    texto, markup = _tela_apos_entrega(pfm_codigo)
+    if texto:
+        await query.edit_message_text(texto, reply_markup=markup)
+    else:
+        await query.edit_message_text("Entrega registrada.")
+
+
+async def _cb_entrega_cancelar(query, ctx, partes):
+    ctx.user_data.pop("entrega_pfm_codigo", None)
+    ctx.user_data.pop("entrega_doc_id_foto", None)
+    ctx.user_data.pop("entrega_legenda_foto", None)
+    await query.edit_message_text(
+        mostrar_boas_vindas(),
+        reply_markup=teclado_boas_vindas()
+    )
+
+
+async def _cb_entrega_foto_primeiro(query, ctx, partes):
+    ctx.user_data["aguardando"] = "foto_entrega_obs"
+    await query.edit_message_text("Envie a foto ou documento da entrega:")
+
+
+async def _cb_entrega_editar(query, ctx, partes):
+    pfm_codigo = partes[1]
+    forn, obs_ent, qtd_fotos = _buscar_estado_entrega(pfm_codigo)
+    await query.edit_message_text(
+        _texto_gerir_entrega(pfm_codigo, forn, obs_ent, qtd_fotos),
+        reply_markup=_teclado_gerir_entrega(pfm_codigo, qtd_fotos)
+    )
+
+
+async def _cb_entrega_mudar_obs(query, ctx, partes):
+    pfm_codigo = partes[1]
+    ctx.user_data["entrega_pfm_codigo"] = pfm_codigo
+    _, obs_atual, _ = _buscar_estado_entrega(pfm_codigo)
+    await query.edit_message_text(
+        f"#{pfm_codigo} — Mudar observação\n\nAtual: {obs_atual or '—'}",
+        reply_markup=_teclado_mudar_obs(pfm_codigo)
+    )
+
+
+async def _cb_entrega_editobs(query, ctx, partes):
+    chave = partes[1]
+    pfm_codigo = ctx.user_data.get("entrega_pfm_codigo")
+    if not pfm_codigo:
+        await query.answer("Sessão expirada. Abra o pedido novamente.", show_alert=True)
+        return
+    OBS_MAP_EDIT = {
+        "completa":  "Entrega completa",
+        "parcial":   "Entrega parcial — aguardando restante",
+        "avaria":    "Material com avaria",
+        "diferente": "Produto diferente do pedido",
+    }
+    if chave == "outro":
+        ctx.user_data["aguardando"] = "edit_obs_entrega_texto"
+        await query.edit_message_text("Descreva a observação:")
+        return
+    obs = OBS_MAP_EDIT.get(chave, chave)
+    _atualizar_obs_entrega(pfm_codigo, obs)
+    forn, obs_ent, qtd_fotos = _buscar_estado_entrega(pfm_codigo)
+    await query.edit_message_text(
+        _texto_gerir_entrega(pfm_codigo, forn, obs_ent, qtd_fotos),
+        reply_markup=_teclado_gerir_entrega(pfm_codigo, qtd_fotos)
+    )
+
+
+async def _cb_entrega_trocar_foto(query, ctx, partes):
+    pfm_codigo = partes[1]
+    ctx.user_data["aguardando"] = "foto_entrega_troca"
+    ctx.user_data["entrega_pfm_codigo"] = pfm_codigo
+    await query.edit_message_text("Envie a foto ou documento da entrega:")
+
+
+async def _cb_entrega_ver_fotos(query, ctx, partes):
+    pfm_codigo = partes[1]
+    fotos = _listar_fotos_entrega(pfm_codigo)
+    if not fotos:
+        await query.answer("Nenhuma foto registrada.", show_alert=True)
+        return
+    botoes = []
+    for foto_id, _doc_id_foto, legenda, caminho in fotos:
+        rotulo = (legenda or "Sem legenda")[:40]
+        icone = _icone_arquivo_entrega(caminho)
+        botoes.append([InlineKeyboardButton(f"{icone} {rotulo}", callback_data=f"entrega_foto_ver:{foto_id}:{pfm_codigo}")])
+    botoes.append([InlineKeyboardButton("← Voltar", callback_data=f"entrega_editar:{pfm_codigo}")])
+    await query.edit_message_text(
+        f"#{pfm_codigo} — Arquivos da entrega ({len(fotos)})",
+        reply_markup=InlineKeyboardMarkup(botoes)
+    )
+
+
+async def _cb_entrega_foto_ver(query, ctx, partes):
+    _, foto_id, pfm_codigo = partes
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT ef.legenda, d.caminho FROM entrega_fotos ef "
+            "JOIN documentos d ON d.id = ef.doc_id WHERE ef.id=?",
+            (int(foto_id),)
+        ).fetchone()
+    if not row or not row[1] or not Path(row[1]).exists():
+        await query.answer("Foto não encontrada.", show_alert=True)
+        return
+    legenda, caminho = row
+    await query.answer()
+    path = Path(caminho)
+    dados = path.read_bytes()
+    ext = path.suffix.lower()
+    if ext in (".jpg", ".jpeg", ".png", ".webp"):
+        await ctx.bot.send_photo(chat_id=query.message.chat_id, photo=dados, caption=legenda or None)
+    else:
+        await ctx.bot.send_document(chat_id=query.message.chat_id, document=dados, filename=path.name, caption=legenda or None)
+
+
+async def _cb_entrega_remover_foto(query, ctx, partes):
+    pfm_codigo = partes[1]
+    fotos = _listar_fotos_entrega(pfm_codigo)
+    if not fotos:
+        await query.answer("Nenhuma foto registrada.", show_alert=True)
+        return
+    botoes = []
+    for foto_id, _doc_id_foto, legenda, _caminho in fotos:
+        rotulo = (legenda or "Sem legenda")[:40]
+        botoes.append([InlineKeyboardButton(f"🗑 {rotulo}", callback_data=f"entrega_foto_apagar:{foto_id}:{pfm_codigo}")])
+    botoes.append([InlineKeyboardButton("← Voltar", callback_data=f"entrega_editar:{pfm_codigo}")])
+    await query.edit_message_text(
+        f"#{pfm_codigo} — Remover qual arquivo?",
+        reply_markup=InlineKeyboardMarkup(botoes)
+    )
+
+
+async def _cb_entrega_foto_apagar(query, ctx, partes):
+    _, foto_id, pfm_codigo = partes
+    _apagar_foto_entrega(int(foto_id))
+    forn, obs_ent, qtd_fotos = _buscar_estado_entrega(pfm_codigo)
+    await query.edit_message_text(
+        _texto_gerir_entrega(pfm_codigo, forn, obs_ent, qtd_fotos),
+        reply_markup=_teclado_gerir_entrega(pfm_codigo, qtd_fotos)
+    )
+
+
+async def _cb_entrega_apagar(query, ctx, partes):
+    pfm_codigo = partes[1]
+    _apagar_entrega_db(pfm_codigo)
+    texto, markup = _tela_apos_entrega(pfm_codigo)
+    if texto:
+        await query.edit_message_text(texto, reply_markup=markup)
+    else:
+        await query.edit_message_text("Entrega apagada.")
+
+
+async def _cb_entrega_voltar(query, ctx, partes):
+    pfm_codigo = partes[1]
+    texto, markup = _tela_apos_entrega(pfm_codigo)
+    if texto:
+        await query.edit_message_text(texto, reply_markup=markup)
+    else:
+        await query.edit_message_text("Pedido não encontrado.")
+
+
+async def _cb_nfe_confirmar(query, ctx, partes):
+    _, doc_id_nfe, pfm_codigo = partes
+    ok = vincular_nfe(pfm_codigo, int(doc_id_nfe), DB_PATH)
+    if ok:
+        with sqlite3.connect(DB_PATH) as con:
+            row_nfe = con.execute(
+                "SELECT caminho, dados_claude FROM documentos WHERE id=?", (int(doc_id_nfe),)
+            ).fetchone()
+        if row_nfe:
+            caminho_nfe, dados_nfe = row_nfe
+            numero_nfe = _campo(dados_nfe, "Número da NF")
+            data_nfe   = _campo(dados_nfe, "Data de emissão")
+            sufixo_nfe = f"NFe {numero_nfe}" if numero_nfe != "A PREENCHER" else "NFe"
+            _arquivar_doc_financeiro(pfm_codigo, sufixo_nfe, caminho_nfe, data_nfe)
+        with sqlite3.connect(DB_PATH) as con:
+            row_lanc = con.execute(
+                "SELECT status, valor FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)
+            ).fetchone()
+        status_lanc, valor_lanc = row_lanc if row_lanc else (None, None)
+        if status_lanc == "pago":
+            texto = f"🟢 #{pfm_codigo} — NF-e vinculada. Ciclo fechado."
+        else:
+            total_pago = _total_pago(pfm_codigo)
+            faltam = (valor_lanc or 0) - total_pago
+            texto = (
+                f"🟡 #{pfm_codigo} — NF-e vinculada. Pagamento em andamento: "
+                f"R$ {_fmt_brl(total_pago)} de R$ {_fmt_brl(valor_lanc or 0)} pago "
+                f"(faltam R$ {_fmt_brl(faltam)}). Ciclo fecha quando o pagamento for concluído."
+            )
+        await query.edit_message_text(texto)
+    else:
+        await query.edit_message_text(
+            f"Não foi possível vincular a NF-e ao Pedido #{pfm_codigo}.\n"
+            "O pedido pode já ter uma NF-e vinculada."
+        )
+
+
+async def _cb_nfe_cancelar(query, ctx, partes):
+    await query.edit_message_text("NF-e não vinculada.")
+
+
+async def _cb_parcelas_ver(query, ctx, partes):
+    pfm_codigo = partes[1]
+    pedido = buscar_pedido(pfm_codigo)
+    if not pedido:
+        await query.answer(f"Pedido {pfm_codigo} não encontrado.", show_alert=True)
+        return
+    await query.edit_message_text(
+        _texto_parcelas(pedido),
+        reply_markup=teclado_parcelas(pfm_codigo)
+    )
+
+
+async def _cb_recibo_parcela_iniciar(query, ctx, partes):
+    parcela_id = int(partes[1])
+    parcela = _buscar_parcela(parcela_id)
+    if not parcela:
+        await query.answer("Parcela não encontrada.", show_alert=True)
+        return
+    pfm_codigo = parcela[1]
+    await query.edit_message_text(
+        f"#{pfm_codigo} — Por que não tem NF-e?",
+        reply_markup=teclado_motivo_recibo(parcela_id, pfm_codigo)
+    )
+
+
+async def _cb_recibo_parcela_motivo(query, ctx, partes):
+    _, parcela_id_str, chave = partes
+    parcela_id = int(parcela_id_str)
+    if chave == "outro":
+        ctx.user_data["aguardando"] = "recibo_motivo_texto"
+        ctx.user_data["recibo_parcela_id"] = parcela_id
+        await query.edit_message_text("Descreva o motivo:")
+        return
+    motivo = _MOTIVOS_RECIBO.get(chave, chave)
+    await query.edit_message_text("Gerando recibo...")
+    await _gerar_recibo(ctx, parcela_id, motivo)
+
+
+async def _cb_recibo_assinado_iniciar(query, ctx, partes):
+    parcela_id = int(partes[1])
+    ctx.user_data["aguardando"] = "recibo_assinado_upload"
+    ctx.user_data["recibo_parcela_id"] = parcela_id
+    await query.edit_message_text("Envie a foto ou PDF do recibo assinado:")
+
+
+async def _cb_obra_pedidos(query, ctx, partes):
+    codigo  = partes[1]
+    pedidos = _pedidos_obra(codigo)
+    await query.edit_message_text(
+        mostrar_lista_pedidos(codigo, pedidos),
+        reply_markup=teclado_lista_pedidos(codigo, pedidos)
+    )
+
+
+async def _cb_pedido_abrir(query, ctx, partes):
+    pfm_codigo = partes[1]
+    pedido = buscar_pedido(pfm_codigo)
+    if pedido:
+        preparar_visualizacao_pedido(pedido)
+        await query.edit_message_text(
+            mostrar_pedido(pedido),
+            reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status, pedido.categoria, pedido.qtd_parcelas)
+        )
+    else:
+        await query.answer(f"Pedido {pfm_codigo} não encontrado.", show_alert=True)
+
+
+async def _cb_pedido_excluir_confirmar(query, ctx, partes):
+    pfm_codigo = partes[1]
+    await query.edit_message_text(
+        f"Excluir #{pfm_codigo}?\n\n"
+        "Apaga o pedido, parcelas, entrega e todos os documentos vinculados na Laura. "
+        "Não apaga arquivos já arquivados no OneDrive. Não pode ser desfeito.",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🗑 Sim, excluir", callback_data=f"pedido_excluir_ok:{pfm_codigo}"),
+            InlineKeyboardButton("← Voltar",       callback_data=f"pedido_abrir:{pfm_codigo}"),
+        ]])
+    )
+
+
+async def _cb_pedido_excluir_ok(query, ctx, partes):
+    pfm_codigo = partes[1]
+    ggv = pfm_codigo.rsplit("-", 1)[0]
+    _excluir_pedido(pfm_codigo)
+    await query.edit_message_text(
+        f"#{pfm_codigo} excluído.",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("◀️ Pedidos", callback_data=f"obra_pedidos:{ggv}")
+        ]])
+    )
+
+
+async def _cb_obra_ver(query, ctx, partes):
+    codigo = partes[1]
+    obra = buscar_obra(codigo)
+    if obra:
+        await query.edit_message_text(
+            mostrar_cockpit_obra(obra),
+            reply_markup=teclado_obra(codigo, _pedidos_obra(codigo))
+        )
+    else:
+        await query.edit_message_text(f"Obra {codigo} não encontrada.")
+
+
+async def _cb_obra_editar(query, ctx, partes):
+    codigo = partes[1]
+    obra = buscar_obra(codigo)
+    if obra:
+        await query.edit_message_text(
+            f"Qual campo deseja editar em {codigo}?",
+            reply_markup=teclado_obra_campos(codigo)
+        )
+    else:
+        await query.edit_message_text(f"Obra {codigo} não encontrada.")
+
+
+async def _cb_obra_campo(query, ctx, partes):
+    _, codigo, campo = partes
+    ctx.user_data["aguardando"]   = f"obra_edit_{campo}"
+    ctx.user_data["obra_codigo"]  = codigo
+    labels = {
+        "descricao":         "Descrição",
+        "endereco_entrega":  "Endereço de entrega",
+        "encarregado_nome":  "Nome do encarregado",
+        "encarregado_fone":  "Telefone do encarregado",
+        "responsavel_nome":  "Nome do responsável",
+        "responsavel_fone":  "Telefone do responsável",
+    }
+    label = labels.get(campo, campo)
+    await query.edit_message_text(f"Novo valor para {label}:")
+
+
+async def _cb_pfm_fechar(query, ctx, partes):
+    await query.edit_message_text("Fechado.")
+
+
+async def _cb_obra_fechar(query, ctx, partes):
+    await query.edit_message_text("Fechado.")
+
+
+async def _cb_obras_fechar(query, ctx, partes):
+    await query.edit_message_text("Fechado.")
+
+
+async def _cb_menu_inicio(query, ctx, partes):
+    await query.edit_message_text(
+        mostrar_boas_vindas(),
+        reply_markup=teclado_boas_vindas()
+    )
+
+
+async def _cb_menu_obras(query, ctx, partes):
+    obras = _listar_obras()
+    await query.edit_message_text(
+        mostrar_lista_obras(obras),
+        reply_markup=teclado_lista_obras(obras)
+    )
+
+
+async def _cb_menu_ajuda(query, ctx, partes):
+    await query.edit_message_text(
+        mostrar_ajuda(),
+        reply_markup=teclado_ajuda(),
+        parse_mode="HTML"
+    )
+
+
+async def _cb_menu_nova_obra(query, ctx, partes):
+    await query.edit_message_text("Código da nova obra (ex: GGV04):")
+    ctx.user_data["aguardando"] = "nova_obra_codigo"
+
+
+_CB_DISPATCH = {
+    "ok": _cb_ok,
+    "cancelar": _cb_cancelar,
+    "sel_tipo": _cb_sel_tipo,
+    "set_tipo": _cb_set_tipo,
+    "sel_tipo_inicial": _cb_sel_tipo_inicial,
+    "pix_confirmar": _cb_pix_confirmar,
+    "pix_pagar": _cb_pix_pagar,
+    "pix_cancelar": _cb_pix_cancelar,
+    "sel_ggv": _cb_sel_ggv,
+    "set_ggv": _cb_set_ggv,
+    "pgto": _cb_pgto,
+    "end": _cb_end,
+    "sel_edit": _cb_sel_edit,
+    "edit_campo": _cb_edit_campo,
+    "voltar_edit": _cb_voltar_edit,
+    "ver_itens": _cb_ver_itens,
+    "pfm": _cb_pfm,
+    "cat_confirmar": _cb_cat_confirmar,
+    "cat_corrigir": _cb_cat_corrigir,
+    "cat_sel": _cb_cat_sel,
+    "pfm_revisar": _cb_pfm_revisar,
+    "pfm_ver": _cb_pfm_ver,
+    "pfm_orc": _cb_pfm_orc,
+    "pfm_nfe": _cb_pfm_nfe,
+    "pfm_comp": _cb_pfm_nfe,
+    "pfm_recibo": _cb_pfm_nfe,
+    "pfm_entregue": _cb_pfm_entregue,
+    "entrega_sel": _cb_entrega_sel,
+    "entrega_obs": _cb_entrega_obs,
+    "entrega_cancelar": _cb_entrega_cancelar,
+    "entrega_foto_primeiro": _cb_entrega_foto_primeiro,
+    "entrega_editar": _cb_entrega_editar,
+    "entrega_mudar_obs": _cb_entrega_mudar_obs,
+    "entrega_editobs": _cb_entrega_editobs,
+    "entrega_trocar_foto": _cb_entrega_trocar_foto,
+    "entrega_ver_fotos": _cb_entrega_ver_fotos,
+    "entrega_foto_ver": _cb_entrega_foto_ver,
+    "entrega_remover_foto": _cb_entrega_remover_foto,
+    "entrega_foto_apagar": _cb_entrega_foto_apagar,
+    "entrega_apagar": _cb_entrega_apagar,
+    "entrega_voltar": _cb_entrega_voltar,
+    "nfe_confirmar": _cb_nfe_confirmar,
+    "nfe_cancelar": _cb_nfe_cancelar,
+    "parcelas_ver": _cb_parcelas_ver,
+    "recibo_parcela_iniciar": _cb_recibo_parcela_iniciar,
+    "recibo_parcela_motivo": _cb_recibo_parcela_motivo,
+    "recibo_assinado_iniciar": _cb_recibo_assinado_iniciar,
+    "obra_pedidos": _cb_obra_pedidos,
+    "pedido_abrir": _cb_pedido_abrir,
+    "pedido_excluir_confirmar": _cb_pedido_excluir_confirmar,
+    "pedido_excluir_ok": _cb_pedido_excluir_ok,
+    "obra_ver": _cb_obra_ver,
+    "obra_editar": _cb_obra_editar,
+    "obra_campo": _cb_obra_campo,
+    "pfm_fechar": _cb_pfm_fechar,
+    "obra_fechar": _cb_obra_fechar,
+    "obras_fechar": _cb_obras_fechar,
+    "menu_inicio": _cb_menu_inicio,
+    "menu_obras": _cb_menu_obras,
+    "menu_ajuda": _cb_menu_ajuda,
+    "menu_nova_obra": _cb_menu_nova_obra,
+}
+
 async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     partes = query.data.split(":")
@@ -3204,910 +4048,9 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return  # callback expirado (bot reiniciado) — ignora silenciosamente
 
     try:
-        if acao == "ok":
-            _, doc_id, tipo, ggv = partes
-            atualizar(int(doc_id), status="confirmado")
-            if tipo == "orcamento":
-                ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": None})
-                texto, markup = _resumo_gerar(int(doc_id))
-                await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
-            elif tipo == "comprovante_pix":
-                dados_claude = _dados_doc(int(doc_id))
-                dados        = parse_comprovante(dados_claude)
-                candidatos   = buscar_candidatos_pix(dados["valor_v"], dados["favorecido"], dados["cnpj"])
-                await query.edit_message_text(mostrar_comprovante_candidatos(dados, candidatos))
-            else:
-                emoji, label = TIPOS.get(tipo, ("📄", tipo))
-                await query.edit_message_text(f"Confirmado: {label}")
-
-        elif acao == "cancelar":
-            doc_id_cancelar = int(partes[1])
-            if _descartar_documento(doc_id_cancelar):
-                await query.edit_message_text("Cancelado. Pode reenviar o arquivo se precisar.")
-            else:
-                # Mensagem antiga de um documento que já virou pedido — abre o cockpit direto,
-                # sem etapa intermediária
-                with sqlite3.connect(DB_PATH) as con:
-                    row = con.execute(
-                        "SELECT ggv, pfm_numero FROM documentos WHERE id=?", (doc_id_cancelar,)
-                    ).fetchone()
-                pfm_codigo_atual = f"{row[0]}-{row[1]:03d}" if row and row[1] else None
-                pedido = buscar_pedido(pfm_codigo_atual) if pfm_codigo_atual else None
-                if pedido:
-                    preparar_visualizacao_pedido(pedido)
-                    await query.edit_message_text(
-                        mostrar_pedido(pedido),
-                        reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo_atual, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status, pedido.categoria, pedido.qtd_parcelas)
-                    )
-                else:
-                    await query.answer("Esse documento já virou um pedido — não dá mais pra cancelar por aqui.", show_alert=True)
-
-        elif acao == "sel_tipo":
-            _, doc_id, tipo, ggv = partes
-            botoes = [[InlineKeyboardButton(f"{e} {l}", callback_data=f"set_tipo:{doc_id}:{t}:{ggv}")]
-                      for t, (e, l) in TIPOS.items()]
-            await query.edit_message_reply_markup(InlineKeyboardMarkup(botoes))
-
-        elif acao == "set_tipo":
-            _, doc_id, novo_tipo, ggv = partes
-            atualizar(int(doc_id), tipo=novo_tipo)
-            with sqlite3.connect(DB_PATH) as con:
-                status = con.execute("SELECT status FROM documentos WHERE id=?", (int(doc_id),)).fetchone()[0]
-            if status == "confirmado":
-                texto, markup = _resumo_gerar(int(doc_id))
-                await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
-            else:
-                texto, markup = _resumo_gerar(int(doc_id))
-                await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
-
-        elif acao == "sel_tipo_inicial":
-            _, doc_id, tipo = partes
-            with sqlite3.connect(DB_PATH) as con:
-                row = con.execute("SELECT caminho FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
-            if not row:
-                await query.edit_message_text("Documento não encontrado.")
-                return
-            caminho_doc = row[0]
-
-            if tipo == "foto_entrega":
-                atualizar(int(doc_id), tipo=tipo)
-                pedidos = buscar_pedidos_sem_entrega()
-                if not pedidos:
-                    await query.edit_message_text("Nenhum pedido sem entrega registrada.")
-                    return
-                ctx.user_data["entrega_doc_id_foto"] = int(doc_id)
-                await query.edit_message_text(
-                    _mostrar_pedidos_entrega(pedidos),
-                    reply_markup=_teclado_pedidos_entrega(pedidos)
-                )
-                return
-
-            mime_inf = "application/pdf" if caminho_doc.lower().endswith(".pdf") else "image/jpeg"
-            tipo_conteudo = "document" if mime_inf == "application/pdf" else "image"
-            conteudo = Path(caminho_doc).read_bytes()
-            dados_b64 = base64.standard_b64encode(conteudo).decode()
-            await query.edit_message_text("Analisando...")
-            resposta = claude.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=4096,
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": tipo_conteudo, "source": {"type": "base64", "media_type": mime_inf, "data": dados_b64}},
-                        {"type": "text", "text": PROMPT}
-                    ]
-                }]
-            )
-            _, ggv, corpo = parse_resposta(resposta.content[0].text)
-            atualizar(int(doc_id), tipo=tipo, ggv=ggv, dados_claude=corpo)
-            if tipo == "orcamento":
-                _autopreencher_endereco(int(doc_id), ggv)
-            emoji, label_tipo = TIPOS.get(tipo, ("📄", tipo))
-            label_ggv = ggv if ggv != "nao_identificado" else "Obra não identificada"
-            if tipo == "comprovante_pix":
-                dados = parse_comprovante(corpo)
-                ident = dados["id_transacao"] if dados["id_transacao"] != "A PREENCHER" else None
-                ja_pago = None
-                if ident and not TEST_MODE:
-                    with sqlite3.connect(DB_PATH) as con:
-                        ja_pago = con.execute(
-                            "SELECT pfm_codigo FROM lancamentos "
-                            "WHERE identificador_comprovante=? AND status='pago' LIMIT 1",
-                            (ident,)
-                        ).fetchone()
-                if ja_pago:
-                    await query.edit_message_text(
-                        f"Comprovante já registrado.\n\n"
-                        f"Pedido #{ja_pago[0]} — 🟢 Pago\n\n"
-                        "Cada comprovante pode ser usado apenas uma vez."
-                    )
-                else:
-                    candidatos = buscar_candidatos_pix(dados["valor_v"], dados["favorecido"], dados["cnpj"])
-                    texto_resultado = mostrar_comprovante_candidatos(dados, candidatos)
-                    if not candidatos:
-                        _descartar_documento(int(doc_id))
-                        texto_resultado += "\n\nArquivo descartado — pode reenviar depois de corrigir o pedido."
-                        await query.edit_message_text(texto_resultado)
-                    else:
-                        await query.edit_message_text(
-                            texto_resultado,
-                            reply_markup=teclado_candidatos_pix(int(doc_id), candidatos)
-                        )
-            elif tipo == "nota_fiscal":
-                dados_nfe = _parse_nfe(corpo)
-                candidatos = buscar_candidatos_nfe(dados_nfe["cnpj"], dados_nfe["valor_v"], DB_PATH)
-                await query.edit_message_text(
-                    _mostrar_nfe(dados_nfe, candidatos),
-                    reply_markup=_teclado_candidatos_nfe(int(doc_id), candidatos)
-                )
-            elif tipo == "orcamento":
-                texto, markup = _resumo_gerar(int(doc_id))
-                await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
-            else:
-                await query.edit_message_text(
-                    f"{label_tipo}\n\n{corpo}\n\nConfirmar?",
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("✅ Confirmar", callback_data=f"ok:{doc_id}:{tipo}:{ggv}"),
-                        InlineKeyboardButton("← Voltar",    callback_data=f"cancelar:{doc_id}"),
-                    ]])
-                )
-
-        elif acao == "pix_confirmar":
-            _, doc_id_comp, pfm_codigo = partes
-            with sqlite3.connect(DB_PATH) as con:
-                comp = con.execute(
-                    "SELECT dados_claude FROM documentos WHERE id=?", (int(doc_id_comp),)
-                ).fetchone()
-                lanc = con.execute(
-                    "SELECT fornecedor, valor, status FROM lancamentos WHERE pfm_codigo=?",
-                    (pfm_codigo,)
-                ).fetchone()
-            if not comp or not lanc:
-                await query.edit_message_text("Dados não encontrados.")
-                return
-            dados_comp   = parse_comprovante(comp[0])
-            forn, valor_lanc, status_lanc = lanc
-            status_label = {"a_pagar": "🟡 Aguardando pagamento", "pago": "🟢 Pago"}.get(status_lanc, status_lanc)
-            valor_lanc_fmt = f"R$ {_fmt_brl(valor_lanc)}" if valor_lanc else "—"
-            texto = (
-                f"Confirmar pagamento?\n\n"
-                f"Comprovante:  R$ {dados_comp['valor_fmt']}  {dados_comp['data']}\n"
-                f"Pedido:       #{pfm_codigo} — {forn}\n"
-                f"Valor:        {valor_lanc_fmt}\n"
-                f"Status:       {status_label}"
-            )
-            await query.edit_message_text(texto, reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Confirmar pagamento",
-                                     callback_data=f"pix_pagar:{doc_id_comp}:{pfm_codigo}")],
-                [InlineKeyboardButton("↩️ Voltar",
-                                     callback_data="pix_cancelar")],
-            ]))
-
-        elif acao == "pix_pagar":
-            _, doc_id_comp, pfm_codigo = partes
-            with sqlite3.connect(DB_PATH) as con:
-                comp = con.execute(
-                    "SELECT dados_claude, caminho FROM documentos WHERE id=?", (int(doc_id_comp),)
-                ).fetchone()
-                lanc = con.execute(
-                    "SELECT valor, categoria, doc_id FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)
-                ).fetchone()
-            if not comp or not lanc:
-                await query.edit_message_text("Dados não encontrados.")
-                return
-            dados_comp = parse_comprovante(comp[0])
-            caminho_comp = comp[1]
-            valor_total, categoria_lanc, doc_id_orcamento = lanc
-            ident_comp = dados_comp["id_transacao"] if dados_comp["id_transacao"] != "A PREENCHER" else None
-            ja_usado = None
-            if ident_comp and not TEST_MODE:
-                with sqlite3.connect(DB_PATH) as con:
-                    ja_usado = con.execute(
-                        "SELECT pfm_codigo FROM parcelas_pagamento WHERE identificador_comprovante=? LIMIT 1",
-                        (ident_comp,)
-                    ).fetchone()
-            if ja_usado:
-                await query.edit_message_text(
-                    f"Comprovante já registrado no Pedido #{ja_usado[0]}.\n"
-                    "Cada comprovante pode ser usado apenas uma vez."
-                )
-                return
-            _MESES = {"janeiro":"01","fevereiro":"02","março":"03","abril":"04",
-                      "maio":"05","junho":"06","julho":"07","agosto":"08",
-                      "setembro":"09","outubro":"10","novembro":"11","dezembro":"12"}
-            _data_raw = dados_comp["data"] if dados_comp["data"] != "A PREENCHER" \
-                        else datetime.now().strftime("%d/%m/%Y")
-            data_pgto = _data_raw
-            for nome, num in _MESES.items():
-                if nome in _data_raw.lower():
-                    data_pgto = re.sub(nome, num, _data_raw, flags=re.IGNORECASE)
-                    break
-
-            valor_parcela = dados_comp["valor_v"] or 0.0
-            parcela_id = _registrar_parcela(pfm_codigo, valor_parcela, data_pgto, int(doc_id_comp), ident_comp)
-            _arquivar_doc_financeiro(pfm_codigo, f"comprovante-parcela{parcela_id}", caminho_comp, data_pgto)
-
-            total_pago = _total_pago(pfm_codigo)
-            quitado = valor_total and total_pago >= valor_total - 0.01
-            with sqlite3.connect(DB_PATH) as con:
-                if quitado:
-                    con.execute(
-                        "UPDATE lancamentos SET status='pago', valor_pago=?, data_pagamento=? WHERE pfm_codigo=?",
-                        (total_pago, data_pgto, pfm_codigo)
-                    )
-                else:
-                    con.execute(
-                        "UPDATE lancamentos SET valor_pago=? WHERE pfm_codigo=?",
-                        (total_pago, pfm_codigo)
-                    )
-
-            if quitado and categoria_lanc in CATEGORIAS_SEM_NFE_OBRIGATORIA:
-                # Taxa/imposto/serviço público: a fatura já enviada é a "terceira via" — não há NF-e separada
-                with sqlite3.connect(DB_PATH) as con:
-                    row_fatura = con.execute("SELECT caminho FROM documentos WHERE id=?", (doc_id_orcamento,)).fetchone()
-                _arquivar_doc_financeiro(pfm_codigo, "fatura", row_fatura[0] if row_fatura else None, data_pgto)
-
-            valor_parcela_fmt = f"R$ {_fmt_brl(valor_parcela)}"
-            botoes = []
-            if categoria_lanc not in CATEGORIAS_SEM_NFE_OBRIGATORIA:
-                botoes.append([InlineKeyboardButton(
-                    "📄 Gerar recibo desta parcela", callback_data=f"recibo_parcela_iniciar:{parcela_id}"
-                )])
-            if quitado:
-                texto = f"🟢 Pedido #{pfm_codigo} — quitado. Parcela: {valor_parcela_fmt}."
-                if categoria_lanc not in CATEGORIAS_SEM_NFE_OBRIGATORIA:
-                    texto += "\n\nEnvie a NF-e para fechar este pedido (se aplicável)."
-            else:
-                faltam = valor_total - total_pago
-                texto = (
-                    f"🟡 Pedido #{pfm_codigo} — parcela registrada: {valor_parcela_fmt}.\n"
-                    f"Total pago: R$ {_fmt_brl(total_pago)} de R$ {_fmt_brl(valor_total)} — "
-                    f"faltam R$ {_fmt_brl(faltam)}."
-                )
-            await query.edit_message_text(texto, reply_markup=InlineKeyboardMarkup(botoes) if botoes else None)
-
-        elif acao == "pix_cancelar":
-            await query.edit_message_text("Cancelado.")
-
-        elif acao == "sel_ggv":
-            _, doc_id, tipo, ggv = partes
-            botoes = [[InlineKeyboardButton(g, callback_data=f"set_ggv:{doc_id}:{tipo}:{g}")] for g in GGVS]
-            botoes.append([InlineKeyboardButton("❓ Não identificado",
-                                                callback_data=f"set_ggv:{doc_id}:{tipo}:nao_identificado")])
-            botoes.append([InlineKeyboardButton("◀️ Voltar",
-                                                callback_data=f"voltar_edit:{doc_id}:{tipo}:{ggv}")])
-            await query.edit_message_reply_markup(InlineKeyboardMarkup(botoes))
-
-        elif acao == "set_ggv":
-            _, doc_id, tipo, novo_ggv = partes
-            atualizar(int(doc_id), ggv=novo_ggv)
-            if tipo == "orcamento":
-                _autopreencher_endereco(int(doc_id), novo_ggv)
-            with sqlite3.connect(DB_PATH) as con:
-                status = con.execute("SELECT status FROM documentos WHERE id=?", (int(doc_id),)).fetchone()[0]
-            if status == "confirmado":
-                texto, markup = _resumo_gerar(int(doc_id))
-                await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
-            else:
-                texto, markup = _resumo_gerar(int(doc_id))
-                await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
-
-        elif acao == "pgto":
-            _, doc_id, ggv, escolha = partes
-            if escolha == "outro":
-                ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": "condicao_pgto"})
-                await query.edit_message_text("Condição de pagamento:")
-                return
-            label_pgto = CONDICOES.get(escolha, escolha)
-            atualizar(int(doc_id), condicao_pgto=label_pgto)
-            ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": None})
-            texto, markup = _resumo_gerar(int(doc_id))
-            await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
-
-        elif acao == "end":
-            _, doc_id, ggv, escolha = partes
-            if escolha == "outro":
-                ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": "endereco_entrega"})
-                await query.edit_message_text("Endereço de entrega:")
-                return
-            if escolha.startswith("obra_"):
-                ggv_key = escolha[5:]
-                endereco = buscar_obra(ggv_key).get("endereco_entrega") or ENDERECOS.get(escolha, escolha)
-            else:
-                endereco = ENDERECOS.get(escolha, escolha)
-            atualizar(int(doc_id), endereco_entrega=endereco)
-            texto, markup = _resumo_gerar(int(doc_id))
-            await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
-
-        elif acao == "sel_edit":
-            _, doc_id, tipo, ggv = partes
-            botoes = [
-                [InlineKeyboardButton("👤 Fornecedor",    callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:fornecedor")],
-                [InlineKeyboardButton("🔢 CNPJ/CPF",      callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:cnpj")],
-                [InlineKeyboardButton("💲 Valor total",   callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:valor")],
-                [InlineKeyboardButton("🔑 Chave PIX",     callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:pix")],
-                [InlineKeyboardButton("📦 Itens",         callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:itens")],
-                [InlineKeyboardButton("🏷️ Desconto",     callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:desconto")],
-                [InlineKeyboardButton("💰 Condição pgto", callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:pgto")],
-                [InlineKeyboardButton("📅 Data entrega",  callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:data")],
-                [InlineKeyboardButton("📍 Endereço",      callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:endereco")],
-                [InlineKeyboardButton("📅 Vencimento pgto", callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:vencimento")],
-                [InlineKeyboardButton("👷 Encarregado",     callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:encarregado")],
-                [InlineKeyboardButton("📞 Contato vendedor", callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:contato")],
-                [InlineKeyboardButton("📝 Observações",     callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:obs")],
-                [InlineKeyboardButton("🏗 GGV",             callback_data=f"sel_ggv:{doc_id}:{tipo}:{ggv}")],
-                [InlineKeyboardButton("📋 Tipo doc.",      callback_data=f"sel_tipo:{doc_id}:{tipo}:{ggv}")],
-                [InlineKeyboardButton("◀️ Voltar",         callback_data=f"voltar_edit:{doc_id}:{tipo}:{ggv}")],
-            ]
-            await query.edit_message_reply_markup(InlineKeyboardMarkup(botoes))
-
-        elif acao == "edit_campo":
-            _, doc_id, tipo, ggv, campo = partes
-            ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "tipo": tipo})
-
-            if campo == "pgto":
-                ctx.user_data["aguardando"] = None
-                await query.edit_message_text(
-                    "Condição de pagamento:",
-                    reply_markup=teclado_condicao(doc_id, tipo, ggv)
-                )
-            elif campo == "endereco":
-                ctx.user_data["aguardando"] = None
-                await query.edit_message_text(
-                    "Endereço de entrega:",
-                    reply_markup=teclado_endereco(doc_id, tipo, ggv)
-                )
-            elif campo == "vencimento":
-                ctx.user_data["aguardando"] = "vencimento_pgto"
-                with sqlite3.connect(DB_PATH) as con:
-                    row = con.execute("SELECT vencimento_pgto FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
-                atual = row[0] if row and row[0] else "Não informado"
-                await query.edit_message_text(
-                    f"Atual: {atual}\n\nNovo vencimento (ex: Parcela única até 15/07/2026):"
-                )
-            elif campo == "encarregado":
-                ctx.user_data["aguardando"] = "edit_encarregado"
-                with sqlite3.connect(DB_PATH) as con:
-                    row = con.execute("SELECT encarregado FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
-                atual = (row[0] if row and row[0] else None) or buscar_obra(ggv).get("encarregado_nome", "Não definido")
-                await query.edit_message_text(
-                    f"Atual: {atual}\n\nNovo encarregado:"
-                )
-            elif campo == "contato":
-                ctx.user_data["aguardando"] = "edit_contato"
-                with sqlite3.connect(DB_PATH) as con:
-                    row = con.execute("SELECT dados_claude FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
-                dados_atuais = row[0] if row else ""
-                nome_v = _campo(dados_atuais, "Vendedor")
-                fone_v = _campo(dados_atuais, "Telefone do vendedor")
-                if nome_v == "A PREENCHER": nome_v = "Não informado"
-                if fone_v == "A PREENCHER": fone_v = ""
-                atual = f"{nome_v}  {fone_v}".strip() if fone_v else nome_v
-                await query.edit_message_text(
-                    f"Atual: {atual}\n\nNome e telefone do vendedor (ex: Flávio 42 99912-7781):"
-                )
-            elif campo == "itens":
-                ctx.user_data["aguardando"] = "edit_itens"
-                with sqlite3.connect(DB_PATH) as con:
-                    row = con.execute("SELECT dados_claude FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
-                bloco = _bloco_itens(row[0] if row else "")
-                await query.edit_message_text(
-                    f"Itens atuais:\n\n{bloco}\n\n"
-                    "Novos itens:\n"
-                    "Use o formato para cálculo automático:\n"
-                    "1. Descrição (qtde UN) — R$ valor_total\n"
-                    "Ex: 1. Cimento 50kg (10 sc) — R$ 350,00"
-                )
-            else:
-                aguardando_campo = "data_entrega" if campo == "data" else f"edit_{campo}"
-                ctx.user_data["aguardando"] = aguardando_campo
-                labels = {
-                    "fornecedor": "nome do fornecedor",
-                    "cnpj":       "CNPJ ou CPF",
-                    "valor":      "valor total (ex: R$ 1.500,00)",
-                    "pix":        "chave PIX",
-                    "desconto":   "valor do desconto em R$ (ex: 80 ou 80,00) — ou 0 para remover",
-                    "data":       "data de entrega (ex: 01/08/2026, 7 dias úteis, A combinar)",
-                    "obs":        "observação",
-                }
-                campo_doc = {
-                    "fornecedor": "Fornecedor",
-                    "cnpj":       "CNPJ/CPF",
-                    "valor":      "Valor total",
-                    "pix":        "Chave PIX",
-                }
-                with sqlite3.connect(DB_PATH) as con:
-                    row = con.execute(
-                        "SELECT dados_claude, desconto_rs, data_entrega FROM documentos WHERE id=?", (int(doc_id),)
-                    ).fetchone()
-                dados_atuais, desconto_atual, data_atual = row if row else ("", None, None)
-                if campo == "desconto":
-                    atual = f"R$ {_fmt_brl(_parse_brl(re.sub(r'[^\d,.]', '', str(desconto_atual))))}" if desconto_atual else "Não informado"
-                elif campo == "data":
-                    atual = data_atual or "Não informada"
-                elif campo == "obs":
-                    atual = _obs(dados_atuais) or "Não informada"
-                else:
-                    atual = _campo(dados_atuais, campo_doc.get(campo, campo))
-                await query.edit_message_text(
-                    f"Atual: {atual}\n\nNovo valor:"
-                )
-
-        elif acao == "voltar_edit":
-            _, doc_id, tipo, ggv = partes
-            texto, markup = _resumo_gerar(int(doc_id))
-            await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
-
-        elif acao == "ver_itens":
-            _, doc_id, tipo, ggv = partes
-            with sqlite3.connect(DB_PATH) as con:
-                row = con.execute("SELECT dados_claude FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
-            bloco = _bloco_itens(row[0] if row else "")
-            await query.edit_message_text(
-                bloco,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("◀️ Voltar ao resumo", callback_data=f"voltar_edit:{doc_id}:{tipo}:{ggv}")]
-                ])
-            )
-
-        elif acao == "pfm":
-            _, doc_id, ggv = partes
-            pfm_codigo_revisao = ctx.user_data.get("modo_revisao")
-            if pfm_codigo_revisao:
-                await _executar_revisao_pfm(query, ctx, int(doc_id), pfm_codigo_revisao)
-            else:
-                atualizar(int(doc_id), status="confirmado")
-                ramo = _campo(_dados_doc(int(doc_id)), "Ramo de atividade")
-                cat  = sugerir_categoria(ramo)
-                await query.edit_message_text(
-                    _tela_categoria(cat, ramo),
-                    reply_markup=_teclado_categoria(int(doc_id), ggv, cat)
-                )
-
-        elif acao == "cat_confirmar":
-            _, doc_id, ggv, cat_val = partes
-            await _executar_gerar_pfm(query, ctx, int(doc_id), ggv, CategoriaLancamento(cat_val))
-
-        elif acao == "cat_corrigir":
-            _, doc_id, ggv = partes
-            await query.edit_message_text(
-                "Selecione a categoria:",
-                reply_markup=_teclado_selecao_categorias(int(doc_id), ggv)
-            )
-
-        elif acao == "cat_sel":
-            _, doc_id, ggv, cat_val = partes
-            await _executar_gerar_pfm(query, ctx, int(doc_id), ggv, CategoriaLancamento(cat_val))
-
-        elif acao == "pfm_revisar":
-            _, doc_id, pfm_codigo = partes
-            ctx.user_data["doc_id"]       = int(doc_id)
-            ctx.user_data["tipo"]         = "orcamento"
-            ctx.user_data["modo_revisao"] = pfm_codigo
-            texto_resumo, markup = _resumo_gerar(int(doc_id))
-            try:
-                await query.edit_message_text(texto_resumo, reply_markup=markup, parse_mode="HTML")
-            except Exception:
-                await query.answer("Tela de revisão já está aberta.")
-
-        elif acao == "pfm_ver":
-            _, doc_id, pfm_codigo = partes
-            await query.answer()
-            html      = _gerar_html_pc(int(doc_id))
-            pdf_bytes = await _html_para_pdf(html)
-            await ctx.bot.send_document(
-                chat_id=DONO_ID,
-                document=pdf_bytes,
-                filename=f"{pfm_codigo}.pdf",
-                caption=f"📄 {pfm_codigo}"
-            )
-
-        elif acao == "pfm_orc":
-            _, doc_id, pfm_codigo = partes
-            with sqlite3.connect(DB_PATH) as con:
-                row = con.execute("SELECT caminho FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
-            caminho = row[0] if row else None
-            if not caminho or not Path(caminho).exists():
-                await query.answer("Orçamento original não encontrado.", show_alert=True)
-                return
-            path = Path(caminho)
-            await query.answer()
-            dados = path.read_bytes()
-            ext = path.suffix.lower()
-            if ext in (".jpg", ".jpeg", ".png", ".webp"):
-                await ctx.bot.send_photo(chat_id=query.message.chat_id, photo=dados)
-            else:
-                await ctx.bot.send_document(chat_id=query.message.chat_id, document=dados, filename=path.name)
-
-        elif acao in ("pfm_nfe", "pfm_comp", "pfm_recibo"):
-            _, doc_id_arquivo, pfm_codigo = partes
-            with sqlite3.connect(DB_PATH) as con:
-                row = con.execute("SELECT caminho FROM documentos WHERE id=?", (int(doc_id_arquivo),)).fetchone()
-            caminho = row[0] if row else None
-            label = {"pfm_nfe": "NF-e", "pfm_comp": "comprovante", "pfm_recibo": "recibo"}.get(acao, acao)
-            if not caminho or not Path(caminho).exists():
-                await query.answer(f"Arquivo de {label} não encontrado.", show_alert=True)
-                return
-            path = Path(caminho)
-            await query.answer()
-            dados = path.read_bytes()
-            ext = path.suffix.lower()
-            if ext in (".jpg", ".jpeg", ".png", ".webp"):
-                await ctx.bot.send_photo(chat_id=query.message.chat_id, photo=dados)
-            else:
-                await ctx.bot.send_document(chat_id=query.message.chat_id, document=dados, filename=path.name)
-
-        elif acao == "pfm_entregue":
-            _, doc_id, pfm_codigo = partes
-            ctx.user_data["entrega_pfm_codigo"] = pfm_codigo
-            ctx.user_data["entrega_doc_id_foto"] = None
-            with sqlite3.connect(DB_PATH) as con:
-                row = con.execute("SELECT fornecedor FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)).fetchone()
-            forn = row[0] if row else pfm_codigo
-            await query.edit_message_text(
-                _texto_obs_entrega(pfm_codigo, forn),
-                reply_markup=_teclado_obs_com_cancelar()
-            )
-
-        elif acao == "entrega_sel":
-            _, pfm_codigo = partes
-            ctx.user_data["entrega_pfm_codigo"] = pfm_codigo
-            with sqlite3.connect(DB_PATH) as con:
-                row = con.execute("SELECT fornecedor FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)).fetchone()
-            forn = row[0] if row else pfm_codigo
-            await query.edit_message_text(
-                _texto_obs_entrega(pfm_codigo, forn),
-                reply_markup=_teclado_obs_com_cancelar()
-            )
-
-        elif acao == "entrega_obs":
-            _, chave = partes
-            OBS_MAP = {
-                "completa":  "Entrega completa",
-                "parcial":   "Entrega parcial — aguardando restante",
-                "avaria":    "Material com avaria",
-                "diferente": "Produto diferente do pedido",
-            }
-            if chave == "outro":
-                ctx.user_data["aguardando"] = "obs_entrega_texto"
-                await query.edit_message_text("Descreva a observação:")
-                return
-            obs = OBS_MAP.get(chave, chave)
-            pfm_codigo = ctx.user_data.pop("entrega_pfm_codigo", None)
-            doc_id_foto = ctx.user_data.pop("entrega_doc_id_foto", None)
-            legenda_foto = ctx.user_data.pop("entrega_legenda_foto", None)
-            if not pfm_codigo:
-                await query.answer("Pedido não encontrado. Tente novamente.", show_alert=True)
-                return
-            _salvar_entrega_db(pfm_codigo, obs)
-            if doc_id_foto:
-                _adicionar_foto_entrega(pfm_codigo, doc_id_foto, legenda_foto)
-            texto, markup = _tela_apos_entrega(pfm_codigo)
-            if texto:
-                await query.edit_message_text(texto, reply_markup=markup)
-            else:
-                await query.edit_message_text("Entrega registrada.")
-
-        elif acao == "entrega_cancelar":
-            ctx.user_data.pop("entrega_pfm_codigo", None)
-            ctx.user_data.pop("entrega_doc_id_foto", None)
-            ctx.user_data.pop("entrega_legenda_foto", None)
-            await query.edit_message_text(
-                mostrar_boas_vindas(),
-                reply_markup=teclado_boas_vindas()
-            )
-
-        elif acao == "entrega_foto_primeiro":
-            ctx.user_data["aguardando"] = "foto_entrega_obs"
-            await query.edit_message_text("Envie a foto ou documento da entrega:")
-
-        elif acao == "entrega_editar":
-            pfm_codigo = partes[1]
-            forn, obs_ent, qtd_fotos = _buscar_estado_entrega(pfm_codigo)
-            await query.edit_message_text(
-                _texto_gerir_entrega(pfm_codigo, forn, obs_ent, qtd_fotos),
-                reply_markup=_teclado_gerir_entrega(pfm_codigo, qtd_fotos)
-            )
-
-        elif acao == "entrega_mudar_obs":
-            pfm_codigo = partes[1]
-            ctx.user_data["entrega_pfm_codigo"] = pfm_codigo
-            _, obs_atual, _ = _buscar_estado_entrega(pfm_codigo)
-            await query.edit_message_text(
-                f"#{pfm_codigo} — Mudar observação\n\nAtual: {obs_atual or '—'}",
-                reply_markup=_teclado_mudar_obs(pfm_codigo)
-            )
-
-        elif acao == "entrega_editobs":
-            chave = partes[1]
-            pfm_codigo = ctx.user_data.get("entrega_pfm_codigo")
-            if not pfm_codigo:
-                await query.answer("Sessão expirada. Abra o pedido novamente.", show_alert=True)
-                return
-            OBS_MAP_EDIT = {
-                "completa":  "Entrega completa",
-                "parcial":   "Entrega parcial — aguardando restante",
-                "avaria":    "Material com avaria",
-                "diferente": "Produto diferente do pedido",
-            }
-            if chave == "outro":
-                ctx.user_data["aguardando"] = "edit_obs_entrega_texto"
-                await query.edit_message_text("Descreva a observação:")
-                return
-            obs = OBS_MAP_EDIT.get(chave, chave)
-            _atualizar_obs_entrega(pfm_codigo, obs)
-            forn, obs_ent, qtd_fotos = _buscar_estado_entrega(pfm_codigo)
-            await query.edit_message_text(
-                _texto_gerir_entrega(pfm_codigo, forn, obs_ent, qtd_fotos),
-                reply_markup=_teclado_gerir_entrega(pfm_codigo, qtd_fotos)
-            )
-
-        elif acao == "entrega_trocar_foto":
-            pfm_codigo = partes[1]
-            ctx.user_data["aguardando"] = "foto_entrega_troca"
-            ctx.user_data["entrega_pfm_codigo"] = pfm_codigo
-            await query.edit_message_text("Envie a foto ou documento da entrega:")
-
-        elif acao == "entrega_ver_fotos":
-            pfm_codigo = partes[1]
-            fotos = _listar_fotos_entrega(pfm_codigo)
-            if not fotos:
-                await query.answer("Nenhuma foto registrada.", show_alert=True)
-                return
-            botoes = []
-            for foto_id, _doc_id_foto, legenda, caminho in fotos:
-                rotulo = (legenda or "Sem legenda")[:40]
-                icone = _icone_arquivo_entrega(caminho)
-                botoes.append([InlineKeyboardButton(f"{icone} {rotulo}", callback_data=f"entrega_foto_ver:{foto_id}:{pfm_codigo}")])
-            botoes.append([InlineKeyboardButton("← Voltar", callback_data=f"entrega_editar:{pfm_codigo}")])
-            await query.edit_message_text(
-                f"#{pfm_codigo} — Arquivos da entrega ({len(fotos)})",
-                reply_markup=InlineKeyboardMarkup(botoes)
-            )
-
-        elif acao == "entrega_foto_ver":
-            _, foto_id, pfm_codigo = partes
-            with sqlite3.connect(DB_PATH) as con:
-                row = con.execute(
-                    "SELECT ef.legenda, d.caminho FROM entrega_fotos ef "
-                    "JOIN documentos d ON d.id = ef.doc_id WHERE ef.id=?",
-                    (int(foto_id),)
-                ).fetchone()
-            if not row or not row[1] or not Path(row[1]).exists():
-                await query.answer("Foto não encontrada.", show_alert=True)
-                return
-            legenda, caminho = row
-            await query.answer()
-            path = Path(caminho)
-            dados = path.read_bytes()
-            ext = path.suffix.lower()
-            if ext in (".jpg", ".jpeg", ".png", ".webp"):
-                await ctx.bot.send_photo(chat_id=query.message.chat_id, photo=dados, caption=legenda or None)
-            else:
-                await ctx.bot.send_document(chat_id=query.message.chat_id, document=dados, filename=path.name, caption=legenda or None)
-
-        elif acao == "entrega_remover_foto":
-            pfm_codigo = partes[1]
-            fotos = _listar_fotos_entrega(pfm_codigo)
-            if not fotos:
-                await query.answer("Nenhuma foto registrada.", show_alert=True)
-                return
-            botoes = []
-            for foto_id, _doc_id_foto, legenda, _caminho in fotos:
-                rotulo = (legenda or "Sem legenda")[:40]
-                botoes.append([InlineKeyboardButton(f"🗑 {rotulo}", callback_data=f"entrega_foto_apagar:{foto_id}:{pfm_codigo}")])
-            botoes.append([InlineKeyboardButton("← Voltar", callback_data=f"entrega_editar:{pfm_codigo}")])
-            await query.edit_message_text(
-                f"#{pfm_codigo} — Remover qual arquivo?",
-                reply_markup=InlineKeyboardMarkup(botoes)
-            )
-
-        elif acao == "entrega_foto_apagar":
-            _, foto_id, pfm_codigo = partes
-            _apagar_foto_entrega(int(foto_id))
-            forn, obs_ent, qtd_fotos = _buscar_estado_entrega(pfm_codigo)
-            await query.edit_message_text(
-                _texto_gerir_entrega(pfm_codigo, forn, obs_ent, qtd_fotos),
-                reply_markup=_teclado_gerir_entrega(pfm_codigo, qtd_fotos)
-            )
-
-        elif acao == "entrega_apagar":
-            pfm_codigo = partes[1]
-            _apagar_entrega_db(pfm_codigo)
-            texto, markup = _tela_apos_entrega(pfm_codigo)
-            if texto:
-                await query.edit_message_text(texto, reply_markup=markup)
-            else:
-                await query.edit_message_text("Entrega apagada.")
-
-        elif acao == "entrega_voltar":
-            pfm_codigo = partes[1]
-            texto, markup = _tela_apos_entrega(pfm_codigo)
-            if texto:
-                await query.edit_message_text(texto, reply_markup=markup)
-            else:
-                await query.edit_message_text("Pedido não encontrado.")
-
-        elif acao == "nfe_confirmar":
-            _, doc_id_nfe, pfm_codigo = partes
-            ok = vincular_nfe(pfm_codigo, int(doc_id_nfe), DB_PATH)
-            if ok:
-                with sqlite3.connect(DB_PATH) as con:
-                    row_nfe = con.execute(
-                        "SELECT caminho, dados_claude FROM documentos WHERE id=?", (int(doc_id_nfe),)
-                    ).fetchone()
-                if row_nfe:
-                    caminho_nfe, dados_nfe = row_nfe
-                    numero_nfe = _campo(dados_nfe, "Número da NF")
-                    data_nfe   = _campo(dados_nfe, "Data de emissão")
-                    sufixo_nfe = f"NFe {numero_nfe}" if numero_nfe != "A PREENCHER" else "NFe"
-                    _arquivar_doc_financeiro(pfm_codigo, sufixo_nfe, caminho_nfe, data_nfe)
-                await query.edit_message_text(
-                    f"🟢 #{pfm_codigo} — NF-e vinculada. Ciclo fechado."
-                )
-            else:
-                await query.edit_message_text(
-                    f"Não foi possível vincular a NF-e ao Pedido #{pfm_codigo}.\n"
-                    "O pedido pode já ter uma NF-e vinculada."
-                )
-
-        elif acao == "nfe_cancelar":
-            await query.edit_message_text("NF-e não vinculada.")
-
-        elif acao == "parcelas_ver":
-            pfm_codigo = partes[1]
-            pedido = buscar_pedido(pfm_codigo)
-            if not pedido:
-                await query.answer(f"Pedido {pfm_codigo} não encontrado.", show_alert=True)
-                return
-            await query.edit_message_text(
-                _texto_parcelas(pedido),
-                reply_markup=teclado_parcelas(pfm_codigo)
-            )
-
-        elif acao == "recibo_parcela_iniciar":
-            parcela_id = int(partes[1])
-            parcela = _buscar_parcela(parcela_id)
-            if not parcela:
-                await query.answer("Parcela não encontrada.", show_alert=True)
-                return
-            pfm_codigo = parcela[1]
-            await query.edit_message_text(
-                f"#{pfm_codigo} — Por que não tem NF-e?",
-                reply_markup=teclado_motivo_recibo(parcela_id, pfm_codigo)
-            )
-
-        elif acao == "recibo_parcela_motivo":
-            _, parcela_id_str, chave = partes
-            parcela_id = int(parcela_id_str)
-            if chave == "outro":
-                ctx.user_data["aguardando"] = "recibo_motivo_texto"
-                ctx.user_data["recibo_parcela_id"] = parcela_id
-                await query.edit_message_text("Descreva o motivo:")
-                return
-            motivo = _MOTIVOS_RECIBO.get(chave, chave)
-            await query.edit_message_text("Gerando recibo...")
-            await _gerar_recibo(ctx, parcela_id, motivo)
-
-        elif acao == "recibo_assinado_iniciar":
-            parcela_id = int(partes[1])
-            ctx.user_data["aguardando"] = "recibo_assinado_upload"
-            ctx.user_data["recibo_parcela_id"] = parcela_id
-            await query.edit_message_text("Envie a foto ou PDF do recibo assinado:")
-
-        elif acao == "obra_pedidos":
-            codigo  = partes[1]
-            pedidos = _pedidos_obra(codigo)
-            await query.edit_message_text(
-                mostrar_lista_pedidos(codigo, pedidos),
-                reply_markup=teclado_lista_pedidos(codigo, pedidos)
-            )
-
-        elif acao == "pedido_abrir":
-            pfm_codigo = partes[1]
-            pedido = buscar_pedido(pfm_codigo)
-            if pedido:
-                preparar_visualizacao_pedido(pedido)
-                await query.edit_message_text(
-                    mostrar_pedido(pedido),
-                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status, pedido.categoria, pedido.qtd_parcelas)
-                )
-            else:
-                await query.answer(f"Pedido {pfm_codigo} não encontrado.", show_alert=True)
-
-        elif acao == "pedido_excluir_confirmar":
-            pfm_codigo = partes[1]
-            await query.edit_message_text(
-                f"Excluir #{pfm_codigo}?\n\n"
-                "Apaga o pedido, parcelas, entrega e todos os documentos vinculados na Laura. "
-                "Não apaga arquivos já arquivados no OneDrive. Não pode ser desfeito.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🗑 Sim, excluir", callback_data=f"pedido_excluir_ok:{pfm_codigo}"),
-                    InlineKeyboardButton("← Voltar",       callback_data=f"pedido_abrir:{pfm_codigo}"),
-                ]])
-            )
-
-        elif acao == "pedido_excluir_ok":
-            pfm_codigo = partes[1]
-            ggv = pfm_codigo.rsplit("-", 1)[0]
-            _excluir_pedido(pfm_codigo)
-            await query.edit_message_text(
-                f"#{pfm_codigo} excluído.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("◀️ Pedidos", callback_data=f"obra_pedidos:{ggv}")
-                ]])
-            )
-
-        elif acao == "obra_ver":
-            codigo = partes[1]
-            obra = buscar_obra(codigo)
-            if obra:
-                await query.edit_message_text(
-                    mostrar_cockpit_obra(obra),
-                    reply_markup=teclado_obra(codigo, _pedidos_obra(codigo))
-                )
-            else:
-                await query.edit_message_text(f"Obra {codigo} não encontrada.")
-
-        elif acao == "obra_editar":
-            codigo = partes[1]
-            obra = buscar_obra(codigo)
-            if obra:
-                await query.edit_message_text(
-                    f"Qual campo deseja editar em {codigo}?",
-                    reply_markup=teclado_obra_campos(codigo)
-                )
-            else:
-                await query.edit_message_text(f"Obra {codigo} não encontrada.")
-
-        elif acao == "obra_campo":
-            _, codigo, campo = partes
-            ctx.user_data["aguardando"]   = f"obra_edit_{campo}"
-            ctx.user_data["obra_codigo"]  = codigo
-            labels = {
-                "descricao":         "Descrição",
-                "endereco_entrega":  "Endereço de entrega",
-                "encarregado_nome":  "Nome do encarregado",
-                "encarregado_fone":  "Telefone do encarregado",
-                "responsavel_nome":  "Nome do responsável",
-                "responsavel_fone":  "Telefone do responsável",
-            }
-            label = labels.get(campo, campo)
-            await query.edit_message_text(f"Novo valor para {label}:")
-
-        elif acao == "pfm_fechar":
-            await query.edit_message_text("Fechado.")
-
-        elif acao == "obra_fechar":
-            await query.edit_message_text("Fechado.")
-
-        elif acao == "obras_fechar":
-            await query.edit_message_text("Fechado.")
-
-        elif acao == "menu_inicio":
-            await query.edit_message_text(
-                mostrar_boas_vindas(),
-                reply_markup=teclado_boas_vindas()
-            )
-
-        elif acao == "menu_obras":
-            obras = _listar_obras()
-            await query.edit_message_text(
-                mostrar_lista_obras(obras),
-                reply_markup=teclado_lista_obras(obras)
-            )
-
-        elif acao == "menu_ajuda":
-            await query.edit_message_text(
-                mostrar_ajuda(),
-                reply_markup=teclado_ajuda(),
-                parse_mode="HTML"
-            )
-
-        elif acao == "menu_nova_obra":
-            await query.edit_message_text("Código da nova obra (ex: GGV04):")
-            ctx.user_data["aguardando"] = "nova_obra_codigo"
-
+        handler = _CB_DISPATCH.get(acao)
+        if handler:
+            await handler(query, ctx, partes)
     except Exception as e:
         await ctx.bot.send_message(chat_id=DONO_ID, text=f"Erro inesperado — tente novamente.\n{e}")
 
@@ -4121,16 +4064,17 @@ async def _post_init(app):
         BotCommand("entrega",   "Registrar entrega de pedido"),
     ])
 
-init_db()
-app = Application.builder().token(TOKEN).post_init(_post_init).build()
-app.add_handler(CommandHandler("start",     start))
-app.add_handler(CommandHandler("help",      ajuda))
-app.add_handler(CommandHandler("obras",     obras_cmd))
-app.add_handler(CommandHandler("nova_obra", nova_obra))
-app.add_handler(CommandHandler("entrega",   entrega_cmd))
-app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, receber_arquivo))
-app.add_handler(CallbackQueryHandler(responder_botao))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receber_texto))
-app.add_handler(MessageHandler(filters.COMMAND, comando_desconhecido))
-app.job_queue.run_repeating(_sincronizar_receita_fornecedores, interval=6 * 60 * 60, first=120)
-app.run_polling()
+if __name__ == "__main__":
+    init_db()
+    app = Application.builder().token(TOKEN).post_init(_post_init).build()
+    app.add_handler(CommandHandler("start",     start))
+    app.add_handler(CommandHandler("help",      ajuda))
+    app.add_handler(CommandHandler("obras",     obras_cmd))
+    app.add_handler(CommandHandler("nova_obra", nova_obra))
+    app.add_handler(CommandHandler("entrega",   entrega_cmd))
+    app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, receber_arquivo))
+    app.add_handler(CallbackQueryHandler(responder_botao))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receber_texto))
+    app.add_handler(MessageHandler(filters.COMMAND, comando_desconhecido))
+    app.job_queue.run_repeating(_sincronizar_receita_fornecedores, interval=6 * 60 * 60, first=120)
+    app.run_polling()

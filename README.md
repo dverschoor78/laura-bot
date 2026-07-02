@@ -80,8 +80,8 @@ Você também pode simplesmente **mandar uma foto ou PDF** diretamente — o bot
 | Bot Telegram | python-telegram-bot v22 |
 | IA / Visão | Claude API (Anthropic) |
 | Banco de dados | SQLite (built-in) |
-| Geração Word | docxtpl + python-docx |
-| Conversão PDF | LibreOffice headless |
+| Geração de documentos (Pedido de Compra, recibo) | HTML + Playwright (Chromium headless) → PDF |
+| Valor por extenso (recibo) | num2words |
 | Excel | openpyxl |
 | Validação | Pydantic v2 |
 | Logs | loguru |

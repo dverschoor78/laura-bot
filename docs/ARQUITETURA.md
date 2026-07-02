@@ -1,6 +1,6 @@
 # Arquitetura do Projeto Laura
 
-> Versão: 2026-07-01 — reflete o estado real do sistema (pós ADR-003, auto-cadastro via Receita)
+> Versão: 2026-07-02 — reflete o estado real do sistema (pós ADR-004: dispatch table + módulo `nfe/`; DOCX removido)
 
 ---
 
@@ -9,12 +9,15 @@
 A Laura é um bot Telegram pessoal para gestão de compras de obras GGV.
 
 Dennis envia fotos ou PDFs de orçamentos pelo Telegram. O bot extrai os dados
-com IA, apresenta para confirmação, gera o PFM Word numerado, salva no OneDrive
+com IA, apresenta para confirmação, gera o PFM em PDF numerado, salva no OneDrive
 e registra o lançamento A PAGAR no banco.
 
 **Tecnologias em uso:** Python 3.12 · python-telegram-bot 22 (+ `job-queue`/APScheduler) · SQLite ·
-Claude API (Anthropic) · python-docx · Playwright Chromium · BrasilAPI (Receita Federal) ·
-OneDrive (pasta local mapeada)
+Claude API (Anthropic) · Playwright Chromium (HTML → PDF) · num2words (valor por extenso) ·
+BrasilAPI (Receita Federal) · OneDrive (pasta local mapeada)
+
+`python-docx` não é mais dependência de `bot.py` (DOCX removido em 2026-07-02) — continua usado só
+por `scripts/import_fornecedores.py` (leitura de .docx legado, não geração).
 
 ---
 
@@ -31,7 +34,11 @@ Telegram ──────► bot.py ──────► Claude API (haiku-4-
                                 (orçamento, PFM, comprovante, NF-e, foto de entrega)
 ```
 
-- **`bot.py`** — monólito único com toda a lógica: banco, IA, PFM, handlers Telegram
+- **`bot.py`** — parcialmente modularizado (ADR-004, 2026-07-02): banco, IA, PFM e a maior parte
+  dos handlers Telegram continuam aqui; `nfe/` (parsing/exibição de NF-e) e `financeiro/`
+  (lançamento financeiro) já são módulos próprios, importáveis sem inicializar o bot
+- **`nfe/`** — parsing e exibição de NF-e (`nfe/nfe.py`); matching (`buscar_candidatos_nfe`) e
+  vinculação (`vincular_nfe`) continuam em `financeiro/lancamento.py`
 - **`data/laura.db`** — banco SQLite com cinco tabelas (ver seção 3)
 - **`data/uploads/`** — todo arquivo recebido pelo Telegram cai aqui primeiro (pasta única,
   achatada); é a partir daqui que os documentos são copiados para a pasta certa da obra
@@ -54,7 +61,7 @@ convenção — não há necessidade de configurar cada subpasta manualmente:
 | Tipo de documento | Subpasta (derivada por `_pasta_*()`) | Nome do arquivo |
 |---|---|---|
 | Orçamento original | `04 Compras/00 Orçamentos/` | `{pfm_codigo} - {Fornecedor} - {Resumo}.{ext}` |
-| PFM gerado (.docx + .pdf) | `04 Compras/` | `{pfm_codigo} - {Fornecedor} - {Resumo}.docx` |
+| PFM gerado (.pdf) | `04 Compras/` | `{pfm_codigo} - {Fornecedor} - {Resumo}.pdf` |
 | Comprovante de pagamento | `01 Controle financeiro/` | `{AAAA-MM-DD} {pfm_codigo} {Fornecedor} - comprovante.{ext}` |
 | NF-e | `01 Controle financeiro/` | `{AAAA-MM-DD} {pfm_codigo} {Fornecedor} - NFe {numero}.{ext}` |
 | Foto de entrega | `05 Entrega/` | `{AAAA-MM-DD} {pfm_codigo} {Fornecedor} - foto{NN}.{ext}` |
@@ -98,7 +105,7 @@ sincronizado) em vez de falhar — evita gravar no lugar errado por engano.
 | `encarregado` | Encarregado por documento — sobrescreve padrão do dict `GGV_ENCARREGADO` |
 | `pfm_numero` | Número sequencial por GGV (ex: 9 → GGV03-009) |
 | `status` | Ciclo de vida: recebido → confirmado → pfm_gerado → cancelado |
-| `caminho_pfm` | Caminho real do .docx gerado (2026-07-01) — lido direto, não reconstruído por convenção de nome |
+| `caminho_pfm` | Caminho real do .pdf gerado (2026-07-01; DOCX removido em 2026-07-02) — lido direto, não reconstruído por convenção de nome |
 
 ---
 
@@ -180,11 +187,10 @@ Dennis envia foto ou PDF
   → Dennis confirma (ou edita tipo, GGV, campos)
   → bot coleta condição de pagamento e endereço de entrega
   → Dennis aciona "Gerar PFM"
-  → gerar_pfm() cria o .docx (salvo em OneDrive — backup silencioso)
-  → registra lançamento A PAGAR em lancamentos
+  → gerar_pfm() define o código do pedido, salva itens, registra lançamento A PAGAR
   → _gerar_html_pc() monta HTML do Pedido de Compra 2.0
-  → _html_para_pdf() converte HTML → PDF via Playwright Chromium
-  → envia o .pdf para Dennis no Telegram
+  → _html_para_pdf() converte HTML → PDF via Playwright Chromium (único documento gerado)
+  → envia o .pdf para Dennis no Telegram, salvo também na pasta OneDrive da obra
 ```
 
 **Fluxo B — Consulta de pedido por código**
@@ -202,7 +208,7 @@ Dennis digita o código (ex: GGV03-009)
 
 ## 5. Estrutura do bot.py
 
-Referências para navegação no arquivo (3277 linhas):
+Referências para navegação no arquivo (4.068 linhas):
 
 | Bloco | Referência | O que faz |
 |---|---|---|
@@ -211,26 +217,35 @@ Referências para navegação no arquivo (3277 linhas):
 | Domínio — Pedido | `StatusPedido`, `Pedido` | Enum de status e dataclass com 17 campos |
 | Integração Claude | `PROMPT` | Prompt de extração estruturada |
 | Banco de dados | `init_db()`, `buscar_fornecedor()` | Criação de tabelas, CRUD |
-| Geração de PFM | `gerar_pfm()`, `_campo()`, `_itens()` | Helpers de parsing e formatação; geração do Word |
+| Geração de PFM | `gerar_pfm()`, `_campo()`, `_itens()` | Helpers de parsing/formatação; define código, salva itens, registra lançamento (não gera documento — ver `_gerar_html_pc()`) |
 | Domínio — consulta | `buscar_pedido()`, `mostrar_pedido()` | Pipeline de visualização do pedido |
 | Teclados | `parse_resposta()`, `teclado_confirmacao()` | Parse da resposta Claude e botões inline |
-| Handlers Telegram | `receber_arquivo()`, `receber_texto()`, `responder_botao()` | Handlers de mensagens e callbacks |
-| Inicialização | `app.run_polling()` | Registro dos handlers e loop principal |
+| Handlers Telegram | `receber_arquivo()`, `receber_texto()` | Handlers de mensagens |
+| Dispatch de callback | `responder_botao()`, `_CB_DISPATCH`, `_cb_*()` | Um único `CallbackQueryHandler`; roteia por dict `acao → função` (ADR-004, 2026-07-02) em vez de if/elif — 59 funções `_cb_*`, cada uma cobrindo os ramos que antes viviam soltos dentro de uma função de 929 linhas |
+| Inicialização | `if __name__ == "__main__": ... app.run_polling()` | Registro dos handlers e loop principal — protegido por guard desde 2026-07-02 (importar `bot.py` não inicia mais o bot) |
 
 ---
 
 ## 6. Limitações Conhecidas
 
-- **Monólito** — toda a lógica está em `bot.py`. Gatilho de revisão da ADR-001 (2.500–3.000
-  linhas) já foi atingido; extração do domínio entrega avaliada e adiada por decisão (ADR-003),
-  com gatilho de revisão próprio. Ver `docs/decisoes/ADR-003-extracao-entrega-adiada.md`.
+- 🔴 **Vulnerabilidade de segurança real, não corrigida** — `responder_botao()` não verifica
+  `DONO_ID` (diferente de todos os outros handlers). Combinado com `atualizar()`/`atualizar_obra()`
+  (interpolam nome de coluna direto em SQL a partir de `**kwargs`, sem allowlist), permite que um
+  usuário capaz de mandar `callback_data` arbitrário dispare ações reais e potencialmente injete
+  SQL. Encontrado na auditoria de bibliotecas de 2026-07-02 — correção pequena, prioridade alta.
 
-- **`responder_botao()` é dispatcher único** — função de ~800 linhas que trata todas
-  as ações de botões inline do sistema inteiro (PFM, PIX, NF-e, entrega, obras). Ponto de
-  maior acoplamento do sistema; mapeado em detalhe na ADR-003.
+- **Monólito parcial** — `bot.py` com 4.068 linhas, acima do teto da ADR-001 (2.500–3.000).
+  ADR-004 (2026-07-02) extraiu dispatch table + módulo `nfe/`; `fornecedor/`/`obra/`/`comprovante/`
+  avaliados e adiados com gatilho próprio; `entrega/` continua adiada (ADR-003, motivo não mudou).
 
-- **`gerar_pfm()` acumula responsabilidades** — gera o Word, grava no banco e cria
-  o lançamento na mesma função. Dificulta testes e extensão futura.
+- **`responder_botao()` é um único handler** — agora roteia por dispatch table (`_CB_DISPATCH`,
+  59 funções `_cb_*`) em vez de if/elif, mas continua sendo um único `CallbackQueryHandler` com um
+  único `try/except` — um erro em qualquer ramo ainda aparece como "Erro inesperado" genérico,
+  sem isolamento por domínio. `sel_tipo_inicial` continua misturando 4 domínios (entrega, pix,
+  nfe, pfm) internamente, não coberto pela divisão em `_cb_*`. Ver ADR-004.
+
+- **`gerar_pfm()` acumula responsabilidades** — grava no banco, cria o lançamento e arquiva em
+  disco na mesma função (a geração do documento em si — Word — foi removida em 2026-07-02).
 
 - **`dados_claude` armazena texto bruto** — campos não são estruturados no banco;
   toda extração ocorre na leitura via `_campo()`. Mudanças no formato do Claude
@@ -255,5 +270,8 @@ Referências para navegação no arquivo (3277 linhas):
 - **ADR-001** — manter o monólito em `bot.py`, com gatilhos de revisão explícitos (já atingidos)
 - **ADR-002** — domínio Financeiro nasce modular em `financeiro/`; reserva `app/` para extração futura
 - **ADR-003** — extração do domínio entrega de `bot.py` avaliada e adiada, com gatilho de revisão próprio
+- **ADR-004** (2026-07-02) — gatilho da ADR-003 disparou (bot.py > 3.500 linhas); processo de dois
+  agentes (propor + derrubar) reduziu o escopo original pra dispatch table + módulo `nfe/`;
+  `fornecedor/`/`obra/`/`comprovante/` adiados com gatilho próprio
 
 Ver `docs/decisoes/` para o texto completo de cada uma.

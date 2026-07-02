@@ -135,29 +135,33 @@ def init_db_financeiro(db_path):
 
 
 def vincular_nfe(pfm_codigo: str, doc_id_nfe: int, db_path: str) -> bool:
-    """Vincula uma NF-e a um lançamento pago. Retorna True se o vínculo foi criado."""
+    """Vincula uma NF-e a um lançamento, independente do status de pagamento — a nota pode ser
+    emitida a qualquer momento (entrega, pagamento parcial via parcelas, ou pagamento total já
+    seladas no pedido), não só quando o lançamento já está totalmente quitado. Retorna True se o
+    vínculo foi criado."""
     with sqlite3.connect(db_path) as con:
         cur = con.execute(
-            "UPDATE lancamentos SET doc_id_nfe=? WHERE pfm_codigo=? AND status='pago' AND doc_id_nfe IS NULL",
+            "UPDATE lancamentos SET doc_id_nfe=? WHERE pfm_codigo=? AND doc_id_nfe IS NULL",
             (doc_id_nfe, pfm_codigo)
         )
         return cur.rowcount == 1
 
 
 def buscar_pedidos_sem_nfe(ggv: str, db_path: str) -> list:
-    """Retorna lançamentos pagos sem NF-e vinculada para um GGV."""
+    """Retorna lançamentos sem NF-e vinculada para um GGV, qualquer status de pagamento."""
     with sqlite3.connect(db_path) as con:
         return con.execute(
             """SELECT pfm_codigo, fornecedor, valor
                FROM lancamentos
-               WHERE ggv=? AND status='pago' AND doc_id_nfe IS NULL
+               WHERE ggv=? AND doc_id_nfe IS NULL
                ORDER BY pfm_codigo""",
             (ggv,)
         ).fetchall()
 
 
 def buscar_candidatos_nfe(cnpj: str, valor: float, db_path: str) -> list:
-    """Encontra pedidos pagos sem NF-e.
+    """Encontra pedidos sem NF-e vinculada, qualquer status de pagamento — a nota pode ser emitida
+    a qualquer momento, não só quando o pedido está totalmente pago.
 
     Retorna todos os pedidos elegíveis, ordenados por score:
     - CNPJ coincide (+5), valor próximo (<1% +3, <5% +1)
@@ -168,7 +172,7 @@ def buscar_candidatos_nfe(cnpj: str, valor: float, db_path: str) -> list:
             """SELECT l.pfm_codigo, l.fornecedor, l.valor, f.cnpj
                FROM lancamentos l
                LEFT JOIN fornecedores f ON LOWER(f.nome) = LOWER(l.fornecedor)
-               WHERE l.status='pago' AND l.doc_id_nfe IS NULL""",
+               WHERE l.doc_id_nfe IS NULL""",
         ).fetchall()
     candidatos = []
     for pfm_codigo, fornecedor, valor_lanc, cnpj_forn in rows:
@@ -184,4 +188,10 @@ def buscar_candidatos_nfe(cnpj: str, valor: float, db_path: str) -> list:
                 score += 1
         candidatos.append({"pfm_codigo": pfm_codigo, "fornecedor": fornecedor,
                             "valor_lanc": valor_lanc, "score": score})
-    return sorted(candidatos, key=lambda x: x["score"], reverse=True)
+    # Desempate por proximidade de valor — dentro do mesmo score (ex: todos com score 0),
+    # o valor mais perto do informado na NF-e vem primeiro, em vez de ordem arbitrária do banco
+    def _distancia(c):
+        if not (valor and c["valor_lanc"]):
+            return 0
+        return abs(float(c["valor_lanc"]) - float(valor))
+    return sorted(candidatos, key=lambda x: (-x["score"], _distancia(x)))

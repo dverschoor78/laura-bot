@@ -10,16 +10,73 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Estruturar itens de compra numa tabela própria (hoje é texto corrido em `dados_claude`) —
+1. 🔴 Corrigir vulnerabilidade de segurança em `responder_botao()` (sem checagem de `DONO_ID`) +
+   SQL injection via nome de coluna em `atualizar()`/`atualizar_obra()`
+2. Estruturar itens de compra numa tabela própria (hoje é texto corrido em `dados_claude`) —
    primeiro passo real da fase "lista de compras"
-2. Fechar o GGV03-003 (pagamento parcelado em andamento, R$2.500 de R$30.000 pago)
-3. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
-4. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
-5. Validar PDF do PC 2.0 com orçamento real em produção
-6. Remover DOCX do fluxo principal após validação
+3. Fechar o GGV03-003 (pagamento parcelado em andamento)
+4. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
+5. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
+6. Revisitar `fornecedor/`/`obra/`/`comprovante/` quando os gatilhos da ADR-004 ocorrerem
 7. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
 8. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
 9. Acesso via Claude Code Remote do celular — ideia registrada, servidor Proxmox em casa (Eric)
+
+---
+
+## [DOCX removido, ADR-004 (modularização), matching PIX/NF-e corrigido] — 2026-07-02
+
+### Motivação
+
+Eric (filho do Dennis, estudando engenharia de software) comentou que `bot.py` parecia
+"bagunçado" — virou o gatilho pra uma rodada de limpeza e organização.
+
+### Removido
+
+- Geração de Word (`python-docx`) em `gerar_pfm()` — PDF (HTML via Playwright) passa a ser o único
+  documento gerado, confirmado por Dennis durante teste real. Helpers exclusivos do Word removidos
+  (`_cell_bg`, `_set_col_widths`, `_secao_row`, `_kv_row`, `_data_extenso`)
+
+### Corrigido
+
+- **Segurança**: `bot.py` não tinha guard `if __name__ == "__main__":` — importar o módulo
+  disparava `app.run_polling()` com o token real do Telegram. `import bot` agora é seguro
+- `ITEM_RE` só reconhecia unidade de compra com até 4 letras — palavra por extenso ("blocos")
+  caía no fallback sem preço unitário. Ampliado pra 15 letras (Lição #11)
+- `buscar_candidatos_pix()` cortava em top-3 com desempate por ordem de inserção (favorecia
+  pedidos mais antigos, escondendo candidatos legítimos mais novos em empate) — agora lista todos
+  os pedidos com saldo em aberto, ordenados por score e proximidade de valor, com total pendente
+  exibido na mensagem
+- `buscar_candidatos_nfe()`/`vincular_nfe()` exigiam `status='pago'` — pedido em pagamento
+  parcelado com nota já emitida pelo fornecedor não aparecia como candidato (caso real: GGV03-010).
+  Vínculo de NF-e agora independente do status de pagamento — são registros paralelos
+- Mensagem de confirmação de NF-e não dizia mais "Ciclo fechado" quando o pagamento ainda está em
+  andamento — agora mostra "Pagamento em andamento: R$X de R$Y pago (faltam R$Z)"
+
+### Adicionado
+
+- Módulo `nfe/` (`nfe/__init__.py` + `nfe/nfe.py`) — parsing/exibição de NF-e extraído de `bot.py`,
+  importável sem inicializar o bot (ADR-004)
+- Dispatch table interna (`_CB_DISPATCH`) em `responder_botao()` — substituiu um `if/elif` de 929
+  linhas (59 ramos) por 59 funções `_cb_*` nomeadas, mantendo um único `CallbackQueryHandler` e o
+  mesmo tratamento de erro (ADR-004)
+- Recibo (`_gerar_html_recibo()`) ganhou parágrafo narrativo com valor por extenso (`num2words`) e
+  quantidade/unidade do item — modelo baseado no recibo antigo em Excel do GGV01 (Valdir Aparecida
+  Silveira); layout em cartão mantido
+- `docs/decisoes/ADR-004-modularizacao-bot-py.md` — modularização parcial de `bot.py`, decidida
+  após processo de dois agentes independentes (propor + tentar derrubar)
+- `docs/LICOES_EXTRACAO.md` — item #11 (unidade de compra por extenso)
+- `.claude/settings.local.json` — restringe a skill `deep-research` a invocação explícita neste
+  projeto (gestão de custo de IA)
+
+### Auditoria (somente leitura, sem mudança de código)
+
+7 agentes especializados varreram o código em busca de reinvenção de bibliotecas prontas. Achado
+real aplicado: conversor de número por extenso manual (~85 linhas) trocado por `num2words`,
+validado byte-a-byte. A auditoria também encontrou uma vulnerabilidade de segurança real (ver
+"Próximas fiadas" no topo deste arquivo) e dois bugs de correção (`_parse_nfe()` não reusando
+`_parse_brl()`; comparação de campo errado em `buscar_candidatos_pix()` — nome fantasia vs. razão
+social) — catalogados como dívida técnica, não corrigidos nesta sessão.
 
 ---
 

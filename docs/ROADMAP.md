@@ -1,6 +1,6 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-02 (produção migrada e limpa; auto-cadastro via Receita; arquivos organizados por obra; taxas/impostos/serviços públicos; recibo automático; pagamento parcelado; base de insumos SINAPI; produção ativada + correções de cadastro ao vivo; enriquecimento de fornecedor via Receita — e-mail, telefone, CNAE; incidente crítico de exclusão de documento + correção)
+> Atualizado em: 2026-07-02 (produção migrada e limpa; auto-cadastro via Receita; arquivos organizados por obra; taxas/impostos/serviços públicos; recibo automático; pagamento parcelado; base de insumos SINAPI; produção ativada + correções de cadastro ao vivo; enriquecimento de fornecedor via Receita — e-mail, telefone, CNAE; incidente crítico de exclusão de documento + correção; **DOCX removido, ADR-004 (modularização), recibo narrativo, matching PIX/NF-e corrigido**)
 
 ---
 
@@ -83,7 +83,7 @@ Tabela `obras` no banco com dados por GGV. Substitui dicts hardcoded no código.
 - `/help` e handler de comando desconhecido
 - Menu de comandos registrado no Telegram
 
-**Fase 4b — Pedido de Compra 2.0** *(implementado — aguarda validação em produção)*
+**Fase 4b — Pedido de Compra 2.0** ✓ *(concluída — validada e DOCX removido em 2026-07-02)*
 
 Design aprovado em 2026-06-30. Referência: `prints/pc_alternativa_a.html`
 
@@ -91,14 +91,14 @@ Implementado em 2026-06-30:
 - `_PC_CSS` — CSS do documento como constante Python
 - `_gerar_html_pc(doc_id)` — gera HTML com dados reais do banco
 - `_html_para_pdf(html)` — converte para PDF via Playwright Chromium (async)
-- Handler `pfm` envia PDF; DOCX continua gerado silenciosamente para o OneDrive
 - PROMPT: 4 novos campos — Ramo de atividade, Número do orçamento, Vendedor, Telefone do vendedor
 - `fornecedores.ramo` — coluna adicionada, salva automaticamente ao gerar PFM
 
-Pendente:
-- Validar layout do PDF com orçamento real
-- Remover geração DOCX do fluxo principal após validação
-- Data da negociação: ainda usa `criado_em` como proxy
+Concluído em 2026-07-02:
+- Validado em produção; DOCX removido do fluxo principal (`gerar_pfm()` só gera PDF) — confirmado
+  por Dennis durante teste real ("será que realmente precisa disso? eu não vou usar")
+- Data da negociação: ainda usa `criado_em` como proxy (dívida técnica de baixa prioridade, não
+  bloqueante)
 
 **Fase 4c — Relatório de Compras por Obra** *(próxima)*
 
@@ -383,37 +383,70 @@ descarte num documento que já tinha virado pedido de verdade. A função nunca 
 - Navegação simplificada: "Cancelar" virou "← Voltar" nos três lugares onde aparecia; ao clicar
   numa mensagem antiga já vinculada a um pedido, abre o cockpit direto (um clique, não dois)
 
+**DOCX removido + ADR-004 (modularização) + correções de matching PIX/NF-e** ✓ *(concluída 2026-07-02)*
+
+Sessão motivada por um comentário do Eric (filho do Dennis, estudando engenharia de software) de
+que `bot.py` parecia "bagunçado".
+
+- `gerar_pfm()` parou de gerar Word — PDF (HTML via Playwright) é o único documento desde então
+- Bug de segurança corrigido: `bot.py` não tinha guard `if __name__ == "__main__":` — importar o
+  módulo disparava o polling real do Telegram. Corrigido; `import bot` agora é seguro
+- Auditoria de bibliotecas (7 agentes, somente leitura): conversor de número por extenso manual
+  (~85 linhas) trocado por `num2words`, validado byte-a-byte. Auditoria também encontrou uma
+  vulnerabilidade real não corrigida — ver Dívida Técnica
+- **ADR-004**: gatilho de linhas da ADR-003 disparou (bot.py em 3.994 linhas). Processo de dois
+  agentes (propor + derrubar) reduziu o escopo original — só dispatch table interna em
+  `responder_botao()` (929 linhas → 59 funções + dict) e extração do módulo `nfe/` (84 linhas,
+  importável sem `bot.py`). `fornecedor/`/`obra/`/`comprovante/` adiados com gatilho próprio
+- Recibo ganhou parágrafo narrativo (modelo do Excel antigo do GGV01) com quantidade do item e
+  valor por extenso, mantendo o layout em cartão
+- `ITEM_RE` corrigido pra aceitar unidade por extenso ("blocos"), não só abreviação — item #11 em
+  `docs/LICOES_EXTRACAO.md`
+- `buscar_candidatos_pix()` parou de cortar em top-3 — lista todos os pedidos com saldo aberto,
+  ordenados por score e proximidade de valor, com total pendente exibido
+- Regra de elegibilidade de NF-e mudou: não exige mais `status='pago'` — pagamento (PIX) e NF-e
+  são registros paralelos e independentes (caso real: GGV03-010, parcelado, nota já emitida)
+
 ---
 
 ## Próximas Fiadas
 
-1. **Estruturar itens de compra numa tabela própria** — hoje é texto corrido dentro de
+1. **🔴 Corrigir vulnerabilidade de segurança** — `responder_botao()` sem checagem de `DONO_ID` +
+   SQL injection via nome de coluna em `atualizar()`/`atualizar_obra()`. Prioridade alta.
+2. **Estruturar itens de compra numa tabela própria** — hoje é texto corrido dentro de
    `dados_claude`; gatilho concreto: Dennis não conseguiu consultar o preço de um item já comprado
    (Te de redução 32x25, GGV03-006) sem leitura manual do texto inteiro. Primeiro passo real da
    fase "lista de compras" — decidir schema e como cada item se liga a `insumos_sinapi`
-2. **Fechar o GGV03-003** — pagamento parcelado em andamento, falta quitar o restante
-3. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-4. **Usar entrega em produção real** — deixar o fluxo rodar no dia a dia antes de revisitar extração (gatilho na ADR-003)
-5. Validar PC 2.0 em produção + remover DOCX do fluxo principal
-6. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração encontrado
-7. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
+3. **Fechar o GGV03-003** — pagamento parcelado em andamento, falta quitar o restante
+4. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+5. **Usar entrega em produção real** — deixar o fluxo rodar no dia a dia antes de revisitar extração (gatilho na ADR-003)
+6. Revisitar `fornecedor/`/`obra/`/`comprovante/` quando os gatilhos da ADR-004 ocorrerem
+7. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração encontrado
+8. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
    — perguntar sobre a `- Copy.jpeg` antes, é backup pessoal do Dennis
-8. Acesso via Claude Code Remote do celular — sem ambiente configurado; ideia de hospedar Laura +
+9. Acesso via Claude Code Remote do celular — sem ambiente configurado; ideia de hospedar Laura +
    banco num servidor Proxmox em casa (Eric administra) registrada, não iniciada
 
 ---
 
 ## Dívida Técnica
 
+- **🔴 Crítica — vulnerabilidade de segurança em `responder_botao()`**
+  Dispatcher central de callback_query do Telegram não verifica `DONO_ID` (diferente de todos os
+  outros handlers). Combinado com `atualizar()`/`atualizar_obra()`, que interpolam nome de coluna
+  direto em SQL a partir de `**kwargs` sem allowlist, um usuário capaz de mandar `callback_data`
+  arbitrário (cliente Telegram customizado) pode disparar ações reais e potencialmente injetar SQL.
+  Encontrado na auditoria de bibliotecas de 2026-07-02. Correção pequena, ainda não aplicada.
+
 - **Baixa — Separar conceito de Obra do código GGV internamente**
   Decisão 2026-06-29: a mudança é de linguagem e domínio, não de migração imediata.
   Interface já usa "Obra GGV03"; banco mantém coluna `ggv` por compatibilidade.
-  `pfm_codigo` (ex: GGV03-009), arquivos `.docx` e links existentes não serão alterados.
+  `pfm_codigo` (ex: GGV03-009) e links existentes não serão alterados.
   Dívida futura: migrar domínio interno `ggv` → `obra_codigo` em fiada específica.
 
 - **Média — `gerar_pfm()` acumula responsabilidades**
-  Mistura geração Word, gravação no banco, criação de lançamento e arquivamento em disco.
-  Justificativa: dificulta testes e futuras extensões.
+  Grava no banco, cria lançamento e arquiva em disco (a geração do documento em si — Word — foi
+  removida em 2026-07-02). Justificativa: dificulta testes e futuras extensões.
 
 - **Baixa — GGV02 sem `pasta_onedrive` configurada**
   Estrutura real da pasta (sem "00 Orçamentos", com "51 Obra - Materiais e serviços") não
@@ -428,11 +461,22 @@ descarte num documento que já tinha virado pedido de verdade. A função nunca 
   Se o Claude não extrair `ID da transação`, a proteção por identificador não atua.
   Justificativa: afeta apenas comprovantes sem número de transação visível; raro no MP.
 
-- **Média — `bot.py` monolítico com 3277 linhas**
-  Acima do limite ADR-001 (2.500–3.000 linhas). Extração do domínio `entrega/` avaliada e
-  **adiada por decisão** (ADR-003) — os dados de entrega ainda não são independentes
-  (acoplados a `lancamentos` e `documentos`) e a feature tem zero horas de produção real.
-  Gatilho de revisão explícito em `docs/decisoes/ADR-003-extracao-entrega-adiada.md`.
+- **Média — `bot.py` com 4.068 linhas, parcialmente modularizado**
+  ADR-004 (2026-07-02) extraiu dispatch table + módulo `nfe/`. `fornecedor/`/`obra/`/`comprovante/`
+  avaliados e adiados com gatilho próprio (schema de `parcelas_pagamento` não decidido,
+  `_total_pago()` usa banco global, atomicidade de `_gerar_recibo()`). Extração de `entrega/`
+  continua adiada (ADR-003) — motivo substantivo não mudou, só o contador de linhas.
+
+- **Baixa — `buscar_candidatos_pix()` faz SQL inline direto contra `lancamentos`/`fornecedores`**
+  Diferente de `buscar_candidatos_nfe()`, que já reusa função de domínio. Mapeado na ADR-004.
+
+- **Média — `_gerar_recibo()` toca 4 domínios numa função de 46 linhas**
+  Maior ponto de acoplamento cruzado do sistema hoje (parcelas, fornecedores, documentos, pedido).
+  Motivo pelo qual `fornecedor/`/`comprovante/` não foram extraídos na ADR-004.
+
+- **Baixa — `_parse_nfe()` não reusa `_parse_brl()` já corrigido**
+  Reimplementa limpeza de valor BRL na mão — reintroduz o bug da Lição #4 especificamente pra NF-e
+  (valores sem centavos, ex: "R$ 10.99", seriam interpretados errado).
 
 ---
 

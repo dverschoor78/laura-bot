@@ -25,8 +25,11 @@ dependencies = [
     # Logs simples e poderosos
     "loguru>=0.7",
 
-    # Geração de documentos Word a partir de templates
-    "docxtpl>=0.16",
+    # Leitura de .docx (usado por scripts/import_fornecedores.py) — bot.py gera só PDF, não Word
+    "python-docx>=0.8",
+
+    # Renderização de HTML -> PDF (Pedido de Compra, recibo)
+    "playwright>=1.40",
 
     # Manipulação de Excel (.xlsx)
     "openpyxl>=3.1",
@@ -36,6 +39,9 @@ dependencies = [
 
     # Manipulação de imagens (pré-processamento)
     "Pillow>=10.0",
+
+    # Valor por extenso (recibo em PIX/parcela) — pt_BR já validado contra modelo real
+    "num2words>=0.5.14",
 ]
 
 [project.optional-dependencies]

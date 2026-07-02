@@ -61,3 +61,8 @@ tests/fixtures/*.png
 *.swo
 .DS_Store
 Thumbs.db
+
+# ============================================================
+# Claude Code — config pessoal, não compartilhada com o time
+# ============================================================
+.claude/settings.local.json

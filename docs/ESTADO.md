@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-07-02
-> Sessão: Preparação para produção — migração, limpeza, auto-cadastro via Receita, organização automática de arquivos, taxas/impostos/serviços públicos, pagamento parcelado + recibo assinado, base de insumos SINAPI, ativação em produção + cadastro retroativo ao vivo de GGV03, enriquecimento de fornecedor via Receita (e-mail, telefone, CNAE), **incidente crítico de exclusão de documento + correção**
+> Sessão: Preparação para produção — migração, limpeza, auto-cadastro via Receita, organização automática de arquivos, taxas/impostos/serviços públicos, pagamento parcelado + recibo assinado, base de insumos SINAPI, ativação em produção + cadastro retroativo ao vivo de GGV03, enriquecimento de fornecedor via Receita (e-mail, telefone, CNAE), incidente crítico de exclusão de documento + correção. **Sessão seguinte**: remoção do DOCX (PC 2.0 é o único formato agora), correção de segurança crítica (`bot.py` sem guard `__main__`), auditoria de bibliotecas por 7 agentes especializados, **ADR-004 — modularização parcial de `bot.py`** (dispatch table + módulo `nfe/`), recibo com texto narrativo + valor por extenso, correções de matching PIX/NF-e (lista completa + regra de elegibilidade), restrição de custo de IA (deep-research)
 
 ---
 
@@ -10,8 +10,13 @@
 🟢 Verde
 
 - Fundação concluída.
-- Ciclo documental completo: orçamento → PFM → A PAGAR → PIX → PAGO → NF-e vinculada.
-- PC 2.0 (PDF) implementado mas ainda não validado em produção — DOCX continua funcionando.
+- Ciclo documental completo: orçamento → PFM → A PAGAR → PIX → PAGO → NF-e vinculada (vínculo de
+  NF-e agora independente do status de pagamento — ver Última Fiada Implementada).
+- **DOCX removido do fluxo principal** — PC 2.0 (PDF via HTML/Playwright) é o único formato gerado
+  desde 2026-07-02. Validado em produção.
+- **`bot.py` parcialmente modularizado (ADR-004)**: dispatch table interna em `responder_botao()`
+  (929 linhas → 59 funções nomeadas) + módulo `nfe/` extraído. `fornecedor/`, `obra/`,
+  `comprovante/` avaliados e adiados com gatilho próprio (ver `docs/decisoes/ADR-004-*.md`).
 - **`data/laura.db` (produção) migrado e pronto** — schema estava desatualizado desde antes da
   Fase 4a (faltavam `obras`, `entrega_fotos`, 12 colunas de `lancamentos`); corrigido em 2026-07-01.
 - Cadastro de fornecedores limpo e validado contra a Receita Federal (27 registros).
@@ -67,7 +72,8 @@
 
 ## Versão Atual
 
-**v0.8.4** — `_obs()` corrigida (bug antigo) + navegação "Cancelar"→"Voltar" simplificada
+**v0.9.0** — DOCX removido (PC 2.0 é o único formato), ADR-004 (dispatch table + módulo `nfe/`),
+recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte artificial de lista
 
 ---
 
@@ -78,16 +84,18 @@
 - Extração de dados por IA (Claude haiku-4-5) após tipo confirmado
 - Edição de qualquer campo extraído antes de confirmar
 - Seleção e correção manual de tipo e GGV
-- Geração de PFM Word numerado (ex: GGV03-009)
+- Geração de PFM em PDF numerado (ex: GGV03-009) — DOCX não é mais gerado
 - Salvamento automático do PFM na pasta OneDrive do GGV
 - Criação de lançamento A PAGAR no banco
 - Consulta de pedido digitando o código (ex: GGV03-009)
 - Tela do pedido: dados financeiros, arquivos vinculados e histórico resumido
-- Identificação de candidatos A PAGAR ao receber comprovante PIX
+- Identificação de candidatos A PAGAR ao receber comprovante PIX — lista completa, ordenada por
+  relevância (não só os 3 melhores), com total pendente exibido
 - Confirmação de pagamento com botões por candidato
 - Marcação de lançamento como PAGO com gravação de valor, data e identificador
 - Proteção contra duplo pagamento e reutilização do mesmo comprovante
-- Recebimento e vinculação de NF-e ao pedido pago
+- Recebimento e vinculação de NF-e a qualquer pedido sem NF-e (independente do status de
+  pagamento — nota pode ser emitida antes de o pedido estar totalmente pago)
 - Revisão do Pedido de Compra com geração de arquivo rev01, rev02...
 - Cockpit do pedido com número da NF-e, botões de comprovante e nota
 - Registro de entrega: foto, /entrega, botão no cockpit, observação com sugestões
@@ -104,6 +112,68 @@
 ---
 
 ## Última Fiada Implementada
+
+**Remoção do DOCX + ADR-004 (modularização) + correções de matching PIX/NF-e** *(2026-07-02)*
+
+Sessão iniciada com o pedido do Eric (filho do Dennis, estudando engenharia de software) de que
+`bot.py` estava "bagunçado" — virou o gatilho pra uma rodada grande de limpeza e organização.
+
+**DOCX removido do fluxo principal**: `gerar_pfm()` parou de montar `Document()` (python-docx) —
+o PDF (HTML via Playwright, já era o formato entregue de verdade) passa a ser o único documento
+gerado. Removidos os helpers exclusivos do Word (`_cell_bg`, `_set_col_widths`, `_secao_row`,
+`_kv_row`, `_data_extenso`) e os imports de `docx`.
+
+**Bug de segurança crítico corrigido**: `bot.py` não tinha guard `if __name__ == "__main__":` — o
+bloco final (`init_db()`, `Application.builder()`, `app.run_polling()`) rodava automaticamente ao
+importar o módulo, sempre com o token real do Telegram. Descoberto quando um script de teste
+conectou o bot de produção por engano por alguns minutos (sem dano — nenhuma mensagem real chegou
+nesse intervalo). Corrigido; `import bot` agora é seguro para scripts/testes.
+
+**Auditoria de bibliotecas (7 agentes especializados, somente leitura)**: varredura completa do
+código em busca de reinvenção de bibliotecas prontas. Achado real aplicado: conversor de número por
+extenso manual (~85 linhas) trocado por `num2words` (biblioteca já madura), validado byte-a-byte
+contra os mesmos casos. A auditoria também encontrou, de bônus, uma vulnerabilidade real
+(`responder_botao()` sem checagem de `DONO_ID`, combinada com SQL injection via nome de coluna não
+sanitizado em `atualizar()`/`atualizar_obra()`) — **ainda não corrigida**, ver Dívidas Técnicas.
+
+**ADR-004 — modularização parcial de `bot.py`**: gatilho de linhas da ADR-003 (~3.500) disparou
+(arquivo estava em 3.994). Processo de dois agentes independentes (propor + tentar derrubar, mesmo
+método da ADR-003) reduziu drasticamente o escopo original — só 2 fiadas aprovadas: dispatch table
+interna em `responder_botao()` (929 linhas, 59 grupos de ramos → dict, extração mecânica via script
+AST, verificada byte-a-byte antes de substituir) e extração do módulo `nfe/` (`nfe/__init__.py` +
+`nfe/nfe.py`, 84 linhas, importável sem `bot.py`). `fornecedor/`, `obra/`, `comprovante/` avaliados
+e adiados com gatilho próprio documentado (riscos reais encontrados: quebra de atomicidade em
+`_gerar_recibo()`, `_total_pago()` usando banco global em vez de parâmetro). Ver
+`docs/decisoes/ADR-004-modularizacao-bot-py.md`.
+
+**Recibo ganhou texto narrativo**: modelo antigo do Excel (GGV01, Valdir Aparecida Silveira) usava
+um parágrafo tipo "Recebi de X, a importância supra de R$ Y (valor por extenso), Z. Por ser a
+expressão da verdade, dou quitação..." — o recibo atual só mostrava a descrição do item, sem
+quantidade. `_gerar_html_recibo()` mantém o layout em cartão mas troca a seção "Serviço Prestado"
+por esse parágrafo completo, com quantidade/unidade do item e valor por extenso (`num2words`).
+
+**Bug de parsing corrigido**: `ITEM_RE` só reconhecia unidade de compra com até 4 letras — palavra
+por extenso ("blocos" em vez de "UND") caía no fallback sem preço unitário. Ampliado pra 15 letras.
+Documentado como item #11 em `docs/LICOES_EXTRACAO.md`.
+
+**Matching de comprovante PIX — lista completa**: `buscar_candidatos_pix()` cortava em top-3 com
+desempate por ordem de inserção (favorecia sempre os pedidos mais antigos, escondendo pedidos
+legítimos mais novos em caso de empate). Agora lista **todos** os pedidos com saldo em aberto,
+ordenados por score e, em empate, por proximidade de valor — e virou também uma ferramenta de
+gestão (mostra o total pendente no topo da mensagem).
+
+**Regra de elegibilidade de NF-e mudou**: `buscar_candidatos_nfe()`/`vincular_nfe()` exigiam
+`status='pago'` — um pedido em pagamento parcelado (parcial pago, entrega já feita, nota já
+emitida pelo fornecedor) não aparecia como candidato. Decisão do Dennis: NF-e pode ser vinculada a
+qualquer momento, independente do quanto já foi pago — pagamento (PIX) e NF-e são registros
+paralelos, não um dependente do outro. Mensagem de confirmação (`_cb_nfe_confirmar`) ajustada pra
+não dizer mais "Ciclo fechado" quando o pagamento ainda está em andamento.
+
+**Deep-research restrito neste projeto**: configurado via `.claude/settings.local.json` pra não
+disparar automaticamente — só sob invocação explícita (`/deep-research`). Parte de uma conversa
+mais ampla sobre gestão de custo de IA entre os projetos do Dennis (ver memória `user_gestao_custos_ia`).
+
+---
 
 **Incidente crítico: documento de pedido pago apagado por botão antigo — corrigido** *(2026-07-02)*
 
@@ -636,17 +706,49 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Dívidas Técnicas Conhecidas
 
-- `bot.py` monolítico com 3277+ linhas — acima do limite ADR-001 (2.500–3.000); extração do domínio entrega avaliada e **adiada por decisão** (ADR-003), com gatilho de revisão explícito — não é mais "refatoração prioritária", é "aguardando gatilho"
-- `gerar_pfm()` acumula responsabilidades: geração Word + gravação no banco + criação de lançamento + arquivamento em disco
+- 🔴 **Vulnerabilidade de segurança real, não corrigida**: `responder_botao()` (dispatcher central
+  de todo `callback_query` do Telegram) não verifica `DONO_ID` — diferente de todos os outros
+  handlers. Combinado com `atualizar()`/`atualizar_obra()` (que interpolam nomes de coluna direto
+  em SQL a partir de `**kwargs`, sem allowlist), um usuário capaz de mandar `callback_data`
+  arbitrário (via cliente Telegram customizado, ex: Telethon/Pyrogram) pode disparar ações reais e
+  potencialmente injetar SQL, sem nunca ter clicado em botão nenhum. Encontrado na auditoria de
+  bibliotecas de 2026-07-02; correção é pequena (checagem de `DONO_ID` + allowlist de colunas) mas
+  ainda não aplicada — **próxima prioridade de segurança**.
+- `bot.py` com 4.068 linhas — parcialmente modularizado (ADR-004, 2026-07-02): dispatch table +
+  módulo `nfe/` extraído. `fornecedor/`, `obra/`, `comprovante/` avaliados e adiados com gatilho
+  próprio (ver ADR-004); extração do domínio `entrega/` continua adiada (ADR-003, motivo não mudou)
+- `gerar_pfm()` acumula responsabilidades: gravação no banco + criação de lançamento + arquivamento
+  em disco (a geração de documento em si — Word — foi removida em 2026-07-02)
 - `mime_type` não gravado no banco — inferido pela extensão do arquivo
 - Deduplicação de comprovante por `identificador_comprovante` não atua quando Claude
   não extrai o ID da transação (comprovante sem número visível)
 - **GGV02 sem `pasta_onedrive` configurada** — estrutura real da pasta é diferente da convenção
   nova (GGV03); decisão de onde arquivar pendente (ver Fiada "Organização automática" acima)
+- `buscar_candidatos_pix()` faz SQL inline direto contra `lancamentos`/`fornecedores` em vez de
+  reusar função de domínio (diferente de `buscar_candidatos_nfe()`, que já faz certo) — mapeado na
+  ADR-004, não corrigido
+- `_gerar_recibo()` toca 4 domínios numa função de 46 linhas — maior ponto de acoplamento cruzado
+  do sistema hoje, mais entrelaçado que `entrega/`; motivo pelo qual `fornecedor/`/`comprovante/`
+  não foram extraídos nesta rodada (ver ADR-004)
+- `_parse_nfe()` reimplementa limpeza de valor BRL na mão em vez de reusar `_parse_brl()` já
+  corrigido — reintroduz o bug da Lição #4 (`docs/LICOES_EXTRACAO.md`) especificamente pra NF-e
 
 ---
 
 ## Decisões Recentes
+
+- **ADR-004 (2026-07-02)** — gatilho de linhas da ADR-003 disparou (bot.py > 3.500 linhas). Processo
+  de dois agentes (propor + derrubar) reduziu o escopo original (extrair fornecedor/nfe/obra/
+  comprovante + dividir dispatcher) pra só 2 fiadas: dispatch table interna + módulo `nfe/`. Ver
+  `docs/decisoes/ADR-004-modularizacao-bot-py.md`.
+
+- **DOCX removido (2026-07-02)** — `gerar_pfm()` só gera PDF desde então; confirmado por Dennis
+  durante teste real ("será que realmente precisa disso? eu não vou usar"). Documentos antigos em
+  `data/pfms/*.docx` são histórico, não foram apagados.
+
+- **NF-e vinculável a qualquer momento (2026-07-02)** — antes exigia `status='pago'`; caso real
+  (GGV03-010, pagamento parcelado com nota já emitida) expôs que isso escondia candidatos legítimos.
+  Pagamento (PIX) e NF-e passaram a ser registros paralelos e independentes.
 
 - **Organização automática de arquivos (2026-07-01)** — `obras.pasta_onedrive` passou a guardar a
   raiz da obra, não mais uma subpasta específica; cada tipo de documento deriva sua pasta por
@@ -678,24 +780,27 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Objetivo da Próxima Sessão
 
-1. **Começar por aqui, combinado explicitamente com o Dennis**: estruturar os itens de compra numa
-   tabela própria (hoje é texto corrido dentro de `dados_claude`) — é o primeiro passo real da fase
-   "lista de compras", e o gatilho concreto foi ele não conseguir consultar o preço de um item já
-   comprado (Te de redução 32x25, GGV03-006) sem eu ter que ler o texto inteiro do pedido. Pensar
-   junto: schema da tabela de itens, como cada item se liga (ou não) a `insumos_sinapi`, o que fazer
-   com os itens dos 8 pedidos que já estão só em texto
-2. **Fechar o GGV03-003** — pagamento parcelado em andamento (R$2.500 de R$30.000 pago); falta o
-   restante das parcelas até quitar
-3. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-4. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
+1. **🔴 Corrigir a vulnerabilidade de segurança em `responder_botao()`** — checagem de `DONO_ID`
+   ausente + SQL injection via nome de coluna em `atualizar()`/`atualizar_obra()`. Correção pequena
+   (duas linhas + allowlist), mas prioridade alta — bot está em produção. Ver Dívidas Técnicas.
+2. **Estruturar os itens de compra numa tabela própria** (hoje é texto corrido dentro de
+   `dados_claude`) — é o primeiro passo real da fase "lista de compras", e o gatilho concreto foi
+   Dennis não conseguir consultar o preço de um item já comprado (Te de redução 32x25, GGV03-006)
+   sem ler o texto inteiro do pedido. Pensar junto: schema da tabela de itens, como cada item se
+   liga (ou não) a `insumos_sinapi`, o que fazer com os itens dos pedidos que já estão só em texto
+3. **Fechar o GGV03-003** — pagamento parcelado em andamento; falta o restante das parcelas
+4. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+5. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
    no dia a dia antes de qualquer nova decisão sobre extração (ver gatilho da ADR-003)
-5. **Validar PC 2.0** — testar PDF com orçamento real; remover DOCX após validação
-6. **Alimentar `docs/LICOES_EXTRACAO.md`** sempre que aparecer um novo bug de parsing/extração —
+6. **Considerar revisitar `fornecedor/`/`obra/`/`comprovante/`** quando os gatilhos específicos da
+   ADR-004 ocorrerem (dono de `parcelas_pagamento` decidido, `_total_pago()` aceitar `db_path`,
+   atomicidade de `_gerar_recibo()` resolvida) — não propor antes disso
+7. **Alimentar `docs/LICOES_EXTRACAO.md`** sempre que aparecer um novo bug de parsing/extração —
    não só corrigir e seguir (ver [[feedback_documentar_padroes_bugs]] na memória)
-7. **Limpeza opcional no OneDrive** — 2 arquivos órfãos do pedido excluído Base Forte/GGV03-006
+8. **Limpeza opcional no OneDrive** — 2 arquivos órfãos do pedido excluído Base Forte/GGV03-006
    antigo (`.docx`, `.pdf` em `04 Compras`); a `- Copy.jpeg` foi feita pelo próprio Dennis
    (backup pessoal) — perguntar se ele quer manter essa antes de apagar
-8. **Acesso via Claude Code Remote (celular)** — sem ambiente configurado ainda; ideia de hospedar
+9. **Acesso via Claude Code Remote (celular)** — sem ambiente configurado ainda; ideia de hospedar
    Laura + banco num servidor Proxmox em casa (Eric administra) registrada, não iniciada
 
 ---
@@ -716,6 +821,6 @@ Arquitetura detalhada:
 
 ---
 
-*Última atualização: 2026-07-01*
+*Última atualização: 2026-07-02*
 *Responsáveis: Dennis + Claude*
 *Próxima revisão: ao final da próxima sessão*
