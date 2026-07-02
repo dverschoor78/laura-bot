@@ -17,7 +17,9 @@
 - Cadastro de fornecedores limpo e validado contra a Receita Federal (27 registros).
 - `documentos`/`lancamentos` de produção zerados por decisão — numeração de PFM reinicia do zero.
 - **Fornecedor novo se auto-cadastra a partir do orçamento**, com dado oficial da Receita quando
-  disponível; sincronização automática em segundo plano quando a consulta falha na hora.
+  disponível. Job periódico (6h) resincroniza **todos** os fornecedores, não só os pendentes —
+  razão social/cidade/UF/CNAE sempre atualizam com o dado mais recente; ramo, e-mail e telefone só
+  preenchem se ainda estiverem vazios (Receita tem risco real de ficar desatualizada nesses três).
 - **Documentos organizados automaticamente na pasta OneDrive de cada obra** — orçamento, PFM,
   comprovante, NF-e e fotos de entrega arquivados com nome e pasta padronizados, sem ação manual.
 - **Taxas, impostos e serviços públicos** (CREA, ONR, prefeitura, Copel, Sanepar) passam pelo
@@ -45,12 +47,16 @@
 - **Tela de resumo (antes de gerar o pedido) passou a puxar o nome do fornecedor já cadastrado**
   quando só o CNPJ está no documento — antes travava em "Fornecedor não identificado" mesmo com
   o fornecedor já conhecido pela Laura.
+- **Job de sincronização com a Receita passou a rodar em todos os fornecedores, sempre** (não só
+  pendentes) — três políticas por tipo de campo: razão social/cidade/UF/CNAE sempre atualizam;
+  ramo prioriza o texto natural do documento (CNAE só como fallback); e-mail/telefone só entram se
+  ainda vazios. Avisa só quando algo muda de verdade.
 
 ---
 
 ## Versão Atual
 
-**v0.8.1** — Enriquecimento de fornecedor via Receita (e-mail, telefone, CNAE) + correção de nome não reaproveitado
+**v0.8.2** — Sincronização com a Receita sempre ativa (não só pendentes), com política por campo
 
 ---
 
@@ -87,6 +93,31 @@
 ---
 
 ## Última Fiada Implementada
+
+**Sincronização com a Receita sempre ativa, com política por campo** *(2026-07-02)*
+
+Depois do enriquecimento (fiada anterior), Dennis notou que o job de 6h só mexe em fornecedor
+`receita_pendente=1` — como nenhum estava mais pendente, toda vez que um campo novo é adicionado
+(como o CNAE) é preciso rodar um script manual pra propagar pros já cadastrados. Perguntou se não
+seria melhor sincronizar sempre.
+
+**Decisão em três partes**, refinada em conversa (não foi uma decisão única):
+- **Razão social, cidade, UF, CNAE**: sempre atualiza com o dado mais recente da Receita — são
+  dados oficiais de cadastro, baixo risco de estar errado
+- **Ramo**: continua priorizando o texto natural já salvo (extraído de um documento real, ex:
+  "Comércio de Materiais de Construção") — o CNAE da Receita (mais burocrático, ex: "Comércio
+  varejista de materiais de construção em geral") só entra como fallback quando ainda não há nada.
+  Achado durante o teste: sincronizar sempre trocaria o texto natural pelo burocrático a cada 6h —
+  Dennis apontou que "ramo é uma coisa, CNAE é outra"
+- **E-mail, telefone**: só preenchem se ainda estiverem vazios, nunca sobrescrevem — Dennis notou
+  que esses dois têm risco real de estar desatualizados no cadastro da Receita (empresa atualiza
+  endereço por obrigação legal, mas raramente atualiza telefone/e-mail registrado)
+
+O job (`_sincronizar_receita_fornecedores`, renomeado de `_sincronizar_receita_pendentes`) agora
+roda em todos os fornecedores com CNPJ a cada 6h, mas só grava quando algo realmente muda, e só
+avisa o Dennis quando isso acontece — nada de mensagem repetida sem novidade.
+
+---
 
 **Enriquecimento de fornecedor via Receita — e-mail, telefone, CNAE** *(2026-07-02)*
 

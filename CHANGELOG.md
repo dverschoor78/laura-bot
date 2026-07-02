@@ -47,6 +47,32 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Sincronização com a Receita sempre ativa, com política por campo] — 2026-07-02
+
+### Job periódico deixa de mexer só em pendências
+
+Job de 6h passou a resincronizar **todos** os fornecedores com CNPJ, não só os marcados
+`receita_pendente=1` — antes disso, toda vez que um campo novo fosse adicionado (como o CNAE),
+seria preciso rodar um script manual pra propagar pros fornecedores já cadastrados.
+
+Três políticas diferentes por tipo de campo, decididas em conversa (não é um "sempre sobrescreve"
+genérico):
+
+- **Razão social, cidade, UF, CNAE**: sempre atualiza com o dado mais recente da Receita — dado
+  oficial de cadastro, baixo risco de estar errado
+- **Ramo**: continua priorizando o texto natural já salvo (extraído de documento real, ex:
+  "Comércio de Materiais de Construção"); o CNAE da Receita (mais burocrático) só entra como
+  fallback quando ainda não há nada — "ramo é uma coisa, CNAE é outra"
+- **E-mail, telefone**: só preenchem se ainda estiverem vazios, nunca sobrescrevem — risco real
+  de a Receita estar desatualizada nesses dois (empresa atualiza endereço por obrigação legal,
+  raramente atualiza contato)
+
+`_sincronizar_receita_pendentes` renomeada para `_sincronizar_receita_fornecedores` (nome não
+refletia mais o comportamento). Só grava no banco e avisa o Dennis quando algo muda de verdade —
+sem mensagem repetida a cada 6h sem novidade nenhuma.
+
+---
+
 ## [Produção ativada + cadastro retroativo completo de GGV03] — 2026-07-01
 
 ### Primeira vez rodando de verdade, e o que isso revelou

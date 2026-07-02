@@ -348,6 +348,20 @@ andamento, R$2.500 de R$30.000).
 - Incidente operacional resolvido: bot caiu com "database is locked" porque o DB Browser for
   SQLite estava aberto com o `laura.db` — nunca deixar visualizador de banco aberto com o bot rodando
 
+**Sincronização com a Receita sempre ativa, com política por campo** ✓ *(concluída 2026-07-02)*
+
+Job periódico deixou de mexer só em fornecedor `receita_pendente=1` — agora resincroniza todos os
+fornecedores com CNPJ a cada 6h, com três políticas diferentes por tipo de campo:
+
+- Razão social, cidade, UF, CNAE: sempre atualiza com o dado mais recente (oficial, baixo risco)
+- Ramo: prioriza o texto natural do documento; CNAE só como fallback quando vazio — "ramo é uma
+  coisa, CNAE é outra"
+- E-mail, telefone: só preenche se vazio, nunca sobrescreve — risco real de a Receita estar
+  desatualizada nesses dois
+
+Função renomeada `_sincronizar_receita_pendentes` → `_sincronizar_receita_fornecedores`. Só grava
+e avisa quando algo muda de verdade — sem mensagem repetida a cada 6h sem novidade.
+
 ---
 
 ## Próximas Fiadas

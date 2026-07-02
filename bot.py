@@ -2712,42 +2712,58 @@ async def _gerar_recibo(ctx, parcela_id: int, motivo: str):
         reply_markup=teclado_parcelas(pfm_codigo)
     )
 
-async def _sincronizar_receita_pendentes(ctx: ContextTypes.DEFAULT_TYPE):
-    """Job periódico: tenta de novo os fornecedores que ficaram sem resposta da Receita na hora do cadastro."""
+async def _sincronizar_receita_fornecedores(ctx: ContextTypes.DEFAULT_TYPE):
+    """Job periódico: resincroniza TODOS os fornecedores com CNPJ contra a Receita — não só os
+    pendentes. Três políticas diferentes por tipo de campo:
+      - razão social, cidade, UF, CNAE: sempre reflete a Receita mais recente (dado oficial de
+        cadastro, baixo risco de estar errado — pode sobrescrever)
+      - ramo: prioriza o texto natural já salvo (extraído de documento real); CNAE da Receita só
+        entra como fallback quando ainda não há nada
+      - e-mail, telefone: só preenche se ainda estiver vazio — a Receita tem risco real de estar
+        desatualizada nesses dois, nunca sobrescreve o que já existe
+    Avisa só quando algo muda de verdade."""
     with sqlite3.connect(DB_PATH) as con:
-        pendentes = con.execute(
-            "SELECT id, cnpj FROM fornecedores WHERE receita_pendente=1"
+        fornecedores = con.execute(
+            "SELECT id, cnpj, razao_social, cidade, uf, ramo, cnae, email, whatsapp "
+            "FROM fornecedores WHERE cnpj IS NOT NULL AND cnpj != ''"
         ).fetchall()
-    if not pendentes:
+    if not fornecedores:
         return
 
-    resolvidos = 0
-    for forn_id, cnpj in pendentes:
+    atualizados = 0
+    for forn_id, cnpj, razao_at, cidade_at, uf_at, ramo_at, cnae_at, email_at, whats_at in fornecedores:
         cnpj_digits = re.sub(r"\D", "", cnpj or "")
         if len(cnpj_digits) != 14:
             continue
         receita = _consultar_receita(cnpj_digits)
-        if receita:
-            with sqlite3.connect(DB_PATH) as con:
-                con.execute(
-                    "UPDATE fornecedores SET razao_social=COALESCE(razao_social,?), "
-                    "cidade=COALESCE(cidade,?), uf=COALESCE(uf,?), ramo=COALESCE(ramo,?), "
-                    "cnae=COALESCE(cnae,?), email=COALESCE(email,?), whatsapp=COALESCE(whatsapp,?), "
-                    "receita_pendente=0 WHERE id=?",
-                    (receita["razao_social"], receita["cidade"], receita["uf"], receita.get("ramo"),
-                     receita.get("cnae"), receita.get("email"), receita.get("telefone"), forn_id)
-                )
-            resolvidos += 1
+        if not receita:
+            continue
 
-    total = len(pendentes)
-    if resolvidos == total:
-        texto = f"📋 Receita sincronizada — {resolvidos} de {total} pendências resolvidas."
-    else:
-        restantes = total - resolvidos
-        verbo = "segue" if restantes == 1 else "seguem"
-        texto = (f"📋 Receita sincronizada — {resolvidos} de {total} pendências resolvidas. "
-                 f"{restantes} {verbo} tentando.")
-    await ctx.bot.send_message(chat_id=DONO_ID, text=texto)
+        novos = (
+            receita.get("razao_social") or razao_at,     # sempre atualiza
+            receita.get("cidade") or cidade_at,            # sempre atualiza
+            receita.get("uf") or uf_at,                     # sempre atualiza
+            ramo_at or receita.get("ramo"),                 # só preenche se vazio
+            receita.get("cnae") or cnae_at,                 # sempre atualiza
+            email_at or receita.get("email"),               # só preenche se vazio
+            whats_at or receita.get("telefone"),            # só preenche se vazio
+        )
+        if novos == (razao_at, cidade_at, uf_at, ramo_at, cnae_at, email_at, whats_at):
+            continue
+
+        with sqlite3.connect(DB_PATH) as con:
+            con.execute(
+                "UPDATE fornecedores SET razao_social=?, cidade=?, uf=?, ramo=?, cnae=?, "
+                "email=?, whatsapp=?, receita_pendente=0 WHERE id=?",
+                (*novos, forn_id)
+            )
+        atualizados += 1
+
+    if atualizados:
+        await ctx.bot.send_message(
+            chat_id=DONO_ID,
+            text=f"📋 Receita sincronizada — {atualizados} fornecedor(es) com dado novo ou atualizado."
+        )
 
 
 # ── Handlers ───────────────────────────────────────────────────────────────
@@ -4075,5 +4091,5 @@ app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, receber_arq
 app.add_handler(CallbackQueryHandler(responder_botao))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receber_texto))
 app.add_handler(MessageHandler(filters.COMMAND, comando_desconhecido))
-app.job_queue.run_repeating(_sincronizar_receita_pendentes, interval=6 * 60 * 60, first=120)
+app.job_queue.run_repeating(_sincronizar_receita_fornecedores, interval=6 * 60 * 60, first=120)
 app.run_polling()
