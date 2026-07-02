@@ -138,6 +138,7 @@ class Pedido:
     categoria:             Optional[str] = None
     qtd_parcelas:          int = 0
     total_pago:            float = 0.0
+    observacoes:           Optional[str] = None
 
     # Arquivos — populados por preparar_visualizacao_pedido()
     caminho_orcamento: Optional[str] = None
@@ -564,17 +565,29 @@ def _autopreencher_endereco(doc_id, ggv):
     if padrao:
         atualizar(doc_id, endereco_entrega=padrao)
 
-def _descartar_documento(doc_id):
+def _descartar_documento(doc_id, force=False) -> bool:
     """Apaga o registro e o arquivo de um documento que não virou nada (cancelado, sem
-    correspondência). Libera o hash para o mesmo arquivo poder ser reenviado depois."""
+    correspondência). Libera o hash para o mesmo arquivo poder ser reenviado depois.
+
+    Por padrão, nunca apaga um documento que já virou um pedido de verdade (pfm_numero
+    preenchido) — protege contra botão "Cancelar" de mensagem antiga do Telegram (ainda
+    clicável) acertando um documento que já foi usado há muito tempo. Use force=True só quando
+    a exclusão é intencional e explícita (ex: _excluir_pedido, depois de confirmação do usuário).
+    Retorna True se descartou, False se recusou por segurança."""
     with sqlite3.connect(DB_PATH) as con:
-        row = con.execute("SELECT caminho FROM documentos WHERE id=?", (doc_id,)).fetchone()
+        row = con.execute("SELECT caminho, pfm_numero FROM documentos WHERE id=?", (doc_id,)).fetchone()
+        if not row:
+            return False
+        caminho, pfm_numero = row
+        if pfm_numero is not None and not force:
+            return False
         con.execute("DELETE FROM documentos WHERE id=?", (doc_id,))
-    if row and row[0]:
+    if caminho:
         try:
-            Path(row[0]).unlink(missing_ok=True)
+            Path(caminho).unlink(missing_ok=True)
         except OSError:
             pass
+    return True
 
 def _excluir_pedido(pfm_codigo):
     """Apaga um pedido inteiro (cadastro errado): lançamento, parcelas, fotos de entrega e
@@ -604,7 +617,7 @@ def _excluir_pedido(pfm_codigo):
         con.execute("DELETE FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,))
 
     for doc_id in doc_ids:
-        _descartar_documento(doc_id)
+        _descartar_documento(doc_id, force=True)
 
 def registrar_lancamento(doc_id, pfm_codigo, ggv, fornecedor, valor_v, data_entrega, categoria=None):
     """Insere lançamento A PAGAR. Idempotente: se pfm_codigo já existe, retorna o existente."""
@@ -2150,6 +2163,7 @@ def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
         qtd_parcelas              = qtd_parcelas,
         total_pago                = total_pago_v,
         caminho_orcamento         = caminho,
+        observacoes               = _obs(dados).strip() or None,
     )
 
 def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
@@ -2269,7 +2283,10 @@ def mostrar_pedido(pedido: Pedido) -> str:
         hist.append(f"{data}  {evento}".strip())
     historico = "\n".join(hist) if hist else "—"
 
-    return SEP.join([cabecalho, financeiro, arquivos, historico])
+    blocos = [cabecalho, financeiro, arquivos, historico]
+    if pedido.observacoes:
+        blocos.append(f"📝 Obs: {pedido.observacoes}")
+    return SEP.join(blocos)
 
 def teclado_pedido(doc_id, pfm_codigo, doc_id_nfe=None, doc_id_comprovante=None,
                    qtd_fotos_entrega=0, obs_entrega=None, status=None, categoria=None,
@@ -3198,8 +3215,14 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(f"Confirmado: {label}")
 
         elif acao == "cancelar":
-            _descartar_documento(int(partes[1]))
-            await query.edit_message_text("Cancelado. Pode reenviar o arquivo se precisar.")
+            if _descartar_documento(int(partes[1])):
+                await query.edit_message_text("Cancelado. Pode reenviar o arquivo se precisar.")
+            else:
+                await query.answer(
+                    "Esse documento já virou um pedido — não dá mais pra cancelar por aqui "
+                    "(botão de uma mensagem antiga). Use \"🗑 Excluir pedido\" no cockpit se for o caso.",
+                    show_alert=True
+                )
 
         elif acao == "sel_tipo":
             _, doc_id, tipo, ggv = partes

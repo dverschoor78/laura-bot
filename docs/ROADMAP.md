@@ -1,6 +1,6 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-02 (produção migrada e limpa; auto-cadastro via Receita; arquivos organizados por obra; taxas/impostos/serviços públicos; recibo automático; pagamento parcelado; base de insumos SINAPI; produção ativada + correções de cadastro ao vivo; enriquecimento de fornecedor via Receita — e-mail, telefone, CNAE)
+> Atualizado em: 2026-07-02 (produção migrada e limpa; auto-cadastro via Receita; arquivos organizados por obra; taxas/impostos/serviços públicos; recibo automático; pagamento parcelado; base de insumos SINAPI; produção ativada + correções de cadastro ao vivo; enriquecimento de fornecedor via Receita — e-mail, telefone, CNAE; incidente crítico de exclusão de documento + correção)
 
 ---
 
@@ -362,18 +362,39 @@ fornecedores com CNPJ a cada 6h, com três políticas diferentes por tipo de cam
 Função renomeada `_sincronizar_receita_pendentes` → `_sincronizar_receita_fornecedores`. Só grava
 e avisa quando algo muda de verdade — sem mensagem repetida a cada 6h sem novidade.
 
+**Incidente crítico: documento de pedido pago apagado por botão antigo — corrigido** ✓ *(2026-07-02)*
+
+`_descartar_documento()` (criado ontem pro botão "Cancelar") apagou o documento raiz do GGV03-007
+(já pago) — um botão "Cancelar" de mensagem antiga do Telegram, ainda clicável, disparou o
+descarte num documento que já tinha virado pedido de verdade. A função nunca verificava isso.
+
+- Corrigido: `_descartar_documento()` agora recusa apagar documento com `pfm_numero` preenchido,
+  a menos que `force=True` (usado só por "🗑 Excluir pedido", com confirmação explícita)
+- Botão "Cancelar" mostra alerta claro quando recusa, em vez de falhar silenciosamente
+- Lançamento sobreviveu intacto (nunca é tocado por esse descarte); arquivos reais (PFM,
+  comprovante, NF-e) continuavam no OneDrive — só o vínculo interno do banco tinha sumido
+- Documento reconstruído a partir do PDF real gerado (mesmos valores exatos); restaurado duas
+  vezes — a primeira foi apagada de novo antes do bot subir com a correção
+- Esclarecimento paralelo: "Base Forte" e "Espaço Azul" são a mesma empresa (nome fantasia); o
+  cadastro do fornecedor já estava correto, a confusão era só de nome de arquivo no OneDrive
+
 ---
 
 ## Próximas Fiadas
 
-1. **Montar a fase "lista de compras"** — cadastro retroativo concluído; primeiro uso real de
-   `insumos_sinapi`
+1. **Estruturar itens de compra numa tabela própria** — hoje é texto corrido dentro de
+   `dados_claude`; gatilho concreto: Dennis não conseguiu consultar o preço de um item já comprado
+   (Te de redução 32x25, GGV03-006) sem leitura manual do texto inteiro. Primeiro passo real da
+   fase "lista de compras" — decidir schema e como cada item se liga a `insumos_sinapi`
 2. **Fechar o GGV03-003** — pagamento parcelado em andamento, falta quitar o restante
 3. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
 4. **Usar entrega em produção real** — deixar o fluxo rodar no dia a dia antes de revisitar extração (gatilho na ADR-003)
 5. Validar PC 2.0 em produção + remover DOCX do fluxo principal
 6. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração encontrado
-7. Limpeza opcional de 3 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
+7. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
+   — perguntar sobre a `- Copy.jpeg` antes, é backup pessoal do Dennis
+8. Acesso via Claude Code Remote do celular — sem ambiente configurado; ideia de hospedar Laura +
+   banco num servidor Proxmox em casa (Eric administra) registrada, não iniciada
 
 ---
 

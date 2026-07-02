@@ -10,14 +10,61 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Montar a fase "lista de compras" (primeiro uso real de `insumos_sinapi`)
+1. Estruturar itens de compra numa tabela própria (hoje é texto corrido em `dados_claude`) —
+   primeiro passo real da fase "lista de compras"
 2. Fechar o GGV03-003 (pagamento parcelado em andamento, R$2.500 de R$30.000 pago)
 3. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
 4. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
 5. Validar PDF do PC 2.0 com orçamento real em produção
 6. Remover DOCX do fluxo principal após validação
 7. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
-8. Limpeza opcional de 3 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
+8. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
+9. Acesso via Claude Code Remote do celular — ideia registrada, servidor Proxmox em casa (Eric)
+
+---
+
+## [Incidente crítico: documento de pedido pago apagado por botão antigo] — 2026-07-02
+
+### O que aconteceu
+
+Dennis relatou não conseguir acessar o GGV03-007 (já pago). O documento raiz (`documentos.id=28`)
+tinha sido apagado do banco — o lançamento sobreviveu intacto (a lista de pedidos continuava
+mostrando certo), mas a busca direta pelo código não encontrava mais nada.
+
+**Causa raiz**: `_descartar_documento()`, criado ontem pro botão "Cancelar" (ver fiada de
+"produção ativada"), não verificava se o documento já tinha virado um pedido de verdade antes de
+apagar. Telegram mantém botões de mensagens antigas clicáveis para sempre — um toque num
+"Cancelar" de uma mensagem de semanas atrás (de quando o GGV03-007 ainda estava em numeração
+antiga) disparou o descarte num documento já pago.
+
+### Correção
+
+- `_descartar_documento()` agora recusa apagar documento com `pfm_numero` preenchido, a menos que
+  `force=True` — usado só por "🗑 Excluir pedido", que já tem tela de confirmação explícita
+- Botão "Cancelar" mostra alerta claro quando a recusa acontece, em vez de falhar silenciosamente
+
+### Recuperação
+
+Arquivos reais (PFM em `.docx`/`.pdf`, comprovante, NF-e) continuavam intactos no OneDrive — só o
+vínculo interno do banco tinha sumido. Documento reconstruído lendo o PDF real gerado (mesmos
+valores exatos: subtotal R$3.700, desconto R$100, total R$3.600) e reaproveitando a observação já
+registrada sobre a correção do item com a Espaço Azul/Heliadi. Restaurado duas vezes — a primeira
+tentativa foi apagada de novo (outro botão antigo) antes do bot subir com a correção; a segunda,
+já protegida, ficou estável.
+
+### Esclarecimento paralelo (sem código)
+
+A confusão "Base Forte" vs. "Espaço Azul Materiais para Construção Ltda" se resolveu: são a mesma
+empresa, "Base Forte" é o nome fantasia. O cadastro de fornecedor já estava correto
+(`nome='Base Forte'`, `razao_social='ESPACO AZUL...'`) — a confusão era só de nome de arquivo no
+OneDrive, não do sistema.
+
+### Segundo bug: Observações não aparecia no cockpit
+
+Dennis achou que a observação registrada sobre a correção do item (água fria × esgoto) tinha se
+perdido de novo — estava salva certinha no banco, mas o cockpit do pedido (`mostrar_pedido()`)
+nunca exibia o campo Observações, só a tela de resumo antes de confirmar. Corrigido: `Pedido`
+ganhou o campo `observacoes`, cockpit mostra "📝 Obs: ..." quando existe algo registrado.
 
 ---
 

@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-07-02
-> Sessão: Preparação para produção — migração, limpeza, auto-cadastro via Receita, organização automática de arquivos, taxas/impostos/serviços públicos, pagamento parcelado + recibo assinado, base de insumos SINAPI, ativação em produção + cadastro retroativo ao vivo de GGV03, **enriquecimento de fornecedor via Receita (e-mail, telefone, CNAE)**
+> Sessão: Preparação para produção — migração, limpeza, auto-cadastro via Receita, organização automática de arquivos, taxas/impostos/serviços públicos, pagamento parcelado + recibo assinado, base de insumos SINAPI, ativação em produção + cadastro retroativo ao vivo de GGV03, enriquecimento de fornecedor via Receita (e-mail, telefone, CNAE), **incidente crítico de exclusão de documento + correção**
 
 ---
 
@@ -51,12 +51,19 @@
   pendentes) — três políticas por tipo de campo: razão social/cidade/UF/CNAE sempre atualizam;
   ramo prioriza o texto natural do documento (CNAE só como fallback); e-mail/telefone só entram se
   ainda vazios. Avisa só quando algo muda de verdade.
+- **Incidente real corrigido**: um botão "Cancelar" de mensagem antiga do Telegram apagou o
+  documento raiz de um pedido já pago (GGV03-007) — `_descartar_documento()` não tinha proteção
+  contra apagar documento já vinculado a um pedido de verdade. Corrigido e pedido restaurado a
+  partir dos arquivos reais no OneDrive. Ver detalhes na Última Fiada Implementada.
+- **Itens de compra ainda não são estruturados**: cada pedido guarda a lista de itens como texto
+  corrido dentro de `dados_claude`, não numa tabela própria — Dennis notou isso ao tentar achar o
+  preço de um item específico já comprado. Combinado como próxima fiada.
 
 ---
 
 ## Versão Atual
 
-**v0.8.2** — Sincronização com a Receita sempre ativa (não só pendentes), com política por campo
+**v0.8.3** — Correção crítica: documento de pedido pago não pode mais ser apagado por engano
 
 ---
 
@@ -93,6 +100,57 @@
 ---
 
 ## Última Fiada Implementada
+
+**Incidente crítico: documento de pedido pago apagado por botão antigo — corrigido** *(2026-07-02)*
+
+Dennis relatou não conseguir acessar o GGV03-007 (já pago). Investigando, o documento raiz
+(`documentos.id=28`) tinha sido apagado do banco — o lançamento continuava intacto (por isso a
+lista de pedidos ainda mostrava certo), mas a busca direta pelo código não encontrava mais nada.
+
+**Causa raiz**: o descarte automático implementado ontem (`_descartar_documento`, pro botão
+"Cancelar") não verificava se o documento já tinha virado um pedido de verdade antes de apagar.
+Telegram mantém botões de mensagens antigas clicáveis para sempre — um toque num "Cancelar" de
+uma mensagem de quando o GGV03-007 ainda estava sendo processado (semanas atrás, na numeração
+antiga) disparou o descarte num documento já pago.
+
+**Corrigido**: `_descartar_documento()` agora verifica `pfm_numero` antes de apagar — só descarta
+documentos que ainda não viraram pedido. Documentos já usados só podem ser removidos via
+"🗑 Excluir pedido" (com confirmação explícita, `force=True`). Botão "Cancelar" agora mostra um
+alerta claro em vez de falhar silenciosamente quando recusa.
+
+**Recuperação**: o lançamento sobreviveu integralmente (nunca é tocado por esse descarte), e os
+arquivos reais (PFM, comprovante, NF-e) continuavam intactos no OneDrive — só o vínculo interno
+do banco tinha sumido. Reconstruído a partir do PDF real gerado (mesmos valores: subtotal
+R$3.700, desconto R$100, total R$3.600) e da observação já registrada sobre a correção do item
+com a Espaço Azul/Heliadi. Restaurado duas vezes — a primeira tentativa foi apagada de novo antes
+do bot reiniciar com a correção; a segunda, já protegida, ficou estável.
+
+**Esclarecimento paralelo**: a confusão "Base Forte" vs. "Espaço Azul" (do início do dia) se
+resolveu — são a mesma empresa, "Base Forte" é o nome fantasia. O cadastro de fornecedor já
+estava correto (`nome='Base Forte'`, `razao_social='ESPACO AZUL...'`); a confusão era só de nome
+de arquivo no OneDrive, não do sistema.
+
+**Segundo bug encontrado no processo**: Dennis achou que a observação que registramos sobre a
+correção do item (água fria × esgoto) tinha se perdido de novo — mas ela estava salva certinha no
+banco. O problema real: o cockpit do pedido (`mostrar_pedido()`, a tela que abre ao digitar o
+código) nunca exibia o campo Observações — só a tela de resumo antes de confirmar, que ninguém
+revisita depois de um pedido já pago. Corrigido: `Pedido` ganhou o campo `observacoes`, e o
+cockpit mostra "📝 Obs: ..." quando existe algo registrado.
+
+**Descoberto durante uma consulta de preço**: Dennis perguntou o preço de um "Te de redução
+32x25" já comprado (GGV03-006, Carlessi) — achei, mas só depois de ler o texto corrido inteiro do
+pedido, porque **os itens de compra não são estruturados numa tabela própria hoje**, só existem
+como texto dentro de `dados_claude`. Isso é exatamente o gatilho da fase "lista de compras" que
+ficou combinada como pendente na conversa sobre SINAPI — vira a primeira prioridade da próxima
+sessão.
+
+**Conversa paralela, sem código**: exploramos como usar Claude Code Remote (app do Claude no
+celular) pra consultar o banco da Laura de qualquer lugar — sem ambiente configurado ainda, e o
+`data/laura.db` não está no GitHub (dado de produção, fora do repositório de propósito). Dennis
+tem um servidor Proxmox em casa (Eric administra) que poderia hospedar o bot + banco sempre
+ligado; ideia registrada, não iniciada.
+
+---
 
 **Sincronização com a Receita sempre ativa, com política por campo** *(2026-07-02)*
 
@@ -599,9 +657,12 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Objetivo da Próxima Sessão
 
-1. **Montar a fase "lista de compras"** — cadastro retroativo de GGV03 concluído (8 pedidos); é
-   aqui que `insumos_sinapi` passa a ser útil de verdade (matching de item de orçamento com insumo
-   de referência)
+1. **Começar por aqui, combinado explicitamente com o Dennis**: estruturar os itens de compra numa
+   tabela própria (hoje é texto corrido dentro de `dados_claude`) — é o primeiro passo real da fase
+   "lista de compras", e o gatilho concreto foi ele não conseguir consultar o preço de um item já
+   comprado (Te de redução 32x25, GGV03-006) sem eu ter que ler o texto inteiro do pedido. Pensar
+   junto: schema da tabela de itens, como cada item se liga (ou não) a `insumos_sinapi`, o que fazer
+   com os itens dos 8 pedidos que já estão só em texto
 2. **Fechar o GGV03-003** — pagamento parcelado em andamento (R$2.500 de R$30.000 pago); falta o
    restante das parcelas até quitar
 3. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
@@ -610,9 +671,11 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 5. **Validar PC 2.0** — testar PDF com orçamento real; remover DOCX após validação
 6. **Alimentar `docs/LICOES_EXTRACAO.md`** sempre que aparecer um novo bug de parsing/extração —
    não só corrigir e seguir (ver [[feedback_documentar_padroes_bugs]] na memória)
-7. **Limpeza opcional no OneDrive** — 3 arquivos órfãos ainda pendentes do pedido excluído Base
-   Forte/GGV03-006 antigo (`- Copy.jpeg`, `.docx`, `.pdf` em `04 Compras`), Dennis disse que resolve
-   por conta própria depois
+7. **Limpeza opcional no OneDrive** — 2 arquivos órfãos do pedido excluído Base Forte/GGV03-006
+   antigo (`.docx`, `.pdf` em `04 Compras`); a `- Copy.jpeg` foi feita pelo próprio Dennis
+   (backup pessoal) — perguntar se ele quer manter essa antes de apagar
+8. **Acesso via Claude Code Remote (celular)** — sem ambiente configurado ainda; ideia de hospedar
+   Laura + banco num servidor Proxmox em casa (Eric administra) registrada, não iniciada
 
 ---
 
