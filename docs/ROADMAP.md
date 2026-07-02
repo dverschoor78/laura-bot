@@ -308,20 +308,27 @@ premissas, entidades do domínio e armadilhas de equivalência — decisão prá
 - **Deliberadamente sem vínculo com `bot.py` ainda** — tabela de referência pura; o gatilho real
   para conectar isso ao fluxo da Laura é a futura fase "lista de compras" (ver Próximas Fiadas)
 
-**Produção ativada + cadastro retroativo ao vivo de GGV03** ✓ *(em andamento, iniciada 2026-07-01)*
+**Produção ativada + cadastro retroativo completo de GGV03** ✓ *(concluída 2026-07-01)*
 
 `LAURA_ENV=prod` ativado; banco zerado de novo (incluindo o GGV03-001 de teste do Valdir) pra
 começar o cadastro retroativo 100% pelo Telegram, com acompanhamento em paralelo pelo banco.
-2 de pelo menos 8 compras reais já registradas (GGV03-001 CREA R$108,39, GGV03-002 DeltaD/projetos
-de engenharia R$5.000,00), ambas pagas.
+8 pedidos reais registrados (GGV03-001 a 008): CREA, DeltaD/projetos, DeltaD/gestão (parcelado),
+ONR, Costaferro, Carlessi, Espaço Azul, Eletroluz — 7 pagos, 1 em aberto (pagamento parcelado em
+andamento, R$2.500 de R$30.000).
 
-- 6 bugs reais de parsing/extração encontrados e corrigidos ao vivo, catalogados em
+- **10 bugs reais** de parsing/extração encontrados e corrigidos ao vivo, catalogados em
   `docs/LICOES_EXTRACAO.md`: template de campos misturado em boleto, fornecedor confundido com
   CNPJ próprio (guard ampliado pra cobrir VII + DeltaD), unidade "m2" sem superíndice quebrando
   regex de item, `_parse_brl` interpretando "R$ 5.000" como 5,00, data sem zero à esquerda virando
-  ilegível, documento que falha travando o hash e impedindo reenvio
+  ilegível, documento que falha travando o hash e impedindo reenvio, PIX do fornecedor não
+  reaproveitado em pedido novo, filtro de campo vazio só reconhecendo gênero masculino, matching de
+  comprovante não reconhecendo pagamento parcial, bloco de entrega do PDF ignorando o endereço real
 - Novo botão **"🗑 Excluir pedido"** no cockpit (com confirmação) — apaga lançamento, parcelas,
   entrega e documentos vinculados; nunca mexe em arquivo já arquivado no OneDrive
+- **Endereço de entrega preenchido automaticamente** com o padrão da obra assim que o GGV é
+  identificado — sem clique manual; ainda editável depois
+- Observações do pedido virou campo editável; botão "✖ Cancelar" adicionado na tela de escolha de
+  tipo de documento (antes não tinha saída)
 - Descoberto e corrigido: dois processos `bot.py` simultâneos causam conflito de polling no
   Telegram — só uma instância por vez
 - Botões renomeados pra refletir aceitação de foto ou arquivo, não só um dos dois
@@ -330,13 +337,14 @@ de engenharia R$5.000,00), ambas pagas.
 
 ## Próximas Fiadas
 
-1. **Continuar o cadastro retroativo de GGV03** — faltam pelo menos 6 das 8+ compras pendentes
-2. **Montar a fase "lista de compras"** — primeiro uso real de `insumos_sinapi`; só começa depois
-   do item 1 completo
+1. **Montar a fase "lista de compras"** — cadastro retroativo concluído; primeiro uso real de
+   `insumos_sinapi`
+2. **Fechar o GGV03-003** — pagamento parcelado em andamento, falta quitar o restante
 3. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
 4. **Usar entrega em produção real** — deixar o fluxo rodar no dia a dia antes de revisitar extração (gatilho na ADR-003)
 5. Validar PC 2.0 em produção + remover DOCX do fluxo principal
 6. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração encontrado
+7. Limpeza opcional de 3 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
 
 ---
 

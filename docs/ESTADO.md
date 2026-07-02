@@ -33,18 +33,18 @@
   `documentos`/`lancamentos`/`parcelas_pagamento`/`entrega_fotos` zerados de novo (incluindo o
   GGV03-001/Valdir de teste) por decisão explícita, pra começar o cadastro retroativo do zero,
   100% pelo Telegram ao vivo — sem se preocupar com a numeração manual dos arquivos antigos.
-- **Cadastro retroativo de GGV03 em andamento**: GGV03-001 (CREA, taxa, R$108,39, pago) e
-  GGV03-002 (DeltaD/Verschoor Construções Civis — projetos de engenharia, R$5.000, pago) já
-  registrados ao vivo. Faltam as demais compras pendentes (pelo menos mais 6, de um total de 8+).
-- **`docs/LICOES_EXTRACAO.md` criado** — catálogo de armadilhas de parsing/extração, alimentado
-  pelos 6 bugs reais encontrados durante o cadastro ao vivo de hoje; leitura obrigatória antes de
-  mexer em PROMPT/regex, referenciado em `docs/PROCESSO.md`.
+- **Cadastro retroativo de GGV03 concluído**: 8 pedidos reais registrados ao vivo pelo Telegram
+  (GGV03-001 a 008) — CREA, DeltaD/projetos, DeltaD/gestão (parcelado), ONR, Costaferro, Carlessi,
+  Espaço Azul, Eletroluz. 7 pagos, 1 em aberto (gestão, parcial R$2.500 de R$30.000).
+- **`docs/LICOES_EXTRACAO.md` criado e alimentado com 10 bugs reais** encontrados durante o
+  cadastro ao vivo de hoje — leitura obrigatória antes de mexer em PROMPT/regex, referenciado em
+  `docs/PROCESSO.md`.
 
 ---
 
 ## Versão Atual
 
-**v0.8.0** — Produção ativada + 8 correções encontradas em cadastro ao vivo
+**v0.8.0** — Produção ativada + cadastro retroativo completo de GGV03 + 10 correções encontradas ao vivo
 
 ---
 
@@ -97,7 +97,7 @@ testes com dado fictício.
   manualmente por Dennis) causavam conflito de polling no Telegram ("fora de serviço"); só uma
   instância deve rodar por vez durante a sessão
 
-**Bugs reais encontrados e corrigidos (catálogo completo em `docs/LICOES_EXTRACAO.md`):**
+**10 bugs reais encontrados e corrigidos, catálogo completo em `docs/LICOES_EXTRACAO.md`:**
 1. Claude mistura template de campos de tipos diferentes (boleto virou comprovante_pix +
    orçamento ao mesmo tempo) — PROMPT agora proíbe explicitamente
 2. Fornecedor confundido com CNPJ da própria empresa em boleto (Pagador × Beneficiário) — guard
@@ -110,16 +110,33 @@ testes com dado fictício.
    trocado de fatiamento de índice fixo pra regex tolerante
 6. Documento que falha (cancelado, comprovante sem correspondência) ficava travado pelo hash,
    impedindo reenvio — `_descartar_documento()` limpa registro + arquivo automaticamente
+7. PIX já conhecido do fornecedor não era reaproveitado em pedidos novos — tela de resumo passou
+   a consultar `buscar_fornecedor()`, e o cadastro (automático ou manual) passou a persistir PIX
+8. Filtro de "campo vazio" só reconhecia a forma masculina ("Não identificado") — "Não
+   identificada" passava como dado real; `_campo_vazio()` agora tolera gênero e frase mais longa
+9. Comprovante de pagamento parcial (R$2.500 de um pedido de R$30.000) não encontrava o pedido —
+   `buscar_candidatos_pix()` só reconhecia valor exato ou ±10%; agora compara com o saldo restante
+   e aceita qualquer valor parcial como candidato válido
+10. Bloco de entrega do PDF sempre mostrava "Obra GGV03" fixo, nunca o endereço real salvo no
+    banco — corrigido pra exibir o endereço de verdade, com fallback pro padrão da obra
 
-**Duas melhorias de produto, pedidas durante o cadastro:**
+**Seis melhorias de produto, pedidas durante o cadastro:**
 - Botões renomeados pra refletir que aceitam foto OU arquivo ("📋 Orçamento / Fatura",
   "📦 Foto/arquivo de entrega") — rótulo antigo sugeria só cotação/foto
 - **Botão "🗑 Excluir pedido"** no cockpit, com tela de confirmação — apaga lançamento, parcelas,
   entrega e documentos vinculados na Laura (nunca mexe em arquivo já arquivado no OneDrive);
   testado com pedido fictício antes de liberar
+- **Endereço de entrega preenchido automaticamente** com o padrão da obra assim que o GGV é
+  identificado — sem precisar clicar em "🏗 Obra" toda vez; ainda editável depois
+- **Observações do pedido agora é campo editável** em "Corrigir campos" — antes só aparecia na
+  tela, sem jeito de corrigir
+- **Botão "✖ Cancelar" na tela de escolha de tipo de documento** — antes, se o usuário chegasse
+  ali sem querer, não tinha como sair
+- Limpeza retroativa de documentos "cancelado" que sobraram de antes do descarte automático
+  existir, e de arquivos órfãos no OneDrive de um pedido excluído (Base Forte/GGV03-006 antigo)
 
-Testado ao vivo com dois pedidos reais completos (GGV03-001 CREA R$108,39, GGV03-002 DeltaD
-R$5.000,00) — ambos pagos corretamente depois das correções.
+Testado ao vivo com os 8 pedidos reais completos de GGV03 — 7 pagos, 1 em aberto (pagamento
+parcelado em andamento).
 
 ---
 
@@ -517,18 +534,20 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Objetivo da Próxima Sessão
 
-1. **Continuar o cadastro retroativo de GGV03** — 2 de pelo menos 8 compras reais já registradas
-   (GGV03-001 CREA, GGV03-002 DeltaD/projetos); faltam as demais. Nota: o GGV03-001 antigo (teste
-   com Valdir/Sabiá) foi apagado no reset de produção — se aquele recibo ainda precisar ser
-   assinado de verdade pelo Valdir, precisa ser recadastrado do zero como um novo pedido
-2. **Montar a fase "lista de compras"** — é aqui que `insumos_sinapi` passa a ser útil de verdade
-   (matching de item de orçamento com insumo de referência); só começa depois do item 1 completo
+1. **Montar a fase "lista de compras"** — cadastro retroativo de GGV03 concluído (8 pedidos); é
+   aqui que `insumos_sinapi` passa a ser útil de verdade (matching de item de orçamento com insumo
+   de referência)
+2. **Fechar o GGV03-003** — pagamento parcelado em andamento (R$2.500 de R$30.000 pago); falta o
+   restante das parcelas até quitar
 3. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
 4. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
    no dia a dia antes de qualquer nova decisão sobre extração (ver gatilho da ADR-003)
 5. **Validar PC 2.0** — testar PDF com orçamento real; remover DOCX após validação
 6. **Alimentar `docs/LICOES_EXTRACAO.md`** sempre que aparecer um novo bug de parsing/extração —
    não só corrigir e seguir (ver [[feedback_documentar_padroes_bugs]] na memória)
+7. **Limpeza opcional no OneDrive** — 3 arquivos órfãos ainda pendentes do pedido excluído Base
+   Forte/GGV03-006 antigo (`- Copy.jpeg`, `.docx`, `.pdf` em `04 Compras`), Dennis disse que resolve
+   por conta própria depois
 
 ---
 

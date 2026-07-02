@@ -551,6 +551,19 @@ def atualizar(doc_id, **campos):
     with sqlite3.connect(DB_PATH) as con:
         con.execute(f"UPDATE documentos SET {sets} WHERE id=?", (*campos.values(), doc_id))
 
+def _autopreencher_endereco(doc_id, ggv):
+    """Preenche endereco_entrega com o padrão da obra, se o pedido ainda não tiver nenhum
+    definido. Nunca sobrescreve uma escolha já feita (manual ou de edição anterior)."""
+    if ggv == "nao_identificado":
+        return
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute("SELECT endereco_entrega FROM documentos WHERE id=?", (doc_id,)).fetchone()
+    if row and row[0]:
+        return
+    padrao = buscar_obra(ggv).get("endereco_entrega")
+    if padrao:
+        atualizar(doc_id, endereco_entrega=padrao)
+
 def _descartar_documento(doc_id):
     """Apaga o registro e o arquivo de um documento que não virou nada (cancelado, sem
     correspondência). Libera o hash para o mesmo arquivo poder ser reenviado depois."""
@@ -650,6 +663,10 @@ def _resumo_gerar(doc_id):
     fornecedor = _v(_campo(dados, "Fornecedor")) or "Fornecedor não identificado"
     cnpj       = _v(_campo(dados, "CNPJ/CPF"))
     pix        = _v(_campo(dados, "Chave PIX"))
+    forn_db    = buscar_fornecedor(fornecedor, cnpj)
+    if forn_db:
+        cnpj = cnpj or forn_db.get("cnpj") or forn_db.get("cpf")
+        pix  = pix or forn_db.get("chave_pix")
     vendedor   = _v(_campo(dados, "Vendedor"))
     vend_fone  = _v(_campo(dados, "Telefone do vendedor"))
     cond       = _v(condicao) or _v(_campo(dados, "Condição de pagamento"))
@@ -743,26 +760,31 @@ def _consultar_receita(cnpj_digits: str, timeout: float = 4.0) -> Optional[dict]
     except Exception:
         return None
 
-def _criar_fornecedor_auto(nome_claude, cnpj_claude, ramo_claude, doc_id):
+def _criar_fornecedor_auto(nome_claude, cnpj_claude, ramo_claude, doc_id, chave_pix_claude=None):
     """Cadastra um fornecedor novo a partir de um orçamento com CNPJ ainda não conhecido.
     Tenta enriquecer com dado oficial da Receita; se a consulta falhar, marca para sincronizar depois."""
     if not cnpj_claude or cnpj_claude == "A PREENCHER":
         return
     cnpj_digits = re.sub(r"\D", "", cnpj_claude)
+    # Só bloqueia a VII (dona do empreendimento, nunca é fornecedora). A DeltaD PODE ser cadastrada
+    # aqui de verdade — ela é uma empresa técnica que fatura a VII por serviços (ex: GGV03-002),
+    # diferente do guard de buscar_fornecedor() que ignora ambas por segurança contra Pagador
+    # confundido com Fornecedor em boleto.
     if len(cnpj_digits) != 14 or cnpj_digits == DELTAD_CNPJ_DIGITS:
         return
     receita = _consultar_receita(cnpj_digits)
     ramo = ramo_claude if ramo_claude and ramo_claude != "A PREENCHER" else None
+    pix  = chave_pix_claude if chave_pix_claude and chave_pix_claude != "A PREENCHER" else None
     with sqlite3.connect(DB_PATH) as con:
         con.execute(
             "INSERT OR IGNORE INTO fornecedores "
-            "(nome, cnpj, razao_social, cidade, uf, ramo, origem, receita_pendente) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "(nome, cnpj, razao_social, cidade, uf, ramo, chave_pix, origem, receita_pendente) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
             (nome_claude, cnpj_claude,
              receita["razao_social"] if receita else None,
              receita["cidade"] if receita else None,
              receita["uf"] if receita else None,
-             ramo, f"Cadastro automático — doc {doc_id}",
+             ramo, pix, f"Cadastro automático — doc {doc_id}",
              0 if receita else 1)
         )
 
@@ -800,18 +822,22 @@ def buscar_fornecedor(nome_claude, cnpj_claude=None):
 def _esc_html(s):
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
+_MARCADORES_VAZIO = ("não identificad", "nao identificad", "não especificad", "nao especificad",
+                     "não informad", "nao informad", "não encontrad", "nao encontrad")
+_VALORES_VAZIO = {"n/a", "—", "-", ""}
+
+def _campo_vazio(val: str) -> bool:
+    """True se o valor extraído é um marcador de 'não achei', em qualquer gênero/frase
+    (ex: 'Não identificada', 'não identificado no documento') — não só o masculino exato."""
+    v = val.strip().lower()
+    return v in _VALORES_VAZIO or v.startswith(_MARCADORES_VAZIO)
+
 def _campo(dados, nome):
-    nao_encontrado = {
-        "não identificado", "nao identificado",
-        "não especificado", "nao especificado",
-        "não informado", "nao informado",
-        "n/a", "—", "-", "",
-    }
     for linha in dados.splitlines():
         stripped = linha.strip().lstrip("- *")
         if stripped.lower().startswith(nome.lower() + ":"):
             val = stripped.split(":", 1)[1].strip().strip("*").strip()
-            if val.lower() not in nao_encontrado:
+            if not _campo_vazio(val):
                 return val
     return "A PREENCHER"
 
@@ -1147,7 +1173,8 @@ def _gerar_html_pc(doc_id: int) -> str:
     # Bloco Entrega
     enc_nome = obra.get("encarregado_nome", "")
     enc_fone = obra.get("encarregado_fone", "")
-    entrega_linhas = [f"Obra {ggv}"]
+    endereco_real = _h(end_db) or _h(obra.get("endereco_entrega"))
+    entrega_linhas = [endereco_real or f"Obra {ggv}"]
     if _h(data_ent_db):
         entrega_linhas.append(f"Até {_h(data_ent_db)}")
     if enc_nome:
@@ -1411,20 +1438,29 @@ def gerar_pfm(doc_id, categoria=None, pfm_codigo_override=None):
         forn_fone    = forn_db.get("whatsapp") or ""
         forn_contato = forn_db.get("contato") or ""
         ramo         = forn_db.get("ramo") or ramo_claude
+        cnpj_key = forn_db.get("cnpj") or forn_db.get("cpf")
         # Persiste ramo se ainda não estava cadastrado
         if not forn_db.get("ramo") and ramo_claude and ramo_claude != "A PREENCHER":
-            cnpj_key = forn_db.get("cnpj") or forn_db.get("cpf")
             if cnpj_key:
                 with sqlite3.connect(DB_PATH) as _con:
                     _con.execute("UPDATE fornecedores SET ramo=? WHERE cnpj=? OR cpf=?",
                                  (ramo_claude, cnpj_key, cnpj_key))
+        # Persiste chave PIX se ainda não estava cadastrada — assim o próximo pedido do mesmo
+        # fornecedor já vem com o PIX preenchido, mesmo que o documento novo não repita o dado
+        pix_claude = _campo(dados, "Chave PIX")
+        if not forn_db.get("chave_pix") and pix_claude and pix_claude != "A PREENCHER":
+            if cnpj_key:
+                with sqlite3.connect(DB_PATH) as _con:
+                    _con.execute("UPDATE fornecedores SET chave_pix=? WHERE cnpj=? OR cpf=?",
+                                 (pix_claude, cnpj_key, cnpj_key))
+            pix = pix_claude
     else:
         fornecedor  = nome_claude
         cnpj        = cnpj_claude
         pix         = _campo(dados, "Chave PIX")
         ramo        = ramo_claude
         forn_logr = forn_bairro = forn_cidade = forn_email = forn_fone = forn_contato = ""
-        _criar_fornecedor_auto(nome_claude, cnpj_claude, ramo_claude, doc_id)
+        _criar_fornecedor_auto(nome_claude, cnpj_claude, ramo_claude, doc_id, pix)
 
     prazo        = _campo(dados, "Prazo de entrega")
     if prazo == "A PREENCHER":
@@ -1700,12 +1736,16 @@ def buscar_candidatos_pix(valor_v: float, favorecido: str, cnpj: str) -> list:
         score     = 0
         forn_token = (fornecedor or "").strip().upper().split()[0] if fornecedor else ""
 
-        # Valor
-        if valor_v > 0 and valor_lanc:
-            if abs(valor_v - valor_lanc) <= 0.01:
+        # Valor — compara com o saldo restante (valor - parcelas já pagas), não o valor original,
+        # porque pagamento parcelado é o caso normal, não exceção (ver parcelas_pagamento)
+        saldo = valor_lanc - _total_pago(pfm_codigo) if valor_lanc else 0
+        if valor_v > 0 and saldo > 0:
+            if abs(valor_v - saldo) <= 0.01:
                 score += 3
-            elif valor_lanc > 0 and abs(valor_v - valor_lanc) / valor_lanc <= 0.10:
+            elif abs(valor_v - saldo) / saldo <= 0.10:
                 score += 1
+            elif valor_v < saldo:
+                score += 1  # pagamento parcial — valor livre, ver Fiada de pagamento parcelado
 
         # Nome — CNPJ validado tem peso maior que coincidência direta
         if nome_canonico_token and forn_token == nome_canonico_token:
@@ -1968,6 +2008,7 @@ def teclado_tipo_inicial(doc_id):
         [InlineKeyboardButton("📦 Foto/arquivo de entrega", callback_data=f"sel_tipo_inicial:{doc_id}:foto_entrega")],
         [InlineKeyboardButton("🏦 Extrato Mercado Pago", callback_data=f"sel_tipo_inicial:{doc_id}:extrato_mp")],
         [InlineKeyboardButton("Não é da obra",            callback_data=f"sel_tipo_inicial:{doc_id}:nao_relacionado")],
+        [InlineKeyboardButton("✖ Cancelar",               callback_data=f"cancelar:{doc_id}")],
     ])
 
 def teclado_condicao(doc_id, tipo, ggv):
@@ -2999,12 +3040,13 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         texto_resumo, markup = _resumo_gerar(doc_id)
         await update.message.reply_text(texto_resumo, reply_markup=markup, parse_mode="HTML")
 
-    elif aguardando in ("edit_fornecedor", "edit_cnpj", "edit_valor", "edit_pix", "edit_itens"):
+    elif aguardando in ("edit_fornecedor", "edit_cnpj", "edit_valor", "edit_pix", "edit_itens", "edit_obs"):
         campo_map = {
             "edit_fornecedor": "Fornecedor",
             "edit_cnpj":       "CNPJ/CPF",
             "edit_valor":      "Valor total",
             "edit_pix":        "Chave PIX",
+            "edit_obs":        "Observações",
         }
         tipo = ctx.user_data.get("tipo", "orcamento")
         with sqlite3.connect(DB_PATH) as con:
@@ -3171,6 +3213,8 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             _, ggv, corpo = parse_resposta(resposta.content[0].text)
             atualizar(int(doc_id), tipo=tipo, ggv=ggv, dados_claude=corpo)
+            if tipo == "orcamento":
+                _autopreencher_endereco(int(doc_id), ggv)
             emoji, label_tipo = TIPOS.get(tipo, ("📄", tipo))
             label_ggv = ggv if ggv != "nao_identificado" else "Obra não identificada"
             if tipo == "comprovante_pix":
@@ -3350,6 +3394,8 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         elif acao == "set_ggv":
             _, doc_id, tipo, novo_ggv = partes
             atualizar(int(doc_id), ggv=novo_ggv)
+            if tipo == "orcamento":
+                _autopreencher_endereco(int(doc_id), novo_ggv)
             with sqlite3.connect(DB_PATH) as con:
                 status = con.execute("SELECT status FROM documentos WHERE id=?", (int(doc_id),)).fetchone()[0]
             if status == "confirmado":
@@ -3401,6 +3447,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("📅 Vencimento pgto", callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:vencimento")],
                 [InlineKeyboardButton("👷 Encarregado",     callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:encarregado")],
                 [InlineKeyboardButton("📞 Contato vendedor", callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:contato")],
+                [InlineKeyboardButton("📝 Observações",     callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:obs")],
                 [InlineKeyboardButton("🏗 GGV",             callback_data=f"sel_ggv:{doc_id}:{tipo}:{ggv}")],
                 [InlineKeyboardButton("📋 Tipo doc.",      callback_data=f"sel_tipo:{doc_id}:{tipo}:{ggv}")],
                 [InlineKeyboardButton("◀️ Voltar",         callback_data=f"voltar_edit:{doc_id}:{tipo}:{ggv}")],
@@ -3474,6 +3521,7 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     "pix":        "chave PIX",
                     "desconto":   "valor do desconto em R$ (ex: 80 ou 80,00) — ou 0 para remover",
                     "data":       "data de entrega (ex: 01/08/2026, 7 dias úteis, A combinar)",
+                    "obs":        "observação",
                 }
                 campo_doc = {
                     "fornecedor": "Fornecedor",
@@ -3490,6 +3538,8 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     atual = f"R$ {_fmt_brl(_parse_brl(re.sub(r'[^\d,.]', '', str(desconto_atual))))}" if desconto_atual else "Não informado"
                 elif campo == "data":
                     atual = data_atual or "Não informada"
+                elif campo == "obs":
+                    atual = _obs(dados_atuais) or "Não informada"
                 else:
                     atual = _campo(dados_atuais, campo_doc.get(campo, campo))
                 await query.edit_message_text(

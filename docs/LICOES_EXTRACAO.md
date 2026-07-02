@@ -126,15 +126,104 @@ isso falhar aqui, o arquivo fica destrancado pra tentar de novo?"
 
 ---
 
+## 7. Dado já conhecido do fornecedor não era reaproveitado (PIX)
+
+**Sintoma:** GGV03-003 é do mesmo fornecedor de GGV03-002 (DeltaD), mas o PIX veio "Não
+identificada" mesmo já tendo sido extraído corretamente no pedido anterior.
+
+**Causa raiz:** dupla — (a) `_resumo_gerar()` (a tela que o usuário vê antes de confirmar) nunca
+chamava `buscar_fornecedor()`, só lia o texto bruto do documento novo; (b) `_criar_fornecedor_auto()`
+nunca salvava `chave_pix` no cadastro, mesmo quando o Claude a encontrava — então nem existia o que
+reaproveitar.
+
+**Correção:** `_resumo_gerar()` agora consulta `buscar_fornecedor()` e usa CNPJ/PIX já cadastrados
+como fallback. `gerar_pfm()` passou a persistir PIX no fornecedor (tanto no cadastro automático
+quanto como backfill de um fornecedor já existente sem PIX salvo), no mesmo padrão que `ramo` já
+usava.
+
+**Lição geral:** todo dado que o Claude extrai e que faz sentido ser característica do fornecedor
+(não do pedido específico) deveria ser persistido no cadastro na primeira vez que aparece —
+senão cada pedido novo reextraí do zero, e o sistema nunca fica "mais esperto" com o uso.
+
+---
+
+## 8. Filtro de "campo vazio" só reconhecia a forma masculina
+
+**Sintoma:** mesmo depois da correção do item 7, o PIX continuou aparecendo como texto literal
+"Não identificada" na tela — o fallback pro fornecedor nunca era acionado.
+
+**Causa raiz:** o conjunto de marcadores de "não encontrado" em `_campo()` tinha só "não
+identificado" (masculino) — "Não identificada" (concordando com "chave", feminino) não batia,
+então era tratado como um valor real e válido, não como ausência de dado.
+
+**Correção:** `_campo_vazio()` — checagem por prefixo tolerante a gênero (`"não identificad"` sem a
+vogal final) e a frases mais longas (`"não identificada no documento"`), não mais comparação exata
+contra uma lista fixa.
+
+**Lição geral:** qualquer lista de "valores que significam vazio" escrita à mão vai ficar
+incompleta — o Claude varia gênero, frase e nível de detalhe. Preferir checagem por prefixo/
+substring a comparação exata de string sempre que o valor vier de texto gerado por IA.
+
+---
+
+## 9. Matching de comprovante não reconhecia pagamento parcial
+
+**Sintoma:** comprovante de R$2.500 (pagamento parcial de um pedido de R$30.000) voltou "Nenhum
+pedido em aberto corresponde a este pagamento" e foi descartado — mesmo o pedido estando aberto.
+
+**Causa raiz:** `buscar_candidatos_pix()` só pontuava valor exato (±R$0,01) ou próximo (±10%) do
+valor **original** do lançamento — nunca considerava que o pagamento parcelado é o caso normal
+(ver pagamento parcelado, Fiada de 2026-07-01), nem comparava contra o **saldo restante** depois de
+parcelas já pagas.
+
+**Correção:** a pontuação agora compara com `valor_lanc - _total_pago(pfm_codigo)` (saldo, não
+valor cheio), e qualquer valor positivo menor que o saldo ganha pontuação mínima de candidato —
+pagamento parcial deixou de ser um caso não tratado.
+
+**Lição geral:** uma função escrita antes de um domínio novo existir (pagamento parcelado nasceu
+depois do matching de comprovante original) precisa ser revisitada quando esse domínio chega —
+não basta o novo domínio funcionar isoladamente, ele precisa ser considerado nos pontos de
+integração antigos também.
+
+---
+
+## 10. Bloco de entrega do PDF ignorava o endereço real salvo
+
+**Sintoma:** o Pedido de Compra sempre mostrava "Obra GGV03" como endereço de entrega, nunca o
+endereço de verdade — mesmo quando ele já estava salvo no banco (`documentos.endereco_entrega`).
+
+**Causa raiz:** `_gerar_html_pc()` montava o bloco de entrega com `[f"Obra {ggv}"]` fixo — a
+variável com o endereço real (`end_db`) era lida do banco mas nunca usada nesse bloco específico.
+
+**Correção:** usa o endereço real (do pedido, com fallback pro padrão da obra) e só cai pro texto
+genérico "Obra {ggv}" se realmente não houver nenhum endereço conhecido. Complementar: novo
+`_autopreencher_endereco()` já grava o endereço padrão da obra assim que o GGV é identificado, sem
+precisar de clique manual.
+
+**Lição geral:** ter o dado certo no banco não garante que a tela final o exibe — sempre conferir
+se cada bloco de exibição realmente lê a variável que já foi buscada, em vez de assumir que "já
+que carreguei o dado, algum lugar deve estar usando".
+
+---
+
 ## Padrão geral por trás de tudo isso
 
-A maioria desses bugs tem a mesma forma: **o código assume uma forma fixa de string vinda do
-Claude** (largura de caractere, formato numérico americano, unidade só-letra, campo com nome
-exato) — mas a extração por IA é inerentemente variável, principalmente em documentos que fogem do
-padrão esperado (boleto em vez de orçamento, dia sem zero à esquerda, unidade sem superíndice).
+Duas famílias de bug, não uma só.
 
-Regra prática: qualquer parser de valor/data/unidade extraído pelo Claude deve ser feito com regex
-tolerante (`{1,2}` em vez de índice fixo), nunca `string[a:b]` cru, e testado contra pelo menos um
-caso real de produção antes de considerar corrigido — não só contra dado fictício. Foi assim que
-todos os 6 bugs acima foram confirmados (lendo o PDF/imagem real, não assumindo a partir do
+**Família A (itens 1-6) — o código assume uma forma fixa de string vinda do Claude** (largura de
+caractere, formato numérico americano, unidade só-letra, gênero gramatical, campo com nome exato)
+— mas a extração por IA é inerentemente variável, principalmente em documentos que fogem do padrão
+esperado (boleto em vez de orçamento, dia sem zero à esquerda, unidade sem superíndice, "Não
+identificada" em vez de "Não identificado"). Regra prática: qualquer parser de valor/data/unidade
+extraído pelo Claude deve ser feito com regex tolerante (`{1,2}` em vez de índice fixo) ou checagem
+por prefixo (nunca comparação exata de string), nunca `string[a:b]` cru.
+
+**Família B (itens 7, 9, 10) — o sistema não reaproveita o que já sabe.** Dado já cadastrado
+(PIX do fornecedor), domínio novo que muda o significado de "correspondência" (pagamento
+parcelado), ou variável já buscada do banco mas nunca usada na tela final — três formas do mesmo
+problema: escrever uma tela/função nova sem revisitar o que já existe ao redor dela.
+
+Regra prática comum às duas famílias: testar contra pelo menos um caso real de produção antes de
+considerar corrigido — não só contra dado fictício. Foi assim que todos os 10 bugs acima foram
+confirmados (lendo o PDF/imagem real ou consultando o banco de produção, não assumindo a partir do
 sintoma).

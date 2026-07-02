@@ -10,26 +10,29 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Continuar o cadastro retroativo de GGV03 (faltam pelo menos 6 das 8+ compras pendentes)
-2. Montar a fase "lista de compras" (primeiro uso real de `insumos_sinapi`)
+1. Montar a fase "lista de compras" (primeiro uso real de `insumos_sinapi`)
+2. Fechar o GGV03-003 (pagamento parcelado em andamento, R$2.500 de R$30.000 pago)
 3. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
 4. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
 5. Validar PDF do PC 2.0 com orçamento real em produção
 6. Remover DOCX do fluxo principal após validação
 7. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
+8. Limpeza opcional de 3 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
 
 ---
 
-## [Produção ativada + correções de cadastro ao vivo] — 2026-07-01
+## [Produção ativada + cadastro retroativo completo de GGV03] — 2026-07-01
 
 ### Primeira vez rodando de verdade, e o que isso revelou
 
 `LAURA_ENV=prod` ativado. Banco de produção zerado de novo por decisão de Dennis (incluindo o
 GGV03-001 de teste do Valdir/Sabiá) — cadastro retroativo das compras pendentes de GGV03 passou a
-ser feito 100% pelo Telegram, ao vivo, com acompanhamento em paralelo direto no banco. Isso expôs
-bugs reais de parsing que nunca tinham aparecido com dado fictício.
+ser feito 100% pelo Telegram, ao vivo, com acompanhamento em paralelo direto no banco. 8 pedidos
+reais registrados (GGV03-001 a 008): CREA, DeltaD/projetos, DeltaD/gestão (parcelado), ONR,
+Costaferro, Carlessi, Espaço Azul, Eletroluz — 7 pagos, 1 em aberto. Isso expôs, um por um, bugs
+reais de parsing e de integração que nunca tinham aparecido com dado fictício.
 
-### 6 bugs de extração/parsing corrigidos (catálogo completo em `docs/LICOES_EXTRACAO.md`)
+### 10 bugs de extração/parsing corrigidos (catálogo completo em `docs/LICOES_EXTRACAO.md`)
 
 - **Template de campos misturado**: um boleto (classificado como orçamento) voltou com campos de
   comprovante_pix E de orçamento concatenados — PROMPT agora proíbe explicitamente misturar
@@ -45,6 +48,16 @@ bugs reais de parsing que nunca tinham aparecido com dado fictício.
 - **Documento que falha travava o hash**: comprovante sem pedido correspondente, ou cancelado,
   ficava permanentemente bloqueado pra reenvio — `_descartar_documento()` agora limpa registro e
   arquivo automaticamente nesses casos
+- **PIX do fornecedor não reaproveitado**: pedido novo do mesmo fornecedor não puxava o PIX já
+  conhecido — tela de resumo passou a consultar `buscar_fornecedor()`, e o cadastro (automático ou
+  manual) passou a persistir PIX, não só `ramo`
+- **Filtro de "campo vazio" só reconhecia gênero masculino**: "Não identificada" (concordando com
+  "chave") passava como dado real; `_campo_vazio()` agora tolera gênero e frases mais longas
+- **Pagamento parcial não encontrava o pedido**: comprovante de R$2.500 contra um pedido de
+  R$30.000 não batia — `buscar_candidatos_pix()` só reconhecia valor exato ou ±10%; agora compara
+  com o saldo restante (valor menos parcelas já pagas) e aceita qualquer valor parcial
+- **Bloco de entrega do PDF ignorava o endereço real**: sempre mostrava "Obra GGV03" fixo, mesmo
+  com o endereço de verdade já salvo no banco — corrigido pra exibir o endereço real
 
 ### Novo — excluir pedido
 
@@ -52,17 +65,27 @@ bugs reais de parsing que nunca tinham aparecido com dado fictício.
   fotos de entrega e todos os documentos vinculados na Laura (nunca toca em arquivo já arquivado
   no OneDrive). Testado com pedido fictício antes de liberar em produção.
 
+### Novo — endereço automático e observações editáveis
+
+- Endereço de entrega preenchido sozinho com o padrão da obra assim que o GGV é identificado —
+  sem precisar clicar em "🏗 Obra" toda vez; continua editável depois pelo Corrigir campos
+- Observações do pedido virou campo editável em "Corrigir campos" — antes só aparecia na tela
+- Botão "✖ Cancelar" adicionado na tela de escolha de tipo de documento — antes, quem chegasse ali
+  sem querer não tinha como sair
+
 ### Operacional
 
 - Descoberto e corrigido: dois processos `bot.py` rodando ao mesmo tempo causam conflito de
   polling no Telegram (efeito "bot fora de serviço") — só uma instância deve rodar por vez
 - Botões renomeados pra refletir que aceitam foto ou arquivo, não sugerir só um dos dois
   ("📋 Orçamento / Fatura", "📦 Foto/arquivo de entrega")
-- `docs/LICOES_EXTRACAO.md` criado — catálogo vivo de armadilhas de parsing, leitura obrigatória
-  antes de mexer em PROMPT/regex (linkado em `docs/PROCESSO.md`)
+- `docs/LICOES_EXTRACAO.md` criado e alimentado com os 10 bugs — catálogo vivo de armadilhas,
+  leitura obrigatória antes de mexer em PROMPT/regex (linkado em `docs/PROCESSO.md`)
+- Limpeza retroativa de documentos "cancelado" que sobraram de antes do descarte automático
+  existir, e de um arquivo órfão no OneDrive de um pedido excluído (Base Forte/GGV03-006 antigo)
 
-Testado ao vivo com dois pedidos reais completos: GGV03-001 (CREA, R$108,39) e GGV03-002 (DeltaD,
-projetos de engenharia, R$5.000,00) — ambos pagos corretamente depois das correções.
+Testado ao vivo com os 8 pedidos reais completos de GGV03 — 7 pagos, 1 em aberto (pagamento
+parcelado em andamento).
 
 ---
 
