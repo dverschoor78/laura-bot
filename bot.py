@@ -496,7 +496,7 @@ def init_db():
                 UNIQUE(cpf)
             )
         """)
-        for col in ["ramo TEXT", "receita_pendente INTEGER DEFAULT 0", "emite_nf INTEGER"]:
+        for col in ["ramo TEXT", "receita_pendente INTEGER DEFAULT 0", "emite_nf INTEGER", "cnae TEXT"]:
             try:
                 con.execute(f"ALTER TABLE fornecedores ADD COLUMN {col}")
             except Exception:
@@ -660,13 +660,16 @@ def _resumo_gerar(doc_id):
     def _v(val):
         return None if (not val or val == "A PREENCHER") else val
 
-    fornecedor = _v(_campo(dados, "Fornecedor")) or "Fornecedor não identificado"
-    cnpj       = _v(_campo(dados, "CNPJ/CPF"))
-    pix        = _v(_campo(dados, "Chave PIX"))
-    forn_db    = buscar_fornecedor(fornecedor, cnpj)
+    nome_claude = _v(_campo(dados, "Fornecedor"))
+    cnpj        = _v(_campo(dados, "CNPJ/CPF"))
+    pix         = _v(_campo(dados, "Chave PIX"))
+    forn_db     = buscar_fornecedor(nome_claude, cnpj)
     if forn_db:
+        fornecedor = forn_db.get("razao_social") or forn_db.get("nome") or nome_claude or "Fornecedor não identificado"
         cnpj = cnpj or forn_db.get("cnpj") or forn_db.get("cpf")
         pix  = pix or forn_db.get("chave_pix")
+    else:
+        fornecedor = nome_claude or "Fornecedor não identificado"
     vendedor   = _v(_campo(dados, "Vendedor"))
     vend_fone  = _v(_campo(dados, "Telefone do vendedor"))
     cond       = _v(condicao) or _v(_campo(dados, "Condição de pagamento"))
@@ -741,7 +744,16 @@ def _resumo_gerar(doc_id):
     return "\n".join(linhas), teclado_orcamento(doc_id, tipo, ggv)
 
 _FORN_COLS = ["nome", "razao_social", "cnpj", "cpf", "chave_pix", "email",
-              "whatsapp", "logradouro", "numero", "bairro", "cidade", "uf", "cep", "ramo"]
+              "whatsapp", "logradouro", "numero", "bairro", "cidade", "uf", "cep", "ramo", "cnae"]
+
+def _formatar_cnae(codigo) -> Optional[str]:
+    """7 dígitos (ex: 4744099) -> formato oficial do Cartão CNPJ (ex: '47.44-0-99')."""
+    if not codigo:
+        return None
+    s = re.sub(r"\D", "", str(codigo)).zfill(7)
+    if len(s) != 7:
+        return None
+    return f"{s[0:2]}.{s[2:4]}-{s[4]}-{s[5:7]}"
 
 def _consultar_receita(cnpj_digits: str, timeout: float = 4.0) -> Optional[dict]:
     """Consulta CNPJ na Receita Federal via BrasilAPI. Nunca levanta — retorna None em qualquer falha."""
@@ -752,10 +764,18 @@ def _consultar_receita(cnpj_digits: str, timeout: float = 4.0) -> Optional[dict]
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
+        telefone     = data.get("ddd_telefone_1") or data.get("ddd_telefone_2") or None
+        cnae_cod     = _formatar_cnae(data.get("cnae_fiscal"))
+        cnae_desc    = data.get("cnae_fiscal_descricao") or None
+        cnae_str     = f"{cnae_cod} - {cnae_desc}" if cnae_cod and cnae_desc else (cnae_desc or None)
         return {
             "razao_social": data.get("razao_social") or None,
             "cidade":       (data.get("municipio") or "").title() or None,
             "uf":           data.get("uf") or None,
+            "email":        data.get("email") or None,
+            "telefone":     telefone,
+            "ramo":         cnae_desc,
+            "cnae":         cnae_str,
         }
     except Exception:
         return None
@@ -773,18 +793,25 @@ def _criar_fornecedor_auto(nome_claude, cnpj_claude, ramo_claude, doc_id, chave_
     if len(cnpj_digits) != 14 or cnpj_digits == DELTAD_CNPJ_DIGITS:
         return
     receita = _consultar_receita(cnpj_digits)
-    ramo = ramo_claude if ramo_claude and ramo_claude != "A PREENCHER" else None
+    # Ramo: prefere o que o Claude leu no documento (mais específico ao contexto da compra);
+    # cai pro CNAE oficial da Receita só se o documento não tiver essa informação
+    ramo_doc = ramo_claude if ramo_claude and ramo_claude != "A PREENCHER" else None
+    ramo = ramo_doc or (receita.get("ramo") if receita else None)
     pix  = chave_pix_claude if chave_pix_claude and chave_pix_claude != "A PREENCHER" else None
     with sqlite3.connect(DB_PATH) as con:
         con.execute(
             "INSERT OR IGNORE INTO fornecedores "
-            "(nome, cnpj, razao_social, cidade, uf, ramo, chave_pix, origem, receita_pendente) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
+            "(nome, cnpj, razao_social, cidade, uf, ramo, cnae, email, whatsapp, chave_pix, origem, receita_pendente) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (nome_claude, cnpj_claude,
              receita["razao_social"] if receita else None,
              receita["cidade"] if receita else None,
              receita["uf"] if receita else None,
-             ramo, pix, f"Cadastro automático — doc {doc_id}",
+             ramo,
+             receita.get("cnae") if receita else None,
+             receita.get("email") if receita else None,
+             receita.get("telefone") if receita else None,
+             pix, f"Cadastro automático — doc {doc_id}",
              0 if receita else 1)
         )
 
@@ -2704,8 +2731,11 @@ async def _sincronizar_receita_pendentes(ctx: ContextTypes.DEFAULT_TYPE):
             with sqlite3.connect(DB_PATH) as con:
                 con.execute(
                     "UPDATE fornecedores SET razao_social=COALESCE(razao_social,?), "
-                    "cidade=COALESCE(cidade,?), uf=COALESCE(uf,?), receita_pendente=0 WHERE id=?",
-                    (receita["razao_social"], receita["cidade"], receita["uf"], forn_id)
+                    "cidade=COALESCE(cidade,?), uf=COALESCE(uf,?), ramo=COALESCE(ramo,?), "
+                    "cnae=COALESCE(cnae,?), email=COALESCE(email,?), whatsapp=COALESCE(whatsapp,?), "
+                    "receita_pendente=0 WHERE id=?",
+                    (receita["razao_social"], receita["cidade"], receita["uf"], receita.get("ramo"),
+                     receita.get("cnae"), receita.get("email"), receita.get("telefone"), forn_id)
                 )
             resolvidos += 1
 

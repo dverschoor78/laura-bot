@@ -1,6 +1,6 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-01 (produção migrada e limpa; auto-cadastro via Receita; arquivos organizados por obra; taxas/impostos/serviços públicos; recibo automático; pagamento parcelado; base de insumos SINAPI; produção ativada + correções de cadastro ao vivo)
+> Atualizado em: 2026-07-02 (produção migrada e limpa; auto-cadastro via Receita; arquivos organizados por obra; taxas/impostos/serviços públicos; recibo automático; pagamento parcelado; base de insumos SINAPI; produção ativada + correções de cadastro ao vivo; enriquecimento de fornecedor via Receita — e-mail, telefone, CNAE)
 
 ---
 
@@ -332,6 +332,21 @@ andamento, R$2.500 de R$30.000).
 - Descoberto e corrigido: dois processos `bot.py` simultâneos causam conflito de polling no
   Telegram — só uma instância por vez
 - Botões renomeados pra refletir aceitação de foto ou arquivo, não só um dos dois
+
+**Enriquecimento de fornecedor via Receita — e-mail, telefone, CNAE** ✓ *(concluída 2026-07-02)*
+
+- Bug corrigido: tela de resumo travava "Fornecedor não identificado" mesmo com o fornecedor já
+  cadastrado, quando só o CNPJ estava no documento novo — agora consulta `buscar_fornecedor()`
+  pra puxar a razão social, no mesmo padrão já usado pra CNPJ/PIX
+- `_consultar_receita()` ampliada: além de razão social/cidade/UF, agora extrai e-mail, telefone
+  e CNAE (código formatado no padrão oficial do Cartão CNPJ + descrição da atividade principal) —
+  tudo já vinha na mesma resposta da BrasilAPI
+- Novo campo `fornecedores.cnae`, separado de `ramo` (que continua vindo do documento, com CNAE
+  como fallback só quando o documento não especifica)
+- Sincronização retroativa aplicada aos 27 fornecedores já cadastrados — 22 ganharam telefone,
+  todos os 27 ganharam CNAE (e-mail raramente vem preenchido na Receita)
+- Incidente operacional resolvido: bot caiu com "database is locked" porque o DB Browser for
+  SQLite estava aberto com o `laura.db` — nunca deixar visualizador de banco aberto com o bot rodando
 
 ---
 

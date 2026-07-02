@@ -21,6 +21,32 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Enriquecimento de fornecedor via Receita — e-mail, telefone, CNAE] — 2026-07-02
+
+### Fornecedor: nome não reaproveitado, e mais dados da Receita
+
+- **Bug corrigido**: a tela de resumo (antes de gerar o pedido) travava o nome do fornecedor como
+  "Fornecedor não identificado" mesmo quando só o CNPJ era informado e o fornecedor já existia no
+  cadastro — nunca consultava `buscar_fornecedor()`. Corrigido pra seguir o mesmo padrão já usado
+  em CNPJ/PIX e no PDF/PFM final.
+- `_consultar_receita()` ampliada: além de razão social/cidade/UF, agora também extrai e-mail,
+  telefone (`ddd_telefone_1`/`ddd_telefone_2`) e CNAE — tudo já vinha na mesma resposta da
+  BrasilAPI, só não estava sendo aproveitado
+- Novo campo `fornecedores.cnae`: código oficial formatado no padrão do Cartão CNPJ (ex:
+  "47.44-0-99") + descrição da atividade econômica principal, separado de `ramo` (que continua
+  vindo do documento; CNAE só entra como fallback quando o documento não especifica)
+- Sincronização retroativa rodada nos 27 fornecedores já cadastrados (o job periódico só mexe em
+  pendências, e nenhum estava mais pendente) — 22 ganharam telefone, todos os 27 ganharam CNAE;
+  e-mail raramente vem preenchido na Receita (dado pouco comum de existir publicamente)
+
+### Operacional
+
+- Bot caiu com `sqlite3.OperationalError: database is locked` ao reiniciar — o DB Browser for
+  SQLite estava aberto com o `laura.db`, segurando o arquivo. Resolvido fechando o programa.
+  Lição: nunca deixar visualizador de SQLite aberto enquanto o bot está rodando.
+
+---
+
 ## [Produção ativada + cadastro retroativo completo de GGV03] — 2026-07-01
 
 ### Primeira vez rodando de verdade, e o que isso revelou

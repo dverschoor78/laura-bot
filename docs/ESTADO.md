@@ -1,7 +1,7 @@
 # Estado do Projeto Laura
 
-> Atualizado em: 2026-07-01
-> Sessão: Preparação para produção — migração, limpeza, auto-cadastro via Receita, organização automática de arquivos, taxas/impostos/serviços públicos, pagamento parcelado + recibo assinado, base de insumos SINAPI, **ativação em produção + cadastro retroativo ao vivo de GGV03**
+> Atualizado em: 2026-07-02
+> Sessão: Preparação para produção — migração, limpeza, auto-cadastro via Receita, organização automática de arquivos, taxas/impostos/serviços públicos, pagamento parcelado + recibo assinado, base de insumos SINAPI, ativação em produção + cadastro retroativo ao vivo de GGV03, **enriquecimento de fornecedor via Receita (e-mail, telefone, CNAE)**
 
 ---
 
@@ -39,12 +39,18 @@
 - **`docs/LICOES_EXTRACAO.md` criado e alimentado com 10 bugs reais** encontrados durante o
   cadastro ao vivo de hoje — leitura obrigatória antes de mexer em PROMPT/regex, referenciado em
   `docs/PROCESSO.md`.
+- **Enriquecimento de fornecedor via Receita ampliado**: além de razão social/cidade/UF, agora
+  também traz e-mail, telefone e CNAE (código oficial formatado + descrição da atividade
+  econômica principal) — todos os 27 fornecedores já sincronizados retroativamente.
+- **Tela de resumo (antes de gerar o pedido) passou a puxar o nome do fornecedor já cadastrado**
+  quando só o CNPJ está no documento — antes travava em "Fornecedor não identificado" mesmo com
+  o fornecedor já conhecido pela Laura.
 
 ---
 
 ## Versão Atual
 
-**v0.8.0** — Produção ativada + cadastro retroativo completo de GGV03 + 10 correções encontradas ao vivo
+**v0.8.1** — Enriquecimento de fornecedor via Receita (e-mail, telefone, CNAE) + correção de nome não reaproveitado
 
 ---
 
@@ -81,6 +87,34 @@
 ---
 
 ## Última Fiada Implementada
+
+**Enriquecimento de fornecedor via Receita — e-mail, telefone, CNAE** *(2026-07-02)*
+
+Dennis começou a usar o DB Browser for SQLite pra olhar o banco direto, e perguntou sobre a
+sincronização com a Receita. Isso levou a duas melhorias pontuais:
+
+- **Bug corrigido**: a tela de resumo (antes de gerar o pedido) travava o nome do fornecedor como
+  "Fornecedor não identificado" mesmo quando só o CNPJ era informado e o fornecedor já existia no
+  cadastro — nunca consultava `buscar_fornecedor()` pra puxar a razão social. Corrigido: agora
+  segue o mesmo padrão já usado em CNPJ/PIX, e no PDF/PFM final.
+- **`_consultar_receita()` ampliada**: além de razão social/cidade/UF, agora também extrai e-mail,
+  telefone (`ddd_telefone_1`/`ddd_telefone_2`) e CNAE (código formatado no padrão oficial do
+  Cartão CNPJ, ex: "47.44-0-99", + descrição da atividade econômica principal) — tudo já vinha na
+  mesma resposta da BrasilAPI, só não estava sendo aproveitado.
+- Novo campo `fornecedores.cnae`, separado de `ramo` (que continua sendo o texto usado no PFM,
+  geralmente vindo do documento — CNAE só entra como fallback do `ramo` quando o documento não
+  especifica nada).
+- **Sincronização retroativa rodada duas vezes** pra aplicar os campos novos aos 27 fornecedores já
+  cadastrados (o job periódico só mexe em pendências, e nenhum estava mais marcado como pendente).
+  Resultado: 22 ganharam telefone, todos os 27 ganharam CNAE; e-mail quase nunca vem preenchido na
+  Receita (dado raro de existir publicamente).
+
+**Incidente operacional**: o bot caiu com `sqlite3.OperationalError: database is locked` ao tentar
+reiniciar — o DB Browser for SQLite estava aberto com o `laura.db`, segurando o arquivo. Resolvido
+fechando o programa. Lição registrada: nunca deixar um visualizador de SQLite aberto enquanto o
+bot roda, senão qualquer restart (por mudança de código) derruba a Laura.
+
+---
 
 **Ativação em produção + cadastro retroativo ao vivo de GGV03** *(2026-07-01)*
 
