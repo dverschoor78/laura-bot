@@ -66,6 +66,23 @@ perdido de novo — estava salva certinha no banco, mas o cockpit do pedido (`mo
 nunca exibia o campo Observações, só a tela de resumo antes de confirmar. Corrigido: `Pedido`
 ganhou o campo `observacoes`, cockpit mostra "📝 Obs: ..." quando existe algo registrado.
 
+### Terceiro bug: `_obs()` nunca capturava o formato real
+
+Mesmo depois da correção acima, a observação continuou sumindo — `_obs()` só reconhecia texto em
+**linhas separadas** abaixo de "Observações:", mas o formato real (usado em 100% dos casos
+observados no projeto) sempre foi tudo **na mesma linha**. A função pulava essa linha inteira sem
+capturar nada — provavelmente quebrada silenciosamente desde que foi escrita. Corrigida pra
+aceitar os dois formatos; também passou a usar `_campo_vazio()` pra não mostrar "não informado"
+como se fosse uma observação real.
+
+### Navegação: "Cancelar" virou "← Voltar"
+
+Ao clicar num "Cancelar" de mensagem antiga já vinculada a um pedido, o fluxo abria uma tela
+intermediária ("Mensagem antiga — esse documento já é o pedido #X" + botão) antes de chegar no
+cockpit — dois cliques. Simplificado pra abrir o cockpit direto, um clique só. Os três botões
+"Cancelar" do fluxo de orçamento e confirmação inicial foram renomeados pra "← Voltar", seguindo o
+padrão já usado em todo o resto da Laura — a lógica de fundo não mudou, só o rótulo e a navegação.
+
 ---
 
 ## [Enriquecimento de fornecedor via Receita — e-mail, telefone, CNAE] — 2026-07-02

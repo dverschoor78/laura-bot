@@ -377,6 +377,11 @@ descarte num documento que já tinha virado pedido de verdade. A função nunca 
   vezes — a primeira foi apagada de novo antes do bot subir com a correção
 - Esclarecimento paralelo: "Base Forte" e "Espaço Azul" são a mesma empresa (nome fantasia); o
   cadastro do fornecedor já estava correto, a confusão era só de nome de arquivo no OneDrive
+- Bug adicional: `_obs()` só reconhecia "Observações" em linhas separadas — o formato real sempre
+  foi tudo na mesma linha; provavelmente quebrada silenciosamente desde que foi escrita. Corrigida
+  pra aceitar os dois formatos, mais `_campo_vazio()` pra não mostrar "não informado" como real
+- Navegação simplificada: "Cancelar" virou "← Voltar" nos três lugares onde aparecia; ao clicar
+  numa mensagem antiga já vinculada a um pedido, abre o cockpit direto (um clique, não dois)
 
 ---
 

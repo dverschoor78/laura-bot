@@ -1018,11 +1018,17 @@ def _itens(dados):
     return resultado
 
 def _obs(dados):
+    """Extrai o texto de Observações — aceita tanto 'Observações: texto' na mesma linha
+    (formato real, sempre usado na prática) quanto texto em linhas separadas abaixo do rótulo."""
     resultado, capturando = [], False
     for linha in dados.splitlines():
-        stripped = linha.strip()
+        stripped = linha.strip().lstrip("- *")
         if stripped.lower().startswith("observaç"):
             capturando = True
+            if ":" in stripped:
+                inline = stripped.split(":", 1)[1].strip().strip("*").strip()
+                if inline:
+                    resultado.append(inline)
             continue
         if capturando and stripped:
             resultado.append(stripped.lstrip("- *"))
@@ -2022,12 +2028,12 @@ def teclado_orcamento(doc_id, tipo, ggv):
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("📍 Definir obra",   callback_data=f"sel_ggv:{doc_id}:{tipo}:{ggv}")],
             [InlineKeyboardButton("✏️ Corrigir dados", callback_data=f"sel_edit:{doc_id}:{tipo}:{ggv}")],
-            [InlineKeyboardButton("Cancelar",          callback_data=f"cancelar:{doc_id}")],
+            [InlineKeyboardButton("← Voltar",          callback_data=f"cancelar:{doc_id}")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Gerar Pedido de Compra", callback_data=f"pfm:{doc_id}:{ggv}")],
         [InlineKeyboardButton("✏️ Corrigir dados",         callback_data=f"sel_edit:{doc_id}:{tipo}:{ggv}")],
-        [InlineKeyboardButton("Cancelar",                  callback_data=f"cancelar:{doc_id}")],
+        [InlineKeyboardButton("← Voltar",                  callback_data=f"cancelar:{doc_id}")],
     ])
 
 def teclado_candidatos_pix(doc_id_comp: int, candidatos: list):
@@ -2163,7 +2169,7 @@ def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
         qtd_parcelas              = qtd_parcelas,
         total_pago                = total_pago_v,
         caminho_orcamento         = caminho,
-        observacoes               = _obs(dados).strip() or None,
+        observacoes               = (lambda o: None if _campo_vazio(o) else o)(_obs(dados).strip()),
     )
 
 def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
@@ -3215,14 +3221,26 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(f"Confirmado: {label}")
 
         elif acao == "cancelar":
-            if _descartar_documento(int(partes[1])):
+            doc_id_cancelar = int(partes[1])
+            if _descartar_documento(doc_id_cancelar):
                 await query.edit_message_text("Cancelado. Pode reenviar o arquivo se precisar.")
             else:
-                await query.answer(
-                    "Esse documento já virou um pedido — não dá mais pra cancelar por aqui "
-                    "(botão de uma mensagem antiga). Use \"🗑 Excluir pedido\" no cockpit se for o caso.",
-                    show_alert=True
-                )
+                # Mensagem antiga de um documento que já virou pedido — abre o cockpit direto,
+                # sem etapa intermediária
+                with sqlite3.connect(DB_PATH) as con:
+                    row = con.execute(
+                        "SELECT ggv, pfm_numero FROM documentos WHERE id=?", (doc_id_cancelar,)
+                    ).fetchone()
+                pfm_codigo_atual = f"{row[0]}-{row[1]:03d}" if row and row[1] else None
+                pedido = buscar_pedido(pfm_codigo_atual) if pfm_codigo_atual else None
+                if pedido:
+                    preparar_visualizacao_pedido(pedido)
+                    await query.edit_message_text(
+                        mostrar_pedido(pedido),
+                        reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo_atual, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status, pedido.categoria, pedido.qtd_parcelas)
+                    )
+                else:
+                    await query.answer("Esse documento já virou um pedido — não dá mais pra cancelar por aqui.", show_alert=True)
 
         elif acao == "sel_tipo":
             _, doc_id, tipo, ggv = partes
@@ -3327,10 +3345,10 @@ async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
             else:
                 await query.edit_message_text(
-                    f"{label_tipo}\n\n{corpo}\n\nConfirmar ou cancelar?",
+                    f"{label_tipo}\n\n{corpo}\n\nConfirmar?",
                     reply_markup=InlineKeyboardMarkup([[
                         InlineKeyboardButton("✅ Confirmar", callback_data=f"ok:{doc_id}:{tipo}:{ggv}"),
-                        InlineKeyboardButton("Cancelar",    callback_data=f"cancelar:{doc_id}"),
+                        InlineKeyboardButton("← Voltar",    callback_data=f"cancelar:{doc_id}"),
                     ]])
                 )
 

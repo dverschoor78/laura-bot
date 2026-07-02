@@ -58,12 +58,16 @@
 - **Itens de compra ainda não são estruturados**: cada pedido guarda a lista de itens como texto
   corrido dentro de `dados_claude`, não numa tabela própria — Dennis notou isso ao tentar achar o
   preço de um item específico já comprado. Combinado como próxima fiada.
+- **`_obs()` estava quebrada desde sempre**: só reconhecia "Observações" em linhas separadas, mas
+  o formato real é sempre tudo na mesma linha — corrigida pra aceitar os dois formatos.
+- **Botões "Cancelar" viraram "← Voltar"**: mesmo padrão em todo lugar; ao clicar num documento já
+  virado pedido, abre o cockpit direto, sem tela intermediária.
 
 ---
 
 ## Versão Atual
 
-**v0.8.3** — Correção crítica: documento de pedido pago não pode mais ser apagado por engano
+**v0.8.4** — `_obs()` corrigida (bug antigo) + navegação "Cancelar"→"Voltar" simplificada
 
 ---
 
@@ -136,6 +140,23 @@ banco. O problema real: o cockpit do pedido (`mostrar_pedido()`, a tela que abre
 código) nunca exibia o campo Observações — só a tela de resumo antes de confirmar, que ninguém
 revisita depois de um pedido já pago. Corrigido: `Pedido` ganhou o campo `observacoes`, e o
 cockpit mostra "📝 Obs: ..." quando existe algo registrado.
+
+**Terceiro bug, mais sério que o segundo**: mesmo depois da correção acima, a observação continuou
+sumindo — porque `_obs()` só capturava texto em **linhas separadas** abaixo de "Observações:", mas
+o formato real, usado em 100% dos casos, sempre foi tudo **na mesma linha** ("Observações: texto
+aqui"). `_obs()` pulava essa linha inteira sem capturar nada. Provavelmente estava quebrado desde
+que foi escrita, silenciosamente, em qualquer lugar que dependesse dela. Corrigido pra aceitar os
+dois formatos (inline e multi-linha); também passou a filtrar valores tipo "não informado" com
+`_campo_vazio()` em vez de mostrar isso como se fosse uma observação real.
+
+**Refino de UX pedido pelo Dennis**: o botão "Cancelar" (resumo pré-confirmação) que hoje já
+recusa apagar um documento virado pedido, ao ser clicado numa mensagem antiga, abria uma tela
+intermediária ("Mensagem antiga — esse documento já é o pedido #X" com botão "Voltar") — dois
+cliques pra chegar no cockpit. Simplificado pra abrir o cockpit direto, um clique só, sem tela no
+meio. Os três botões "Cancelar" do fluxo de orçamento (`teclado_orcamento()`, confirmação inicial
+de outros tipos de documento) foram renomeados pra **"← Voltar"**, consistente com o resto da
+Laura — a ação de fundo continua a mesma (descarta se ainda não virou pedido, navega pro pedido se
+já virou), só o rótulo mudou.
 
 **Descoberto durante uma consulta de preço**: Dennis perguntou o preço de um "Te de redução
 32x25" já comprado (GGV03-006, Carlessi) — achei, mas só depois de ler o texto corrido inteiro do
