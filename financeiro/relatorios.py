@@ -60,34 +60,77 @@ def _extrair_numero_documento(dados_claude: str, nome_arquivo: str) -> str:
     return "---"
 
 
-def _extrair_descricao(dados_claude: str, categoria: str = None, nome_arquivo: str = None) -> str:
-    """Extrai resumo generico dos itens comprados ou servicos."""
+def _resumo_itens(db_path, pfm_codigo: str) -> str:
+    """Consolida itens do pedido num resumo tipo 'item1, item2, item3'."""
+    con = sqlite3.connect(db_path)
+    con.row_factory = sqlite3.Row
+
+    itens = con.execute(
+        "SELECT descricao FROM itens_pedido WHERE pfm_codigo = ? ORDER BY numero LIMIT 5",
+        (pfm_codigo,)
+    ).fetchall()
+    con.close()
+
+    if not itens:
+        return ""
+
+    # Extrai só a primeira palavra/termo significativo de cada item
+    termos = []
+    for item in itens:
+        desc = item['descricao']
+        # Pega o primeiro termo significativo (até 15 chars, sem números no início)
+        palavras = desc.split()
+        if palavras:
+            termo = palavras[0]
+            if len(termo) > 3:  # Ignora artigos muito curtos
+                termos.append(termo)
+
+    if termos:
+        return " ".join(termos[:3])  # Primeiros 3 termos
+    return ""
+
+
+def _extrair_descricao(dados_claude: str, categoria: str = None, nome_arquivo: str = None, db_path = None, pfm_codigo: str = None) -> str:
+    """Extrai resumo dos itens: 'Categoria - item1, item2, item3'."""
     if not dados_claude:
         return "---"
 
     # Tenta extrair "Resumo da compra:" — formato esperado
     match = re.search(r'Resumo da compra[:\s]+([^\n]+)', dados_claude, re.IGNORECASE)
     if match:
-        desc = match.group(1).strip()
-        desc = re.sub(r'\*\*', '', desc)  # Remove **
-        return desc[:100]
+        resumo = match.group(1).strip()
+        resumo = re.sub(r'\*\*', '', resumo)  # Remove **
+
+        # Se tem itens no banco, consolida melhor
+        if db_path and pfm_codigo:
+            itens_resumo = _resumo_itens(db_path, pfm_codigo)
+            if itens_resumo:
+                return f"{resumo} - {itens_resumo}"
+
+        return resumo[:100]
 
     # Para taxa/ART/servicos: tenta extrair do nome do arquivo
     if categoria in ("taxa", "servicos") and nome_arquivo:
-        # Procura por padroes tipo "Obra Servico", "Projetos", etc
         match = re.search(r'([^/_-]*(?:Projeto|Execucao|Servico|Obra|Art)[^/_-]*)', nome_arquivo, re.IGNORECASE)
         if match:
             desc = match.group(1).strip()
             return desc[:100]
 
-    # Fallback: primeira linha significativa
+    # Para material: tenta primeira linha + itens
     lines = dados_claude.split('\n')
     for line in lines:
         line = line.strip()
-        # Remove markdown e caracteres especiais
         line = re.sub(r'\*\*', '', line)
         if line and len(line) > 10 and ':' not in line[:20]:
-            return line[:100]
+            categoria_desc = line[:100]
+
+            # Se tem itens, adiciona depois do hífen
+            if db_path and pfm_codigo:
+                itens_resumo = _resumo_itens(db_path, pfm_codigo)
+                if itens_resumo:
+                    return f"{categoria_desc} - {itens_resumo}"
+
+            return categoria_desc
 
     return "---"
 
@@ -226,8 +269,8 @@ def gerar_fluxo_pagamentos_obra(db_path: Path, ggv: str = None, output_dir: Path
         pedido = row['pfm_codigo'] or '---'
         fornecedor = row['fornecedor'] or '---'
         categoria = cat_map.get(row['categoria'], row['categoria'] or '---').upper()
-        # Extrai descrição do documento original
-        descricao = _extrair_descricao(row['dados_claude'], row['categoria'], row['doc_orig'])
+        # Extrai descrição do documento original + itens do pedido
+        descricao = _extrair_descricao(row['dados_claude'], row['categoria'], row['doc_orig'], db_path, row['pfm_codigo'])
         valor = row['valor'] or 0
         valor_pago = row['valor_pago'] or 0
         # Para taxa/ART: extrai número do documento original; para material: extrai número da NFe
