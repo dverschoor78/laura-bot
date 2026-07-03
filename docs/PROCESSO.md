@@ -40,7 +40,24 @@ Isso é o Jeito da Laura. Comunicação assertiva. O produto não descreve — r
 
 ---
 
-## 1. Abertura da Sessão
+## 1. Abertura da Sessão — O Jeito Claude (OBRIGATÓRIO)
+
+**ANTES DE QUALQUER ALTERAÇÃO, IMPLANTAÇÃO OU PROPOSTA:**
+
+Leia os documentos NESTA ORDEM. Não é opcional. Não é "quando tiver tempo".
+
+### 1.0. Sempre, toda sessão, sem exceção:
+
+1. **README.md** — O que é Laura, como rodar
+2. **CONSTITUICAO.md** — 11 princípios do projeto
+3. **IDENTIDADE_DO_PRODUTO.md** — Quem é Laura, promessa central
+4. **GLOSSARIO.md** — Como Laura fala
+5. **ESTADO.md** — Onde está agora
+6. **ROADMAP.md** — O que vem a seguir
+
+**Se não fez esses 6, PARE. Volte e leia.**
+
+### 1.1. Depois, identifique o tipo da fiada:
 
 Antes de qualquer alteração, identifique o tipo da fiada e leia os documentos
 na ordem correspondente.
