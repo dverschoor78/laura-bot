@@ -37,10 +37,42 @@ def _extrair_nfe(nome_arquivo: str) -> str:
     return "---"
 
 
-def _extrair_descricao(dados_claude: str) -> str:
-    """Extrai resumo dos itens comprados do dados_claude."""
+def _extrair_numero_documento(dados_claude: str, nome_arquivo: str) -> str:
+    """Extrai número de ART, ONR, CREA, etc do dados_claude ou nome do arquivo."""
+    if not dados_claude and not nome_arquivo:
+        return "---"
+
+    # Procura ART no dados_claude
+    match = re.search(r'ART\s*n[º°\.]*\s*(\d+)', dados_claude or "", re.IGNORECASE)
+    if match:
+        return f"ART {match.group(1)}"
+
+    # Procura ART no nome do arquivo
+    match = re.search(r'ART[_-]?(\d+)', nome_arquivo or "", re.IGNORECASE)
+    if match:
+        return f"ART {match.group(1)}"
+
+    # Procura ONR
+    match = re.search(r'ONR[_-]?(\d+)', nome_arquivo or "", re.IGNORECASE)
+    if match:
+        return f"ONR {match.group(1)}"
+
+    return "---"
+
+
+def _extrair_descricao(dados_claude: str, categoria: str = None, nome_arquivo: str = None) -> str:
+    """Extrai resumo dos itens comprados ou serviços do dados_claude."""
     if not dados_claude:
         return "---"
+
+    # Para taxa/ART: tenta extrair "Obra Serviço", "Projetos", "Execução", etc
+    if categoria in ("taxa", "servicos"):
+        # Procura por padrão de serviços no nome do arquivo
+        if nome_arquivo and ("Projeto" in nome_arquivo or "Execução" in nome_arquivo or "Serviço" in nome_arquivo):
+            match = re.search(r'([^/_-]*(?:Projeto|Execução|Serviço|Obra)[^/_-]*)', nome_arquivo, re.IGNORECASE)
+            if match:
+                desc = match.group(1).strip()
+                return desc[:80]
 
     # Tenta extrair "Resumo da compra:" ou similar
     match = re.search(r'Resumo da compra[:\s]+([^\n]+)', dados_claude, re.IGNORECASE)
@@ -116,7 +148,7 @@ def gerar_fluxo_pagamentos_obra(db_path: Path, ggv: str = None, output_dir: Path
     con = sqlite3.connect(db_path)
     con.row_factory = sqlite3.Row
 
-    # Query base
+    # Query base — inclui documento original (pra extrair ART) e NFe
     query = """
         SELECT
             l.pfm_codigo,
@@ -126,10 +158,12 @@ def gerar_fluxo_pagamentos_obra(db_path: Path, ggv: str = None, output_dir: Path
             l.valor_pago,
             l.data_pagamento,
             l.categoria,
-            d.nome as doc_nfe,
-            d.dados_claude
+            d_orig.nome as doc_orig,
+            d_orig.dados_claude,
+            d_nfe.nome as doc_nfe
         FROM lancamentos l
-        LEFT JOIN documentos d ON l.doc_id_nfe = d.id
+        LEFT JOIN documentos d_orig ON l.doc_id = d_orig.id
+        LEFT JOIN documentos d_nfe ON l.doc_id_nfe = d_nfe.id
         WHERE l.status = 'pago'
     """
     params = []
@@ -190,10 +224,15 @@ def gerar_fluxo_pagamentos_obra(db_path: Path, ggv: str = None, output_dir: Path
         pedido = row['pfm_codigo'] or '---'
         fornecedor = row['fornecedor'] or '---'
         categoria = cat_map.get(row['categoria'], row['categoria'] or '---').upper()
-        descricao = _extrair_descricao(row['dados_claude'])
+        # Extrai descrição do documento original
+        descricao = _extrair_descricao(row['dados_claude'], row['categoria'], row['doc_orig'])
         valor = row['valor'] or 0
         valor_pago = row['valor_pago'] or 0
-        nfe = _extrair_nfe(row['doc_nfe'])
+        # Para taxa/ART: extrai número do documento original; para material: extrai número da NFe
+        if row['categoria'] == 'taxa':
+            nfe = _extrair_numero_documento(row['dados_claude'], row['doc_orig'])
+        else:
+            nfe = _extrair_nfe(row['doc_nfe'])
         percent_quitado = (valor_pago / valor * 100) if valor > 0 else 0
 
         total_valor += valor
