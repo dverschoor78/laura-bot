@@ -4,7 +4,7 @@
 > Ele não é um dicionário. É um argumento.
 > Cada termo carrega o motivo pelo qual foi escolhido.
 >
-> Última revisão: 2026-06-29
+> Última revisão: 2026-07-03
 
 ---
 
@@ -23,6 +23,20 @@ não entra neste documento.
 ## Linguagem do Usuário
 
 Termos que aparecem em mensagens, botões, documentos e qualquer interface com o usuário.
+
+---
+
+### Lista de Compras
+
+**Aprovado:** Lista de Compras
+**Banidos:** lista de materiais, requisição de compra, shopping list
+
+**Por que:**
+"Lista de materiais" sugere um documento técnico de engenharia, não a decisão de compra
+em si. "Requisição de compra" é jargão de ERP corporativo — formal e burocrático demais
+para o tom da Laura. "Shopping list" é inglês, fora do padrão de linguagem do produto.
+"Lista de Compras" é direto e é como o termo já nasceu na Política de Compras
+(`docs/POLITICA_COMPRAS.md`).
 
 ---
 
@@ -234,14 +248,21 @@ comprovante, valores discrepantes.
 
 ---
 
-### Orçamento vs. Pedido de Compra
+### Lista de Compras vs. Orçamento vs. Pedido de Compra
 
-**Orçamento:** documento recebido do fornecedor. É a proposta deles. Entra na Laura.
+**Lista de Compras:** necessidade organizada pelo responsável, com ajuda da Laura.
+Representa "o que precisamos comprar" — decisão técnica, sem fornecedor definido.
+Nunca circula fora da Laura; é ponto de partida, não documento externo.
 
-**Pedido de Compra:** documento gerado pela Laura. É a ordem formal da DeltaD. Sai da Laura.
+**Orçamento:** documento recebido do fornecedor. É a proposta deles, fruto da negociação
+que acontece fora da Laura. Entra na Laura.
 
-São objetos diferentes, em direções opostas, com papéis distintos. O orçamento é matéria-prima;
-o Pedido de Compra é o produto.
+**Pedido de Compra:** documento gerado pela Laura a partir do orçamento negociado.
+É a ordem formal da DeltaD. Sai da Laura.
+
+Três objetos, três papéis: a Lista é a necessidade; o Orçamento é a proposta negociada;
+o Pedido de Compra é a ordem final. Ver `docs/POLITICA_COMPRAS.md` para os princípios
+completos que orientam essa cadeia.
 
 ---
 
@@ -258,5 +279,5 @@ o extrato é processado para conciliação (funcionalidade futura).
 ---
 
 *Responsável: Dennis Verschoor + Claude*
-*Última revisão: 2026-06-29*
+*Última revisão: 2026-07-03*
 *Próxima revisão: ao final da Fase 2 de implementação (Estrutura) ou quando surgir novo termo relevante*

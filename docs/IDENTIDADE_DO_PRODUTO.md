@@ -4,7 +4,7 @@
 > Define quem ela é, o que ela promete, como ela pensa e o que ela nunca será.
 > Toda decisão de design, interface, fluxo e funcionalidade deve ser avaliada contra ele.
 >
-> Última revisão: 2026-06-30
+> Última revisão: 2026-07-03
 
 ---
 
@@ -105,6 +105,11 @@ para fatos financeiros que não geram pedido (aportes, impostos, avulsos).
 > consequências. Juntos, eles contam a história econômica da obra."*
 
 Um gera o outro. Nenhum substitui o outro.
+
+O domínio de Compras — de onde o Pedido de Compra nasce — tem sua própria política,
+documentada em `docs/POLITICA_COMPRAS.md`. Ela define como a necessidade da obra se
+organiza antes de qualquer orçamento existir. Este documento continua descrevendo a
+Laura como produto; o processo interno do domínio de Compras vive na política, não aqui.
 
 ---
 
@@ -483,6 +488,7 @@ que o usuário veja. Ela existe no código e no banco. Em nenhum outro lugar.
 |-----------|-------|
 | `docs/IDENTIDADE_DO_PRODUTO.md` | Quem é a Laura (este documento) |
 | `docs/CONSTITUICAO.md` | Como a engenharia é conduzida |
+| `docs/POLITICA_COMPRAS.md` | Princípios que orientam o domínio de Compras |
 | `docs/ARQUITETURA.md` | Como o sistema é construído |
 | `docs/PROCESSO.md` | Como cada sessão de desenvolvimento funciona |
 | `docs/ROADMAP.md` | O que será construído e quando |
@@ -495,6 +501,21 @@ Quando houver conflito entre uma feature técnica e a identidade do produto, a i
 `docs/PROCESSO.md` define dois tipos de sessão de desenvolvimento: **Sessão de Engenharia**
 e **Sessão de Produto**. Toda fiada que produza algo visível ao usuário requer a leitura
 deste documento como primeiro passo da abertura.
+
+---
+
+## Marco de Maturidade — 2026-07-03 (Política de Compras)
+
+O domínio de Compras — já nomeado desde o Marco do Módulo Financeiro, mas até aqui
+sem princípios próprios documentados — ganhou uma política dedicada:
+`docs/POLITICA_COMPRAS.md`.
+
+Ela define como a Laura participa do processo de compra: consultora, nunca compradora
+automática. A negociação e a decisão comercial continuam sempre humanas.
+
+Este documento continua descrevendo a Laura como produto, em nível de abstração mais
+alto. Os princípios operacionais do domínio de Compras vivem na política — não aqui —
+para preservar a separação entre identidade de produto e política de domínio.
 
 ---
 

@@ -61,6 +61,23 @@ Não é opcional. Não é "quando tiver tempo". É **obrigatório**.
 - `IDENTIDADE_DO_PRODUTO.md` + `GLOSSARIO.md` (sessões Produto)
 - ADR relevante (se existe uma ADR relacionada)
 - `LICOES_EXTRACAO.md` (se mexer em PROMPT ou parsing)
+- Política de domínio correspondente, se a fiada envolver um domínio que possua uma
+  (ver "Políticas de Domínio" abaixo)
+
+### Políticas de Domínio
+
+Alguns domínios da Laura podem ganhar uma política própria — um documento
+`docs/POLITICA_<DOMINIO>.md` que define os princípios que orientam aquele domínio
+especificamente, no mesmo espírito da CONSTITUICAO.md, mas aplicado a um recorte.
+
+Toda política de domínio existente é leitura obrigatória sempre que a fiada envolver
+aquele domínio — mesmo padrão já usado para `LICOES_EXTRACAO.md` (leitura condicional
+ao tocar PROMPT/parsing). Isso vale para qualquer domínio, presente ou futuro
+(Compras, Financeiro, Obras, Estoque, ...) — não é uma regra especial para Compras.
+
+**Políticas de domínio registradas:**
+- `docs/POLITICA_COMPRAS.md` — domínio de Compras (lista de compras, orçamento,
+  comparação de preço, fornecedor)
 
 ### 1.1. Depois, identifique o tipo da fiada:
 
