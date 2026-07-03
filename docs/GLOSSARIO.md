@@ -28,15 +28,19 @@ Termos que aparecem em mensagens, botões, documentos e qualquer interface com o
 
 ### Lista de Compras
 
-**Aprovado:** Lista de Compras
-**Banidos:** lista de materiais, requisição de compra, shopping list
+**Aprovado:** Lista de Compras (objeto dentro da Laura)
+**Banidos como sinônimo do objeto:** requisição de compra, shopping list
 
 **Por que:**
-"Lista de materiais" sugere um documento técnico de engenharia, não a decisão de compra
-em si. "Requisição de compra" é jargão de ERP corporativo — formal e burocrático demais
-para o tom da Laura. "Shopping list" é inglês, fora do padrão de linguagem do produto.
-"Lista de Compras" é direto e é como o termo já nasceu na Política de Compras
-(`docs/POLITICA_COMPRAS.md`).
+"Requisição de compra" é jargão de ERP corporativo — formal e burocrático demais para o
+tom da Laura. "Shopping list" é inglês, fora do padrão de linguagem do produto. "Lista de
+Compras" é direto e é como o termo já nasceu na Política de Compras (`docs/POLITICA_COMPRAS.md`).
+
+**Nota — "Lista de materiais" não é mais banido, é outra coisa:** é o nome do tipo de
+**documento** que o usuário envia (foto/PDF de uma lista à mão ou impressa, com descrição
+e quantidade, sem preço) — mesmo papel que "Orçamento" ocupa para o Pedido de Compra. O
+documento "Lista de materiais" alimenta o objeto "Lista de Compras". Ver distinção
+completa em Distinções Conceituais, mais abaixo.
 
 ---
 
@@ -248,11 +252,16 @@ comprovante, valores discrepantes.
 
 ---
 
-### Lista de Compras vs. Orçamento vs. Pedido de Compra
+### Lista de materiais vs. Lista de Compras vs. Orçamento vs. Pedido de Compra
+
+**Lista de materiais:** documento que o usuário envia — foto ou PDF de uma lista à mão ou
+impressa, com descrição e quantidade, sem preço nem fornecedor. Entra na Laura, igual a
+um orçamento entra. Alimenta o objeto Lista de Compras.
 
 **Lista de Compras:** necessidade organizada pelo responsável, com ajuda da Laura.
 Representa "o que precisamos comprar" — decisão técnica, sem fornecedor definido.
-Nunca circula fora da Laura; é ponto de partida, não documento externo.
+Nunca circula fora da Laura; é ponto de partida, não documento externo. Pode nascer de
+uma Lista de materiais (foto) ou ser montada direto pelo comando `/lista`.
 
 **Orçamento:** documento recebido do fornecedor. É a proposta deles, fruto da negociação
 que acontece fora da Laura. Entra na Laura.

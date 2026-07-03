@@ -34,6 +34,73 @@
 
 ---
 
+## Fase — Módulo de Compras
+
+**Fundação conceitual** ✓ *(concluída 2026-07-03)*
+
+Antes de qualquer código, três documentos em sequência constroem o domínio:
+- `docs/POLITICA_COMPRAS.md` — princípios: Laura como consultora de compras, nunca
+  compradora automática; negociação e decisão comercial sempre humanas; compra planejável
+  nasce de necessidade organizada em Lista de Compras, não de orçamento
+- `docs/CASOS_DE_USO_COMPRAS.md` — 15 casos de uso em linguagem de negócio + "Três
+  Momentos da Laura" (antes/durante/depois) + 7 padrões comuns identificados
+- `docs/MODELO_DOMINIO_COMPRAS.md` — objetos conceituais (Lista de Compras, Item da
+  Lista, Orçamento, Alerta — cada um com ciclo de vida próprio), eventos,
+  responsabilidades Laura/usuário, regras por momento — sem banco de dados/classes/APIs
+
+**Fiada 1 — Criar e consultar Lista de Compras** ✓ *(implementada 2026-07-03, aguardando teste real no Telegram)*
+
+Primeira fiada de engenharia, nasce em módulo próprio `compras/` (ADR-002: todo novo
+domínio nasce modular). Escopo: só o momento "antes da compra" — `/lista GGV03` cria ou
+reabre a lista da obra, Laura sugere itens recorrentes de `itens_pedido` com o último
+preço pago, Dennis adiciona (por botão ou texto livre) e remove itens, lista fica
+consultável. Sem vínculo com orçamento, sem alertas proativos (Casos 11-15), sem tocar o
+fluxo existente de `gerar_pfm()`.
+
+- `compras/lista.py`: `StatusLista`/`StatusItem`, `init_db_compras()`, `sugerir_itens()`
+  (retorna lista vazia se não houver histórico — nunca inventa), `criar_ou_buscar_lista_aberta()`,
+  `adicionar_item()`, `remover_item()`, `listar_itens()` — todas recebendo `db_path`
+- `bot.py`: comando `/lista`, três callbacks (`lista_add_sug`, `lista_rem_item`,
+  `lista_fechar`), parser tolerante de item por texto livre (`_parse_item_lista()`,
+  mesmo espírito de `_itens()` — nunca bloqueia)
+- Testado via script contra `data/laura_test.db`: sugestão real para GGV03 (histórico
+  existente) e "sem histórico" explícito para obra sem nenhum item — critério do Dennis
+  cumprido; regressão do fluxo orçamento → pedido confirmada com
+  `scripts/teste_gerar_pedido.py`, sem alteração de comportamento
+
+**Fiada 2 — Lista de materiais por foto → Lista de Compras** ✓ *(implementada 2026-07-03, teste real adiado para amanhã)*
+
+Pedido de Dennis no meio da sessão: reaproveitar a mesma lógica já usada pra orçamento
+(extração por IA → tela de revisão → confirmar) num ponto mais cedo do processo — a partir
+de uma lista de materiais fotografada ou impressa, sem preço nem fornecedor.
+
+- Novo tipo de documento reconhecido: **Lista de materiais** (`lista_materiais`), com
+  classificação e template de extração próprios no `PROMPT` — explícito que preço/fornecedor
+  nunca devem ser inventados nesse tipo (mesmo cuidado da Lição #1 de `LICOES_EXTRACAO.md`)
+- Novo botão no menu de tipo de documento, ao lado de Orçamento/Comprovante/NF-e
+- Tela de confirmação (`_resumo_lista_materiais()`) reaproveita o padrão de revisão do
+  orçamento, mais simples (sem fornecedor/valor/condição — não existem nesse tipo)
+- Ao confirmar, os itens entram na Lista de Compras da obra via `compras.adicionar_item()`
+  — mesma função da Fiada 1
+- **Ajuste feito ainda hoje, depois do primeiro teste real:** a saída da confirmação
+  originalmente caía na tela de edição da Fiada 1 (`_tela_lista_compras`, "adicionar mais
+  itens / fechar"). Dennis pediu que a saída fosse uma **lista finalizada**, fechada, sem
+  virar modo de edição contínua — implementado como `_tela_lista_finalizada()`, resumo só
+  leitura. O modelo/PDF oficial da lista fica para decidir depois; por hoje é texto.
+- Testado com dado real do Dennis: 11 itens de material hidráulico (Tigre) extraídos
+  corretamente de uma foto real, incluindo obra não identificada → fluxo de definir obra
+  → lista finalizada. Confirmado direto no banco de teste, não só por script.
+- **Pendente:** Dennis retoma o teste ao vivo amanhã antes de considerar a fiada fechada
+
+**Aprendizado registrado hoje, não implementado:** Dennis apontou que a Lista de Compras
+provavelmente precisa de um endereço — o frete faz parte da negociação do orçamento, e sem
+saber pra onde entrega, falta informação relevante pra comparar propostas. Não é
+prioridade agora (a `Fiada 1`/`2` não usam isso); registrado aqui para quando o Modelo de
+Domínio for revisitado. Pode já existir via `obras.endereco_entrega` — decidir se a Lista
+de Compras herda isso da obra ou precisa de campo próprio é decisão de implementação futura.
+
+---
+
 ## Em Andamento
 
 **Fase 2 — Estrutura** *(Sprint de Experiência)*

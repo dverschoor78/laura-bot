@@ -20,6 +20,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from financeiro.lancamento import (init_db_financeiro, sugerir_categoria, CategoriaLancamento,
                                    vincular_nfe, buscar_candidatos_nfe)
 from nfe import parse_nfe, mostrar_nfe, teclado_candidatos_nfe
+from compras import (init_db_compras, criar_ou_buscar_lista_aberta, buscar_lista,
+                      sugerir_itens, adicionar_item, remover_item, listar_itens)
 
 load_dotenv()
 TOKEN       = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -38,6 +40,7 @@ TIPOS = {
     "nota_fiscal":      ("🧾", "Nota Fiscal"),
     "foto_entrega":     ("📦", "Foto/arquivo de entrega"),
     "extrato_mp":       ("🏦", "Extrato MP"),
+    "lista_materiais":  ("📝", "Lista de materiais"),
     "nao_relacionado":  ("🗑", "Não é da obra"),
 }
 GGVS = ["GGV00", "GGV01", "GGV02", "GGV03"]
@@ -155,6 +158,9 @@ PASSO 1 — Classifique o documento:
 [comprovante_pix]  — comprovante de pagamento PIX ou transferência bancária
 [nota_fiscal]      — Nota Fiscal eletrônica (NF-e), DANFE, NFS-e ou recibo fiscal
 [extrato_mp]       — extrato do Mercado Pago ou extrato bancário
+[lista_materiais]  — lista de materiais ou peças à mão ou impressa, com descrição e
+                     quantidade, SEM preço e SEM fornecedor (se tiver preço, é
+                     [orcamento], não isso — a presença de preço decide)
 [nao_relacionado]  — qualquer outro documento não relacionado a obras
 
 PASSO 2 — Identifique o empreendimento (GGV):
@@ -207,19 +213,26 @@ Se [extrato_mp]:
 - Número de transações identificadas:
 - Resumo:
 
+Se [lista_materiais]:
+- Itens (formato: N. Descrição do item (QTDE UND); liste todos os itens da lista — NUNCA
+  invente ou escreva preço, mesmo que consiga estimar um valor de mercado):
+- Observações:
+
 Se [nao_relacionado]:
 - Descreva brevemente o que é o documento.
 
 IMPORTANTE: use SOMENTE os campos da lista do tipo que você classificou no PASSO 1. Nunca misture
 campos de outro tipo — por exemplo, se classificou como [orcamento] (inclusive boleto/fatura),
 não escreva "Favorecido", "Chave PIX" ou "Instituição financeira" (esses são só de
-[comprovante_pix]), mesmo que o documento pareça visualmente um recibo de banco.
+[comprovante_pix]), mesmo que o documento pareça visualmente um recibo de banco. Se classificou
+como [lista_materiais], não escreva preço, fornecedor nem valor total sob nenhuma hipótese —
+esses campos não existem nesse tipo, mesmo que você consiga estimar um preço de mercado.
 
 Responda EXATAMENTE neste formato (sem colchetes, sem barra, escolha um valor de cada):
 TIPO:orcamento
 GGV:GGV03
 
-Valores aceitos para TIPO: orcamento, comprovante_pix, nota_fiscal, extrato_mp, nao_relacionado
+Valores aceitos para TIPO: orcamento, comprovante_pix, nota_fiscal, extrato_mp, lista_materiais, nao_relacionado
 Valores aceitos para GGV: GGV00, GGV01, GGV02, GGV03, nao_identificado
 
 Em seguida, os dados extraídos conforme o tipo identificado acima.
@@ -513,6 +526,7 @@ def init_db():
             except Exception:
                 pass
     init_db_financeiro(DB_PATH)
+    init_db_compras(DB_PATH)
 
 def buscar_obra(codigo):
     """Retorna dict com dados da obra ou {} se não encontrada."""
@@ -1800,6 +1814,9 @@ def mostrar_ajuda():
         "Envie o PDF ou foto da NF-e.\n\n"
         "<b>Registrar entrega</b>\n"
         "Envie a foto ou arquivo, ou use /entrega. Também disponível no botão 📦 Entregue dentro do pedido.\n\n"
+        "<b>Montar lista de compras</b>\n"
+        "Use /lista GGV03 (ou só /lista e informe a obra). Laura sugere itens recorrentes com o "
+        "último preço pago.\n\n"
         "<b>Consultas diretas</b>\n"
         "Digite o código da obra (GGV03) ou do pedido (GGV03-009)."
     )
@@ -1924,6 +1941,7 @@ def teclado_tipo_inicial(doc_id):
         [InlineKeyboardButton("💰 Comprovante PIX",       callback_data=f"sel_tipo_inicial:{doc_id}:comprovante_pix")],
         [InlineKeyboardButton("🧾 Nota Fiscal",           callback_data=f"sel_tipo_inicial:{doc_id}:nota_fiscal")],
         [InlineKeyboardButton("📦 Foto/arquivo de entrega", callback_data=f"sel_tipo_inicial:{doc_id}:foto_entrega")],
+        [InlineKeyboardButton("📝 Lista de materiais",     callback_data=f"sel_tipo_inicial:{doc_id}:lista_materiais")],
         [InlineKeyboardButton("🏦 Extrato Mercado Pago", callback_data=f"sel_tipo_inicial:{doc_id}:extrato_mp")],
         [InlineKeyboardButton("Não é da obra",            callback_data=f"sel_tipo_inicial:{doc_id}:nao_relacionado")],
         [InlineKeyboardButton("✖ Cancelar",               callback_data=f"cancelar:{doc_id}")],
@@ -2674,6 +2692,176 @@ async def nova_obra(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data["aguardando"] = "nova_obra_codigo"
     await update.message.reply_text("Código da nova obra (ex: GGV04):")
 
+# ── Lista de Compras (Fiada 1 — momento "antes da compra") ─────────────────
+# docs/POLITICA_COMPRAS.md, docs/CASOS_DE_USO_COMPRAS.md, docs/MODELO_DOMINIO_COMPRAS.md
+
+_ITEM_LISTA_RE = re.compile(
+    r"^(.+?)[,\-–]\s*([0-9]+(?:[.,][0-9]+)?)\s*([A-Za-zÀ-ÿ]{1,15}[²³0-9]{0,2})\s*$"
+)
+
+def _parse_item_lista(texto):
+    """Parse tolerante de item de lista de compras: 'cimento CP-II, 100 sacos' ->
+    (descrição, unidade, quantidade). Sem quantidade reconhecida, guarda só a
+    descrição — nunca bloqueia o usuário (mesmo espírito de _itens())."""
+    texto = texto.strip()
+    m = _ITEM_LISTA_RE.match(texto)
+    if m:
+        desc, qtd_str, und = m.groups()
+        return desc.strip(), und.upper(), _parse_qtde(qtd_str)
+    return texto, "", None
+
+async def _tela_lista_compras(lista_id, ggv, ctx):
+    itens = listar_itens(DB_PATH, lista_id)
+    sugestoes_raw = sugerir_itens(DB_PATH, ggv)
+    descricoes_na_lista = {i["descricao"].strip().lower() for i in itens}
+    sugestoes = [s for s in sugestoes_raw if s["descricao"].strip().lower() not in descricoes_na_lista]
+    ctx.user_data["lista_sugestoes"] = sugestoes
+
+    linhas = [f"📋 <b>Lista de Compras — Obra {ggv}</b>", ""]
+
+    if itens:
+        linhas.append("<b>Itens na lista:</b>")
+        for i in itens:
+            qtd = f"{_fmt_qtde(i['quantidade'])} {i['unidade']}".strip() if i["quantidade"] else ""
+            linhas.append(f"• {i['descricao']}" + (f" — {qtd}" if qtd else ""))
+        linhas.append("")
+
+    if sugestoes:
+        linhas.append("<b>Itens recorrentes desta obra:</b>")
+        for s in sugestoes:
+            preco = f" (último: R$ {_fmt_brl(s['ultimo_preco'])}/{s['unidade']})" if s["ultimo_preco"] else ""
+            linhas.append(f"• {s['descricao']}{preco}")
+        linhas.append("")
+        linhas.append('Toque pra adicionar um item recorrente, ou envie o próximo item por texto '
+                       '(ex: "cimento CP-II, 100 sacos").')
+    elif not itens:
+        linhas.append("Ainda não há histórico de compras para esta obra — nenhuma sugestão disponível.")
+        linhas.append("")
+        linhas.append('Envie o item que quiser adicionar (ex: "cimento CP-II, 100 sacos").')
+    else:
+        linhas.append('Envie o próximo item que quiser adicionar (ex: "cimento CP-II, 100 sacos").')
+
+    return "\n".join(linhas), _teclado_lista_compras(lista_id, itens, sugestoes)
+
+def _teclado_lista_compras(lista_id, itens, sugestoes):
+    botoes = []
+    for idx, s in enumerate(sugestoes):
+        botoes.append([InlineKeyboardButton(
+            f"➕ {s['descricao'][:40]}", callback_data=f"lista_add_sug:{lista_id}:{idx}"
+        )])
+    for i in itens:
+        botoes.append([InlineKeyboardButton(
+            f"🗑 {i['descricao'][:40]}", callback_data=f"lista_rem_item:{i['id']}:{lista_id}"
+        )])
+    botoes.append([InlineKeyboardButton("✖ Fechar", callback_data=f"lista_fechar:{lista_id}")])
+    return InlineKeyboardMarkup(botoes)
+
+async def _abrir_lista_compras(message, ggv, ctx):
+    lista_id, _ = criar_ou_buscar_lista_aberta(DB_PATH, ggv)
+    ctx.user_data["aguardando"] = "lista_item_texto"
+    ctx.user_data["lista_id"] = lista_id
+    ctx.user_data["lista_ggv"] = ggv
+    texto, markup = await _tela_lista_compras(lista_id, ggv, ctx)
+    await message.reply_text(texto, reply_markup=markup, parse_mode="HTML")
+
+_ITEM_LISTA_MATERIAIS_RE = re.compile(
+    r"^\d+\.\s+(.+?)\s+\(([0-9,.]+)\s+([A-Za-zÀ-ÿ]{1,15}[²³0-9]{0,2})\)\s*$",
+    re.IGNORECASE,
+)
+
+def _itens_lista_materiais(dados):
+    """Mesma filosofia de _itens() (item já existente pro fluxo de orçamento), adaptada
+    pra lista de materiais sem preço: 'N. Descrição (QTDE UND)'. Item que não bate no
+    formato é salvo como string — nunca descartado."""
+    resultado, capturando = [], False
+    for linha in dados.splitlines():
+        stripped = linha.strip().lstrip("- *")
+        if re.match(r"^itens", stripped, re.IGNORECASE) and ":" in stripped:
+            capturando = True
+            inline = stripped.split(":", 1)[1].strip().strip("*").strip()
+            if not inline:
+                continue
+            stripped = inline
+        if capturando:
+            if not stripped:
+                continue
+            if re.match(r"^observ", stripped, re.IGNORECASE):
+                break
+            m = _ITEM_LISTA_MATERIAIS_RE.match(stripped)
+            if m:
+                desc, qtde_str, und = m.groups()
+                resultado.append({"desc": desc.strip(), "und": und.upper(), "qtde": qtde_str})
+            elif stripped:
+                resultado.append(stripped)
+    return resultado
+
+def teclado_lista_materiais(doc_id, ggv):
+    if ggv == "nao_identificado":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📍 Definir obra", callback_data=f"sel_ggv:{doc_id}:lista_materiais:{ggv}")],
+            [InlineKeyboardButton("← Voltar",        callback_data=f"cancelar:{doc_id}")],
+        ])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Gerar Lista de Compras", callback_data=f"lista_mat_confirmar:{doc_id}:{ggv}")],
+        [InlineKeyboardButton("← Voltar",                  callback_data=f"cancelar:{doc_id}")],
+    ])
+
+def _resumo_lista_materiais(doc_id):
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute("SELECT dados_claude, ggv FROM documentos WHERE id=?", (doc_id,)).fetchone()
+    if not row:
+        return "Documento não encontrado.", None
+    dados, ggv = row
+    label_ggv = f"Obra {ggv}" if ggv != "nao_identificado" else "Obra não identificada"
+    itens = _itens_lista_materiais(dados)
+
+    linhas = [f"📝 <b>Lista de materiais — {label_ggv}</b>", ""]
+    if itens:
+        for i, item in enumerate(itens, 1):
+            if isinstance(item, dict):
+                linhas.append(f"{i}. {item['desc']} ({item['qtde']} {item['und']})")
+            else:
+                linhas.append(f"{i}. {item}")
+        linhas.append("")
+        linhas.append("Gerar a Lista de Compras com esses itens?")
+    else:
+        linhas.append("Não consegui reconhecer nenhum item nesta imagem.")
+        linhas.append("")
+        linhas.append("Você pode montar a lista manualmente com /lista.")
+
+    return "\n".join(linhas), teclado_lista_materiais(doc_id, ggv)
+
+def _tela_lista_finalizada(lista_id, ggv):
+    """Saída da Fiada 2: resumo definitivo, só leitura — não é a tela de edição da Fiada 1
+    (_tela_lista_compras). Dennis pediu explicitamente que o resultado da foto seja um
+    documento fechado, não uma tela de "continue adicionando". O modelo/PDF oficial fica
+    pra depois — por enquanto é texto."""
+    itens = listar_itens(DB_PATH, lista_id)
+    linhas = [f"✅ <b>Lista de Compras gerada — Obra {ggv}</b>", ""]
+    for i, item in enumerate(itens, 1):
+        qtd = f"{_fmt_qtde(item['quantidade'])} {item['unidade']}".strip() if item["quantidade"] else ""
+        linhas.append(f"{i}. {item['descricao']}" + (f" — {qtd}" if qtd else ""))
+    linhas.append("")
+    linhas.append(f"{len(itens)} item(ns) na lista. Leve pra negociar com os fornecedores.")
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("✖ Fechar", callback_data=f"lista_fechar:{lista_id}")]])
+    return "\n".join(linhas), markup
+
+async def lista_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != DONO_ID:
+        return
+    if ctx.args:
+        codigo = ctx.args[0].upper()
+        if not GGV_CODIGO_RE.match(codigo):
+            await update.message.reply_text("Formato inválido. Use GGV seguido de dois dígitos — ex: GGV03.")
+            return
+        if not buscar_obra(codigo):
+            await update.message.reply_text(f"Obra {codigo} não encontrada.")
+            return
+        await _abrir_lista_compras(update.message, codigo, ctx)
+    else:
+        ctx.user_data["aguardando"] = "lista_obra_codigo"
+        await update.message.reply_text("Lista de compras de qual obra? (ex: GGV03)")
+
 async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != DONO_ID:
         return
@@ -3002,6 +3190,32 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ctx.user_data["aguardando"] = None
             await update.message.reply_text("Contexto perdido. Envie o código da obra novamente.")
 
+    elif aguardando == "lista_obra_codigo":
+        codigo = texto.upper()
+        if not GGV_CODIGO_RE.match(codigo):
+            await update.message.reply_text("Formato inválido. Use GGV seguido de dois dígitos — ex: GGV03. Tente novamente:")
+            return
+        if not buscar_obra(codigo):
+            ctx.user_data["aguardando"] = None
+            await update.message.reply_text(f"Obra {codigo} não encontrada.")
+            return
+        await _abrir_lista_compras(update.message, codigo, ctx)
+
+    elif aguardando == "lista_item_texto":
+        lista_id = ctx.user_data.get("lista_id")
+        ggv      = ctx.user_data.get("lista_ggv")
+        if not lista_id:
+            ctx.user_data["aguardando"] = None
+            await update.message.reply_text("Contexto da lista perdido. Use /lista de novo.")
+            return
+        desc, und, qtd = _parse_item_lista(texto)
+        if not desc:
+            await update.message.reply_text('Não consegui entender o item. Tente: "cimento CP-II, 100 sacos".')
+            return
+        adicionar_item(DB_PATH, lista_id, desc, und, qtd)
+        texto_lista, markup = await _tela_lista_compras(lista_id, ggv, ctx)
+        await update.message.reply_text(texto_lista, reply_markup=markup, parse_mode="HTML")
+
 async def _cb_ok(query, ctx, partes):
     _, doc_id, tipo, ggv = partes
     atualizar(int(doc_id), status="confirmado")
@@ -3144,6 +3358,9 @@ async def _cb_sel_tipo_inicial(query, ctx, partes):
         )
     elif tipo == "orcamento":
         texto, markup = _resumo_gerar(int(doc_id))
+        await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
+    elif tipo == "lista_materiais":
+        texto, markup = _resumo_lista_materiais(int(doc_id))
         await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
     else:
         await query.edit_message_text(
@@ -3290,14 +3507,11 @@ async def _cb_set_ggv(query, ctx, partes):
     atualizar(int(doc_id), ggv=novo_ggv)
     if tipo == "orcamento":
         _autopreencher_endereco(int(doc_id), novo_ggv)
-    with sqlite3.connect(DB_PATH) as con:
-        status = con.execute("SELECT status FROM documentos WHERE id=?", (int(doc_id),)).fetchone()[0]
-    if status == "confirmado":
-        texto, markup = _resumo_gerar(int(doc_id))
-        await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
+    if tipo == "lista_materiais":
+        texto, markup = _resumo_lista_materiais(int(doc_id))
     else:
         texto, markup = _resumo_gerar(int(doc_id))
-        await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
+    await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
 
 
 async def _cb_pgto(query, ctx, partes):
@@ -3978,6 +4192,56 @@ async def _cb_menu_nova_obra(query, ctx, partes):
     ctx.user_data["aguardando"] = "nova_obra_codigo"
 
 
+async def _cb_lista_add_sug(query, ctx, partes):
+    _, lista_id, idx = partes
+    lista_id = int(lista_id)
+    sugestoes = ctx.user_data.get("lista_sugestoes", [])
+    idx = int(idx)
+    if idx >= len(sugestoes):
+        await query.answer("Sugestão expirada — a lista mudou. Veja a lista atualizada.", show_alert=True)
+        return
+    s = sugestoes[idx]
+    adicionar_item(DB_PATH, lista_id, s["descricao"], s["unidade"], None)
+    lista = buscar_lista(DB_PATH, lista_id)
+    texto, markup = await _tela_lista_compras(lista_id, lista["ggv"], ctx)
+    await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
+
+
+async def _cb_lista_rem_item(query, ctx, partes):
+    _, item_id, lista_id = partes
+    remover_item(DB_PATH, int(item_id))
+    lista_id = int(lista_id)
+    lista = buscar_lista(DB_PATH, lista_id)
+    texto, markup = await _tela_lista_compras(lista_id, lista["ggv"], ctx)
+    await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
+
+
+async def _cb_lista_mat_confirmar(query, ctx, partes):
+    _, doc_id, ggv = partes
+    dados = _dados_doc(int(doc_id))
+    itens = _itens_lista_materiais(dados)
+    if ggv == "nao_identificado" or not itens:
+        await query.answer("Sem obra definida ou sem itens reconhecidos.", show_alert=True)
+        return
+    lista_id, _ = criar_ou_buscar_lista_aberta(DB_PATH, ggv)
+    for item in itens:
+        if isinstance(item, dict):
+            adicionar_item(DB_PATH, lista_id, item["desc"], item["und"], _parse_qtde(item["qtde"]))
+        else:
+            adicionar_item(DB_PATH, lista_id, item, "", None)
+    atualizar(int(doc_id), status="confirmado")
+    texto, markup = _tela_lista_finalizada(lista_id, ggv)
+    await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
+
+
+async def _cb_lista_fechar(query, ctx, partes):
+    ctx.user_data["aguardando"] = None
+    ctx.user_data.pop("lista_id", None)
+    ctx.user_data.pop("lista_ggv", None)
+    ctx.user_data.pop("lista_sugestoes", None)
+    await query.edit_message_text("Lista fechada. Pode reabrir com /lista.")
+
+
 _CB_DISPATCH = {
     "ok": _cb_ok,
     "cancelar": _cb_cancelar,
@@ -4040,6 +4304,10 @@ _CB_DISPATCH = {
     "menu_obras": _cb_menu_obras,
     "menu_ajuda": _cb_menu_ajuda,
     "menu_nova_obra": _cb_menu_nova_obra,
+    "lista_add_sug": _cb_lista_add_sug,
+    "lista_rem_item": _cb_lista_rem_item,
+    "lista_fechar": _cb_lista_fechar,
+    "lista_mat_confirmar": _cb_lista_mat_confirmar,
 }
 
 async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -4077,6 +4345,7 @@ async def _post_init(app):
         BotCommand("obras",     "Lista de obras"),
         BotCommand("nova_obra", "Cadastrar obra nova"),
         BotCommand("entrega",   "Registrar entrega de pedido"),
+        BotCommand("lista",     "Lista de compras de uma obra"),
     ])
 
 if __name__ == "__main__":
@@ -4087,6 +4356,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("obras",     obras_cmd))
     app.add_handler(CommandHandler("nova_obra", nova_obra))
     app.add_handler(CommandHandler("entrega",   entrega_cmd))
+    app.add_handler(CommandHandler("lista",     lista_cmd))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, receber_arquivo))
     app.add_handler(CallbackQueryHandler(responder_botao))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receber_texto))

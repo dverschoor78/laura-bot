@@ -79,6 +79,12 @@ ao tocar PROMPT/parsing). Isso vale para qualquer domínio, presente ou futuro
 - `docs/POLITICA_COMPRAS.md` — domínio de Compras (lista de compras, orçamento,
   comparação de preço, fornecedor)
 
+Uma política de domínio pode ter documentos complementares — casos de uso em
+linguagem de negócio, modelo de domínio (objetos, ciclo de vida, eventos). Quando
+existirem, leitura obrigatória junto com a política, mesma regra acima.
+
+- Compras: `docs/CASOS_DE_USO_COMPRAS.md`, `docs/MODELO_DOMINIO_COMPRAS.md`
+
 ### 1.1. Depois, identifique o tipo da fiada:
 
 Antes de qualquer alteração, identifique o tipo da fiada e leia os documentos

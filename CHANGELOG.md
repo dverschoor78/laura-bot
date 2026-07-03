@@ -15,17 +15,128 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > sozinhas com o uso do dia a dia não entram aqui (ex: fechar um pedido parcelado esperando
 > pagamento). Ver Dívida Técnica em `docs/ROADMAP.md`.
 
-1. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
-2. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
-3. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
-4. Acesso via Claude Code Remote do celular — ideia registrada, servidor Proxmox em casa (Eric)
-5. Persistir os 9 índices de `data/laura.db` em código (hoje só existem no banco vivo — um `init_db()`
+1. Retomar e concluir teste ao vivo das Fiadas 1 e 2 do módulo de Compras (código pronto,
+   testado via script; falta percorrer o Telegram real do início ao fim — ver `docs/ROADMAP.md`)
+2. Decidir se/como a Lista de Compras ganha endereço (frete é parte da negociação do orçamento)
+3. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
+4. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
+5. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
+6. Acesso via Claude Code Remote do celular — ideia registrada, servidor Proxmox em casa (Eric)
+7. Persistir os 9 índices de `data/laura.db` em código (hoje só existem no banco vivo — um `init_db()`
    contra um banco novo não os recria; ver Dívida Técnica em `docs/ROADMAP.md`)
 
 > Concluído desde a última revisão: vulnerabilidade de segurança em `responder_botao()`/`atualizar()`/
 > `atualizar_obra()` corrigida (ver "[Segurança + módulo financeiro/relatorios.py] — 2026-07-03"
 > abaixo) e itens de compra estruturados em `itens_pedido` (ver "[Otimização de BD..." abaixo,
 > `procurar_item()`) — nenhum dos dois estava refletido aqui até esta revisão.
+
+---
+
+## [Módulo de Compras — Fiada 1 e Fiada 2] — 2026-07-03
+
+### Motivação
+
+Primeira engenharia do domínio de Compras, na mesma sessão da fundação conceitual (política
++ casos de uso + modelo de domínio, ver entrada seguinte). Fiada 1 aprovada com critério
+explícito. Fiada 2 nasceu de um pedido do Dennis no meio do trabalho, ao testar a Fiada 1 e
+esperar (sem sucesso) achar "Lista de Compras" no menu de tipo de documento de uma foto.
+
+### Adicionado
+
+- **Módulo `compras/`** (`compras/lista.py` + `compras/__init__.py`) — nasce modular desde o
+  primeiro dia (ADR-002): `StatusLista`/`StatusItem`, `init_db_compras()`, `sugerir_itens()`
+  (nunca inventa — lista vazia sem histórico real), `criar_ou_buscar_lista_aberta()`,
+  `adicionar_item()`, `remover_item()`, `listar_itens()`, todas recebendo `db_path`
+- Tabelas `listas_compra` e `lista_compra_itens`
+- **Comando `/lista`** (Fiada 1): cria/reabre a Lista de Compras de uma obra, Laura sugere
+  itens recorrentes do histórico com último preço pago; adicionar por botão ou texto livre
+  (`_parse_item_lista()`, parser tolerante, nunca bloqueia); remover item; fechar
+- **Tipo de documento `lista_materiais`** (Fiada 2): foto/PDF de lista de materiais (sem
+  preço, sem fornecedor) — novo template de classificação e extração no `PROMPT`, com
+  cuidado explícito pra Claude nunca inventar preço/fornecedor nesse tipo; nova tela de
+  confirmação (`_resumo_lista_materiais()`, mais simples que a de orçamento); confirmação
+  gera a **Lista de Compras finalizada** (`_tela_lista_finalizada()`, resumo só leitura —
+  não a tela de edição contínua da Fiada 1, ajustado ao vivo depois do primeiro teste real)
+
+### Corrigido
+
+- Duplicação morta em `_cb_set_ggv()`: um `if/else` cujos dois ramos chamavam a mesma função
+  com o mesmo resultado — limpeza sem mudança de comportamento, encontrada ao adaptar essa
+  função pro tipo `lista_materiais`
+
+### Testado
+
+- Script contra `data/laura_test.db`: sugestão real (GGV03, histórico existente) e "sem
+  histórico" explícito (obra sem nenhuma compra) — critério do Dennis cumprido
+- Regressão do fluxo orçamento → pedido (`scripts/teste_gerar_pedido.py`), duas vezes,
+  sem alteração de comportamento
+- Foto real do Dennis: 11 itens de material hidráulico (Tigre) extraídos corretamente,
+  incluindo o caminho de obra não identificada → definir obra → lista finalizada
+
+### Não concluído
+
+- Validação completa ao vivo no Telegram, do início ao fim sem interrupção — retomar amanhã
+- Endereço na Lista de Compras (frete é parte da negociação do orçamento) — registrado em
+  `docs/ROADMAP.md`, decisão de implementação futura
+
+---
+
+## [Fundação do domínio de Compras] — 2026-07-03
+
+### Motivação
+
+Dennis quis entender o domínio de Compras por completo antes de escrever qualquer código
+— "quando esse modelo estiver maduro, a implementação seja praticamente um exercício de
+engenharia, e não mais de descoberta do negócio."
+
+### Adicionado
+
+- **`docs/POLITICA_COMPRAS.md`** — princípios do domínio: Laura é consultora de compras,
+  nunca compradora automática; negociação e decisão comercial sempre humanas; nenhuma
+  compra planejável nasce de um orçamento — nasce de uma necessidade, organizada numa
+  Lista de Compras; compras obrigatórias (impostos, taxas, concessionárias) são domínio
+  próprio, não exceção
+- **`docs/CASOS_DE_USO_COMPRAS.md`** — 15 casos de uso em linguagem de negócio: compra
+  planejada, primeira compra sem histórico, com histórico, fornecedor preferencial
+  vence/perde, emergencial, obrigatória, serviço, equipamento, recorrente, mais 5 casos
+  de proatividade e prevenção de erro (Laura inicia conversa, Laura evita erro) —
+  encontrados em revisão crítica pedida por Dennis depois da primeira versão. Seção "Os
+  Três Momentos da Laura" (antes/durante/depois) e 7 padrões comuns no fechamento
+- **`docs/MODELO_DOMINIO_COMPRAS.md`** — transição pra engenharia: objetos conceituais
+  (Lista de Compras, Item da Lista, Orçamento, Alerta — cada um com ciclo de vida
+  próprio; Referência de Preço e Tendência de Fornecedor como valores computados sob
+  demanda, não entidades persistidas), eventos de domínio, responsabilidades Laura ×
+  usuário, regras de negócio por momento — sem banco de dados, classes ou APIs. Revisão
+  arquitetural final corrigiu vocabulário interno vazado (`pfm_gerado` → "emitido") e um
+  estado que era na verdade relacionamento opcional (vinculação orçamento↔item), não fase
+  de ciclo de vida
+
+### Atualizado
+
+- **`docs/PROCESSO.md`**: novo mecanismo "Políticas de Domínio" — generalizado por pedido
+  do Dennis pra não virar regra especial de Compras. Qualquer domínio (presente ou
+  futuro) pode ganhar `docs/POLITICA_<DOMINIO>.md` + documentos complementares, de
+  leitura obrigatória condicional ao tocar aquele domínio — mesmo padrão já usado pra
+  `LICOES_EXTRACAO.md`
+- **`docs/GLOSSARIO.md`**: novo termo "Lista de Compras"; distinção conceitual
+  "Orçamento vs. Pedido de Compra" reescrita como cadeia de três objetos
+- **`docs/IDENTIDADE_DO_PRODUTO.md`**: três referências leves à nova política (Objetos
+  Centrais, novo Marco de Maturidade, tabela de documentos) — sem importar detalhe de
+  processo, preservando a separação entre identidade de produto e política de domínio
+
+### Não alterado, por decisão
+
+- `CONSTITUICAO.md` — deliberadamente abstrata, não nomeia domínio específico (mesmo
+  padrão de nunca ter nomeado Financeiro ou NF-e)
+- Nenhuma ADR existente — são documentos históricos; a ADR-002 já estabelece o princípio
+  que rege a implementação futura ("todo novo domínio nasce modular"), sem necessidade de
+  ADR nova só pra repetir uma decisão já aceita
+
+### Padrão aprendido
+
+Domínio de negócio antes de arquitetura: Política → Casos de Uso → Modelo de Domínio →
+só então engenharia. Cada camada foi revisada criticamente antes de avançar pra próxima —
+inclusive com pedidos explícitos de "pare e aponte inconsistências antes de continuar".
 
 ---
 

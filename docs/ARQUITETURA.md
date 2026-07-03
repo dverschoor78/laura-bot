@@ -3,7 +3,8 @@
 > Versão: 2026-07-03 — reflete o estado real do sistema (pós ADR-004: dispatch table + módulo
 > `nfe/`; DOCX removido; segurança de `responder_botao()`/`atualizar()`/`atualizar_obra()`
 > corrigida; `itens_pedido`/`parcelas_pagamento`/`insumos_sinapi` documentadas; `financeiro/consultas.py`
-> e `financeiro/relatorios.py` adicionados)
+> e `financeiro/relatorios.py` adicionados; **módulo `compras/` nasce — Lista de Compras,
+> tipo de documento `lista_materiais`, comando `/lista`**)
 
 ---
 
@@ -53,7 +54,13 @@ Telegram ──────► bot.py ──────► Claude API (haiku-4-
 - **`financeiro/relatorios.py`** (2026-07-03) — gera fluxo de pagamentos por obra e relatório
   consolidado em Excel (`data/relatorios/*.xlsx`); ainda sem botão/comando no Telegram, só roda
   chamado manualmente
-- **`data/laura.db`** — banco SQLite com oito tabelas (ver seção 3); 9 índices estratégicos
+- **`compras/`** (2026-07-03) — domínio de Compras, nasce modular desde o primeiro dia (ADR-002).
+  `compras/lista.py`: Lista de Compras e Item da Lista (Modelo de Domínio: `docs/MODELO_DOMINIO_COMPRAS.md`),
+  todas as funções recebendo `db_path`. Dois pontos de entrada em `bot.py`: comando `/lista`
+  (cria/consulta lista direto) e tipo de documento `lista_materiais` (foto/PDF de lista de
+  materiais → extração por IA → confirmação → itens entram na lista). Sem vínculo com orçamento,
+  sem alertas proativos ainda — ver ROADMAP.md
+- **`data/laura.db`** — banco SQLite com dez tabelas (ver seção 3); 9 índices estratégicos
   criados em 2026-07-03, mas só no banco vivo — não persistidos em nenhum `CREATE INDEX` versionado
 - **`data/uploads/`** — todo arquivo recebido pelo Telegram cai aqui primeiro (pasta única,
   achatada); é a partir daqui que os documentos são copiados para a pasta certa da obra
@@ -237,6 +244,37 @@ mas nada grava nela ainda.
 
 ---
 
+**`listas_compra`** — Lista de Compras, momento "antes da compra" (domínio Compras, 2026-07-03)
+
+| Campo | Propósito |
+|---|---|
+| `id` | Chave primária |
+| `ggv` | Obra à qual a lista pertence — sem FK explícita |
+| `status` | `aberta` / `encerrada` / `descartada` (Modelo de Domínio) — só `aberta` é usada hoje |
+| `criado_em` | Timestamp de criação |
+
+Uma obra tem no máximo uma lista `aberta` por vez (`buscar_lista_aberta()`); reaberturas
+reaproveitam a mesma lista em vez de criar outra.
+
+---
+
+**`lista_compra_itens`** — itens de uma Lista de Compras, antes de qualquer fornecedor definido
+
+| Campo | Propósito |
+|---|---|
+| `id` | Chave primária |
+| `lista_id` | Lista à qual o item pertence — sem FK explícita |
+| `descricao`, `unidade`, `quantidade` | Dados do item — quantidade pode ser `NULL` (item adicionado por sugestão, sem quantidade ainda definida) |
+| `status` | `pendente` / `comprado` / `removido` — hoje só `pendente`/`removido` são alcançáveis (vínculo com Pedido de Compra é fiada futura) |
+| `criado_em` | Timestamp de inserção |
+
+Populada por três caminhos: sugestão do histórico (`sugerir_itens()`, lê `itens_pedido`/`lancamentos`
+— nunca inventa, retorna vazio sem histórico), texto livre digitado (`/lista`, parser tolerante
+`_parse_item_lista()`), ou extração por IA de uma foto de lista de materiais (`_itens_lista_materiais()`,
+tipo de documento `lista_materiais`).
+
+---
+
 ## 4. Fluxos
 
 **Fluxo A — Orçamento → PFM → Lançamento**
@@ -269,21 +307,38 @@ Dennis digita o código (ex: GGV03-009)
   → bot exibe tela do pedido com botões de ação
 ```
 
+**Fluxo C — Lista de materiais → Lista de Compras** *(2026-07-03)*
+
+```
+Dennis envia foto ou PDF de uma lista de materiais (sem preço, sem fornecedor)
+  → mesmo pipeline de recepção do Fluxo A (SHA256, staging, Claude API)
+  → Claude classifica [lista_materiais] e extrai itens (descrição, quantidade, unidade)
+  → bot exibe itens extraídos para confirmação (_resumo_lista_materiais)
+  → se obra não identificada, Dennis define a obra primeiro (reaproveita sel_ggv/set_ggv)
+  → Dennis confirma ("✅ Gerar Lista de Compras")
+  → itens entram em lista_compra_itens via compras.adicionar_item() (cria a lista se não houver uma aberta)
+  → bot exibe a lista finalizada — resumo só leitura, não a tela de edição contínua
+```
+
+Ponto de entrada alternativo, sem foto: comando `/lista GGV03` cria/reabre a lista
+diretamente, com Laura sugerindo itens recorrentes do histórico (`sugerir_itens()`).
+
 ---
 
 ## 5. Estrutura do bot.py
 
-Referências para navegação no arquivo (4.068 linhas):
+Referências para navegação no arquivo (4.365 linhas):
 
 | Bloco | Referência | O que faz |
 |---|---|---|
 | Imports e inicialização | `load_dotenv()`, `claude = anthropic...` | Dependências, variáveis de ambiente, cliente Claude |
 | Constantes e configuração | `TIPOS`, `DELTAD`, `GGV_ONEDRIVE` | Mapeamentos de tipos, GGVs, dados DeltaD, endereços |
 | Domínio — Pedido | `StatusPedido`, `Pedido` | Enum de status e dataclass com 17 campos |
-| Integração Claude | `PROMPT` | Prompt de extração estruturada |
+| Integração Claude | `PROMPT` | Prompt de extração estruturada (inclui template `lista_materiais`, 2026-07-03) |
 | Banco de dados | `init_db()`, `buscar_fornecedor()` | Criação de tabelas, CRUD |
 | Geração de PFM | `gerar_pfm()`, `_campo()`, `_itens()` | Helpers de parsing/formatação; define código, salva itens, registra lançamento (não gera documento — ver `_gerar_html_pc()`) |
 | Domínio — consulta | `buscar_pedido()`, `mostrar_pedido()` | Pipeline de visualização do pedido |
+| Domínio — Lista de Compras | `lista_cmd()`, `_resumo_lista_materiais()`, `_tela_lista_finalizada()` | Comando `/lista` + fluxo de foto (`lista_materiais`); chama `compras.*` para persistência |
 | Teclados | `parse_resposta()`, `teclado_confirmacao()` | Parse da resposta Claude e botões inline |
 | Handlers Telegram | `receber_arquivo()`, `receber_texto()` | Handlers de mensagens |
 | Dispatch de callback | `responder_botao()`, `_CB_DISPATCH`, `_cb_*()` | Um único `CallbackQueryHandler`; roteia por dict `acao → função` (ADR-004, 2026-07-02) em vez de if/elif — 59 funções `_cb_*`, cada uma cobrindo os ramos que antes viviam soltos dentro de uma função de 929 linhas |

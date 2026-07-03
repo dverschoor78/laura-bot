@@ -1,24 +1,24 @@
 # Estado do Projeto Laura
 
-> Atualizado em: 2026-07-03 (revisão de documentação — Jeito Claude)
-> Sessão: **Sincronização de documentação com o estado real do código**
+> Atualizado em: 2026-07-03 (encerramento — módulo de Compras, Fiadas 1 e 2)
+> Sessão: **Fundação do domínio de Compras + primeiras duas fiadas de engenharia**
 
-Implementado nesta revisão: leitura do checklist obrigatório (CONSTITUICAO → PROCESSO → ESTADO →
-ROADMAP → ARQUITETURA) expôs que **duas prioridades 🔴 do topo do ROADMAP já estavam resolvidas
-havia horas**, sem nenhum documento refletir isso — a vulnerabilidade de segurança e a
-estruturação de itens de compra. Ambas corrigidas no código antes desta sessão (commits `a2077f0` e
-`95c4717`/`86a82cc`), mas nunca capturadas em ESTADO.md/ROADMAP.md/ARQUITETURA.md/CHANGELOG.md.
-Documentos corrigidos; nenhum código novo escrito nesta sessão (ver detalhes na Última Fiada
-Implementada). **Sessão anterior (checklist Jeito Claude):** Checklist obrigatório de inicialização
-de sessão formalizado em PROCESSO.md Seção 1.0. Memória criada em
-`jeito_claude_checklist_obrigatorio.md`. **Sessão anterior a essa (mesmo dia, primeira parte):**
-Estratégia de banco otimizado com 9 índices + CLI instantânea (`scripts/consultar.py`) + extrato de
-pagamentos consolidado com descrições por categoria, número de ART, valor unitário destacado,
-comparação com SINAPI. Laura agora é uma **memória rápida e acessível** (consultas <3ms). **Não foi
-implementada** automação de pagamento — aguarda os 3 gatilhos de ADR-004 (dono de
-`parcelas_pagamento`, `_total_pago()` com `db_path`, atomicidade de `_gerar_recibo()`). Sessão
-2026-07-02: remoção do DOCX, ADR-004 (dispatch table + módulo `nfe/`), recibo com texto narrativo,
-correções de matching PIX/NF-e, restrição de custo de IA
+Dia completo em uma única sessão longa, em três partes. **Parte 1 (manhã):** fundação
+documental do domínio de Compras — `docs/POLITICA_COMPRAS.md`, `docs/CASOS_DE_USO_COMPRAS.md`
+(15 casos + "Três Momentos da Laura" + 7 padrões), `docs/MODELO_DOMINIO_COMPRAS.md` (objetos
+conceituais, ciclo de vida, eventos, responsabilidades) — 100% conceitual, zero código,
+por decisão explícita do Dennis. `PROCESSO.md` ganhou o mecanismo generalizado "Políticas
+de Domínio". **Parte 2 (engenharia):** primeira fiada real do módulo `compras/` — comando
+`/lista` (Fiada 1: criar/consultar Lista de Compras, sugestão só com histórico real, nunca
+inventada) e, depois de um pedido do Dennis no meio do trabalho, Fiada 2 (foto de lista de
+materiais → extração por IA → confirmação → Lista de Compras), reaproveitando a mesma
+lógica já validada do fluxo de orçamento. **Parte 3 (teste ao vivo, parcial):** bot subido
+em `LAURA_ENV=test`, testado com foto real do Dennis (11 itens de material hidráulico,
+extraídos corretamente) — mas a saída inicial (tela de edição contínua da Fiada 1) não era
+o que o Dennis queria; corrigido na hora para uma "lista finalizada" só leitura. **Teste
+completo adiado para amanhã** — sessão encerrada antes de validação total no Telegram.
+Ver detalhes completos na Última Fiada Implementada — histórico das sessões anteriores
+preservado nas entradas abaixo, sem repetir aqui.
 
 ---
 
@@ -88,6 +88,11 @@ correções de matching PIX/NF-e, restrição de custo de IA
 - **Módulo `financeiro/relatorios.py`** (novo, 2026-07-03): gera fluxo de pagamentos por obra e
   relatório consolidado em Excel (`data/relatorios/`) — ainda não tem botão/comando no Telegram,
   só roda chamado manualmente.
+- **Domínio de Compras — fundação conceitual + primeiras duas fiadas** (2026-07-03): política,
+  15 casos de uso e modelo de domínio documentados; módulo `compras/` nasce (ADR-002). Lista de
+  Compras acessível por dois caminhos — comando `/lista` (Fiada 1) e foto de lista de materiais
+  (Fiada 2, tipo de documento `lista_materiais`). Sugestão de itens só com histórico real, nunca
+  inventada. Fluxo orçamento → pedido intocado. **Teste completo no Telegram fica para amanhã.**
 - **Banco otimizado com 9 índices** + `financeiro/consultas.py` (`obter_pedido_completo`,
   `obter_consolidado_obra`, `listar_pedidos_pendentes`, `procurar_item`) + CLI
   `scripts/consultar.py` — consultas de pedido/obra/item em <3ms. Índices existem só no banco
@@ -141,6 +146,106 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 ---
 
 ## Última Fiada Implementada
+
+**Módulo de Compras — Fiada 1 (comando `/lista`) e Fiada 2 (foto → Lista de Compras)** *(2026-07-03)*
+
+Primeiras duas fiadas de engenharia do domínio de Compras, na mesma sessão da fundação
+conceitual (ver entrada seguinte). Aprovadas separadamente por Dennis, cada uma com seu
+próprio critério de aceite (PROCESSO.md Seção 2).
+
+**Fiada 1 — comando `/lista`:** módulo `compras/` criado do zero (`compras/lista.py` +
+`compras/__init__.py`), nasce modular desde o primeiro dia (ADR-002). `/lista GGV03` cria
+ou reabre a Lista de Compras da obra; Laura sugere itens recorrentes de `itens_pedido` com
+o último preço pago — **critério explícito do Dennis**: sugestão só aparece com histórico
+real, nunca inventada; obra sem nenhuma compra anterior recebe mensagem clara ("Ainda não
+há histórico...") em vez de sugestão vazia disfarçada. Duas tabelas novas: `listas_compra`,
+`lista_compra_itens`. Testado via script contra `data/laura_test.db` (sugestão real ×
+sem-histórico) e regressão do fluxo orçamento → pedido confirmada.
+
+**Fiada 2 — lista de materiais por foto:** pedido do Dennis no meio da sessão, depois de
+mandar uma foto esperando encontrar a Lista de Compras no menu de tipo de documento e não
+achar. Visão dele: "mesma lógica do orçamento e criação do pedido de compras" — reaproveitar
+o mecanismo já provado (extração por IA → tela de revisão → confirmar) num ponto mais cedo
+do processo. Implementado: novo tipo de documento `lista_materiais` no `PROMPT` (com cuidado
+explícito pra não inventar preço/fornecedor, mesmo espírito da Lição #1 de
+`LICOES_EXTRACAO.md`), novo botão no menu, tela de confirmação simplificada (sem
+fornecedor/valor/condição — não existem nesse tipo), itens confirmados entram na Lista de
+Compras via `compras.adicionar_item()` (reaproveitando a Fiada 1).
+
+**Correção ao vivo, durante o próprio teste:** primeira versão da Fiada 2 terminava a
+confirmação na tela de edição contínua da Fiada 1 (`_tela_lista_compras`, "adicionar mais
+itens / fechar"). Testado com foto real do Dennis — 11 itens de material hidráulico (Tigre)
+extraídos corretamente, confirmados no banco de teste — mas Dennis apontou que a saída
+devia ser uma **lista finalizada**, fechada, não um convite a continuar editando. Corrigido
+na hora: `_tela_lista_finalizada()`, resumo só leitura. O formato de documento oficial
+(possivelmente um PDF, como o Pedido de Compra) fica para decidir depois — por hoje é texto.
+
+**Bug real encontrado e corrigido durante a investigação:** achei (e corrigi) uma
+duplicação morta em `_cb_set_ggv()` — um `if status == "confirmado": ... else: ...` cujos
+dois ramos chamavam exatamente a mesma função com o mesmo resultado. Limpeza sem mudança
+de comportamento, encontrada ao adaptar essa função pro tipo `lista_materiais`.
+
+**Aprendizado registrado, não implementado:** Dennis apontou que a Lista de Compras
+provavelmente precisa de um endereço — frete é parte da negociação do orçamento, e sem
+saber o destino da entrega falta informação relevante pra comparar propostas. Não implementado
+agora (fora do critério de aceite das duas fiadas); registrado no ROADMAP.md para quando o
+Modelo de Domínio for revisitado. Pode já existir via `obras.endereco_entrega` — decidir se
+a Lista de Compras herda isso da obra ou precisa de campo próprio é decisão futura.
+
+**Não concluído:** validação completa ao vivo no Telegram. Bot subiu em `LAURA_ENV=test`
+(sem afetar produção), Dennis testou parcialmente (obra não identificada → definir obra →
+foto real processada), mas a sessão encerrou antes de percorrer o fluxo do início ao fim
+sem interrupção. **Retomar amanhã antes de considerar as duas fiadas fechadas.**
+
+---
+
+**Fundação do domínio de Compras — política, casos de uso, modelo de domínio** *(2026-07-03)*
+
+Motivado pelo gatilho real de sempre não conseguir achar preço de item comprado sem ler
+o pedido inteiro (já resolvido tecnicamente por `itens_pedido`/`procurar_item()`), Dennis
+quis ir além da correção pontual: definir como a Laura deveria participar do processo de
+compra de ponta a ponta, antes de qualquer linha de código nova.
+
+**Processo em três documentos, cada um construído em cima do anterior:**
+1. `docs/POLITICA_COMPRAS.md` — princípios, refinados por várias rodadas de revisão
+   conjunta. Núcleo: Laura é consultora de compras, nunca compradora automática; toda
+   negociação e decisão comercial permanece humana; nenhuma compra planejável nasce de
+   um orçamento — nasce de uma necessidade, organizada numa Lista de Compras.
+2. `docs/CASOS_DE_USO_COMPRAS.md` — 15 casos de uso em linguagem de negócio (planejada,
+   sem histórico, com histórico, fornecedor preferencial vence/perde, emergencial,
+   obrigatória, serviço, equipamento, recorrente, e 5 casos de proatividade/erro evitado
+   encontrados em revisão crítica posterior). Seção "Os Três Momentos da Laura"
+   (antes/durante/depois) e 7 padrões comuns identificados no fechamento.
+3. `docs/MODELO_DOMINIO_COMPRAS.md` — transição pra engenharia: objetos conceituais
+   (Lista de Compras, Item da Lista, Orçamento, Alerta — cada um com ciclo de vida
+   próprio; Referência de Preço e Tendência de Fornecedor como valores computados, não
+   entidades), eventos, responsabilidades Laura/usuário, regras por momento. Revisão
+   arquitetural final corrigiu vocabulário interno vazado (`pfm_gerado` → "emitido") e um
+   estado que era na verdade relacionamento opcional, não fase de ciclo de vida.
+
+**PROCESSO.md** ganhou o mecanismo "Políticas de Domínio" — generalizado por pedido do
+Dennis pra não virar regra especial de Compras: qualquer domínio (Compras, Financeiro,
+Obras, Estoque...) pode ganhar `POLITICA_<DOMINIO>.md` + documentos complementares, de
+leitura obrigatória condicional ao tocar aquele domínio, mesmo padrão já usado pra
+`LICOES_EXTRACAO.md`.
+
+**GLOSSARIO.md** ganhou o termo "Lista de Compras" e reescreveu a distinção
+"Orçamento vs. Pedido de Compra" como cadeia de três objetos.
+
+**IDENTIDADE_DO_PRODUTO.md** referencia a nova política em três pontos leves (Objetos
+Centrais, novo Marco de Maturidade, tabela de documentos) — sem importar detalhe de
+processo, preservando a separação entre identidade de produto e política de domínio
+(ajuste pedido explicitamente por Dennis durante a revisão).
+
+**Decisão deliberada de não tocar:** `CONSTITUICAO.md` (abstrata demais pra nomear
+domínio específico, mesmo padrão de nunca nomear Financeiro/NF-e) e nenhuma ADR existente
+(documentos históricos — ADR-002 tem sua própria versão datada de "Os Dois Objetos
+Centrais", preservada como estava na aprovação).
+
+**Nenhum código escrito.** Decisão explícita de Dennis: entender o domínio por completo
+antes de qualquer implementação, pra que "a arquitetura praticamente caia sozinha".
+
+---
 
 **Sincronização de documentação com o código real** *(2026-07-03)*
 
@@ -843,18 +948,26 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 > gatilho arquitetural que ainda não ocorreu) não são fiada — ficam em Dívida Técnica/ADR, sem
 > duplicar aqui como se fossem tarefa da próxima sessão.
 
-1. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-2. **Alimentar `docs/LICOES_EXTRACAO.md`** sempre que aparecer um novo bug de parsing/extração —
+1. **Retomar e concluir o teste ao vivo das Fiadas 1 e 2 do módulo de Compras** —
+   código escrito e testado via script (ver ROADMAP.md, Fase — Módulo de Compras); falta
+   percorrer `/lista GGV03` e o fluxo de foto de lista de materiais do início ao fim, sem
+   interrupção, no Telegram real (`LAURA_ENV=test`), antes de considerar as fiadas fechadas
+   e voltar `LAURA_ENV=prod`
+2. **Decidir se/como a Lista de Compras ganha endereço** — Dennis apontou que frete é parte
+   da negociação do orçamento; avaliar se herda de `obras.endereco_entrega` ou precisa de
+   campo próprio (ver ROADMAP.md, Fase — Módulo de Compras)
+3. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+4. **Alimentar `docs/LICOES_EXTRACAO.md`** sempre que aparecer um novo bug de parsing/extração —
    não só corrigir e seguir (ver [[feedback_documentar_padroes_bugs]] na memória)
-3. **Limpeza opcional no OneDrive** — 2 arquivos órfãos do pedido excluído Base Forte/GGV03-006
+5. **Limpeza opcional no OneDrive** — 2 arquivos órfãos do pedido excluído Base Forte/GGV03-006
    antigo (`.docx`, `.pdf` em `04 Compras`); a `- Copy.jpeg` foi feita pelo próprio Dennis
    (backup pessoal) — perguntar se ele quer manter essa antes de apagar
-4. **Acesso via Claude Code Remote (celular)** — sem ambiente configurado ainda; ideia de hospedar
+6. **Acesso via Claude Code Remote (celular)** — sem ambiente configurado ainda; ideia de hospedar
    Laura + banco num servidor Proxmox em casa (Eric administra) registrada, não iniciada
-5. **Persistir os 9 índices de `data/laura.db` em código** — hoje só existem no banco vivo
-6. **Integrar `financeiro/relatorios.py` a `bot.py`** — hoje só roda chamado manualmente, sem
+7. **Persistir os 9 índices de `data/laura.db` em código** — hoje só existem no banco vivo
+8. **Integrar `financeiro/relatorios.py` a `bot.py`** — hoje só roda chamado manualmente, sem
    botão/comando no Telegram
-7. **Popular `itens_pedido.insumo_sinapi_codigo`** — coluna existe no schema, nada grava nela
+9. **Popular `itens_pedido.insumo_sinapi_codigo`** — coluna existe no schema, nada grava nela
    ainda; é o vínculo real que falta entre item comprado e `insumos_sinapi`
 
 ---
