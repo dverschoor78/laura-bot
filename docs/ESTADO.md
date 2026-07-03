@@ -838,25 +838,24 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Objetivo da Próxima Sessão
 
-1. **Fechar o GGV03-003** — pagamento parcelado em andamento; falta o restante das parcelas
-2. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-3. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
-   no dia a dia antes de qualquer nova decisão sobre extração (ver gatilho da ADR-003)
-4. **Considerar revisitar `fornecedor/`/`obra/`/`comprovante/`** quando os gatilhos específicos da
-   ADR-004 ocorrerem (dono de `parcelas_pagamento` decidido, `_total_pago()` aceitar `db_path`,
-   atomicidade de `_gerar_recibo()` resolvida) — não propor antes disso
-5. **Alimentar `docs/LICOES_EXTRACAO.md`** sempre que aparecer um novo bug de parsing/extração —
+> Só entram aqui itens acionáveis numa sessão — decisão a tomar ou código a escrever. Pendências
+> que resolvem sozinhas com o uso do dia a dia (pagamento de parcela, uso real de uma feature,
+> gatilho arquitetural que ainda não ocorreu) não são fiada — ficam em Dívida Técnica/ADR, sem
+> duplicar aqui como se fossem tarefa da próxima sessão.
+
+1. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+2. **Alimentar `docs/LICOES_EXTRACAO.md`** sempre que aparecer um novo bug de parsing/extração —
    não só corrigir e seguir (ver [[feedback_documentar_padroes_bugs]] na memória)
-6. **Limpeza opcional no OneDrive** — 2 arquivos órfãos do pedido excluído Base Forte/GGV03-006
+3. **Limpeza opcional no OneDrive** — 2 arquivos órfãos do pedido excluído Base Forte/GGV03-006
    antigo (`.docx`, `.pdf` em `04 Compras`); a `- Copy.jpeg` foi feita pelo próprio Dennis
    (backup pessoal) — perguntar se ele quer manter essa antes de apagar
-7. **Acesso via Claude Code Remote (celular)** — sem ambiente configurado ainda; ideia de hospedar
+4. **Acesso via Claude Code Remote (celular)** — sem ambiente configurado ainda; ideia de hospedar
    Laura + banco num servidor Proxmox em casa (Eric administra) registrada, não iniciada
-8. **Persistir os 9 índices de `data/laura.db` em código** — hoje só existem no banco vivo
-9. **Integrar `financeiro/relatorios.py` a `bot.py`** — hoje só roda chamado manualmente, sem
+5. **Persistir os 9 índices de `data/laura.db` em código** — hoje só existem no banco vivo
+6. **Integrar `financeiro/relatorios.py` a `bot.py`** — hoje só roda chamado manualmente, sem
    botão/comando no Telegram
-10. **Popular `itens_pedido.insumo_sinapi_codigo`** — coluna existe no schema, nada grava nela
-    ainda; é o vínculo real que falta entre item comprado e `insumos_sinapi`
+7. **Popular `itens_pedido.insumo_sinapi_codigo`** — coluna existe no schema, nada grava nela
+   ainda; é o vínculo real que falta entre item comprado e `insumos_sinapi`
 
 ---
 

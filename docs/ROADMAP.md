@@ -411,21 +411,23 @@ que `bot.py` parecia "bagunçado".
 
 ## Próximas Fiadas
 
-1. **Fechar o GGV03-003** — pagamento parcelado em andamento, falta quitar o restante
-2. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-3. **Usar entrega em produção real** — deixar o fluxo rodar no dia a dia antes de revisitar extração (gatilho na ADR-003)
-4. Revisitar `fornecedor/`/`obra/`/`comprovante/` quando os gatilhos da ADR-004 ocorrerem
-5. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração encontrado
-6. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
+> Só entram aqui itens acionáveis numa sessão — decisão a tomar ou código a escrever. Pendências
+> que resolvem sozinhas com o uso do dia a dia (pagamento de parcela, uso real de uma feature,
+> gatilho arquitetural que ainda não ocorreu) não são fiadas — ficam registradas em Dívida Técnica
+> ou no ADR correspondente, sem duplicar aqui como se fossem tarefa da próxima sessão.
+
+1. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+2. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração encontrado
+3. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
    — perguntar sobre a `- Copy.jpeg` antes, é backup pessoal do Dennis
-7. Acesso via Claude Code Remote do celular — sem ambiente configurado; ideia de hospedar Laura +
+4. Acesso via Claude Code Remote do celular — sem ambiente configurado; ideia de hospedar Laura +
    banco num servidor Proxmox em casa (Eric administra) registrada, não iniciada
-8. Persistir os 9 índices de `data/laura.db` em código — hoje só existem no banco vivo (nenhum
+5. Persistir os 9 índices de `data/laura.db` em código — hoje só existem no banco vivo (nenhum
    `CREATE INDEX` em `bot.py`/scripts); um `init_db()` contra um banco novo não os recria
-9. Integrar `financeiro/relatorios.py` a `bot.py` — hoje as funções só rodam chamadas manualmente,
+6. Integrar `financeiro/relatorios.py` a `bot.py` — hoje as funções só rodam chamadas manualmente,
    sem botão ou comando no Telegram
-10. Popular `itens_pedido.insumo_sinapi_codigo` — coluna já existe no schema, mas nada grava nela
-    ainda; é o vínculo real entre item comprado e `insumos_sinapi` que falta pra fase "lista de compras"
+7. Popular `itens_pedido.insumo_sinapi_codigo` — coluna já existe no schema, mas nada grava nela
+   ainda; é o vínculo real entre item comprado e `insumos_sinapi` que falta pra fase "lista de compras"
 
 ---
 

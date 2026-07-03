@@ -10,14 +10,16 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. Fechar o GGV03-003 (pagamento parcelado em andamento)
-2. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
-3. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
-4. Revisitar `fornecedor/`/`obra/`/`comprovante/` quando os gatilhos da ADR-004 ocorrerem
-5. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
-6. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
-7. Acesso via Claude Code Remote do celular — ideia registrada, servidor Proxmox em casa (Eric)
-8. Persistir os 9 índices de `data/laura.db` em código (hoje só existem no banco vivo — um `init_db()`
+
+> Só itens acionáveis numa sessão (decisão a tomar ou código a escrever) — pendências que resolvem
+> sozinhas com o uso do dia a dia não entram aqui (ex: fechar um pedido parcelado esperando
+> pagamento). Ver Dívida Técnica em `docs/ROADMAP.md`.
+
+1. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
+2. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
+3. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
+4. Acesso via Claude Code Remote do celular — ideia registrada, servidor Proxmox em casa (Eric)
+5. Persistir os 9 índices de `data/laura.db` em código (hoje só existem no banco vivo — um `init_db()`
    contra um banco novo não os recria; ver Dívida Técnica em `docs/ROADMAP.md`)
 
 > Concluído desde a última revisão: vulnerabilidade de segurança em `responder_botao()`/`atualizar()`/
