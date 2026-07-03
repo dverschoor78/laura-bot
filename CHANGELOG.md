@@ -24,6 +24,39 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Formalização do Jeito Claude] — 2026-07-03 (continuação)
+
+### Motivação
+
+**Erro grave:** Tentei implementar automação de pagamento na primeira parte desta sessão sem ler PROCESSO.md, violando ADR-004 e ADR-002. Dennis: "você parece uma anta! Gastamos horrores de tokens desenvolvendo nossos princípios."
+
+**Lição:** Memória não serve se não é **consultada no primeiro passo**. Estabelecer ritual obrigatório.
+
+### Adicionado
+
+- **Checklist obrigatório de inicialização em PROCESSO.md Seção 1.0**
+  - Ordem exata (baseada em `docs/00-Fluxo da cadeia do projeto.txt`):
+    1. CONSTITUICAO.md — princípios
+    2. PROCESSO.md — como funciona uma sessão
+    3. ESTADO.md — onde está agora
+    4. ROADMAP.md — próximas fiadas
+    5. ARQUITETURA.md (se engenharia)
+  - **Não é opcional.** Evita violações de ADR, economiza horas de trabalho errado.
+
+- **Memória formalizada:** `jeito_claude_checklist_obrigatorio.md`
+  - Documenta por que o checklist existe
+  - Registra o erro e a correção de 2026-07-03
+  - Padrão aprendido: **Ler → Entender → Propor → Implementar → Documentar**
+
+### Atualizado
+
+- **Documentação corrigida:**
+  - PROCESSO.md Seção 1.0 agora referencia `docs/00-Fluxo da cadeia do projeto.txt` (ordem exata)
+  - MEMORY.md index aponta para checklist formalizado
+  - ESTADO.md registra a continuação desta sessão
+
+---
+
 ## [Otimização de BD + CLI para memória rápida] — 2026-07-03
 
 ### Motivação

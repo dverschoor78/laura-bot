@@ -1,9 +1,9 @@
 # Estado do Projeto Laura
 
-> Atualizado em: 2026-07-03
-> Sessão: **Otimização de BD + CLI (memória rápida)**
+> Atualizado em: 2026-07-03 (continuação)
+> Sessão: **Formalização do Jeito Claude**
 
-Implementado: Estratégia de banco otimizado com 9 índices + CLI instantânea (`scripts/consultar.py`) + extrato de pagamentos consolidado com descrições por categoria, número de ART, valor unitário destacado, comparação com SINAPI. Laura agora é uma **memória rápida e acessível** (consultas <3ms). **Não foi implementada** automação de pagamento — aguarda os 3 gatilhos de ADR-004 (dono de `parcelas_pagamento`, `_total_pago()` com `db_path`, atomicidade de `_gerar_recibo()`). Sessão anterior (2026-07-02): remoção do DOCX, ADR-004 (dispatch table + módulo `nfe/`), recibo com texto narrativo, correções de matching PIX/NF-e, restrição de custo de IA
+Implementado: Checklist obrigatório de inicialização de sessão **formalizado** em PROCESSO.md Seção 1.0 (ordem exata: CONSTITUICAO → PROCESSO → ESTADO → ROADMAP → ARQUITETURA). Lição aprendida: leitura de documentação não é opcional — evita violações de ADR, economiza horas de trabalho errado. Memória criada em `jeito_claude_checklist_obrigatorio.md`. **Sessão anterior (mesma, primeira parte):** Estratégia de banco otimizado com 9 índices + CLI instantânea (`scripts/consultar.py`) + extrato de pagamentos consolidado com descrições por categoria, número de ART, valor unitário destacado, comparação com SINAPI. Laura agora é uma **memória rápida e acessível** (consultas <3ms). **Não foi implementada** automação de pagamento — aguarda os 3 gatilhos de ADR-004 (dono de `parcelas_pagamento`, `_total_pago()` com `db_path`, atomicidade de `_gerar_recibo()`). Sessão 2026-07-02: remoção do DOCX, ADR-004 (dispatch table + módulo `nfe/`), recibo com texto narrativo, correções de matching PIX/NF-e, restrição de custo de IA
 
 ---
 
