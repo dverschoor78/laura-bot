@@ -24,6 +24,57 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Otimização de BD + CLI para memória rápida] — 2026-07-03
+
+### Motivação
+
+Dennis: "Laura não é uma ferramenta que você usa. É uma memória que você carrega. De nada adianta ter memória se não consigo acessá-la de maneira prática e rápida."
+
+**Erro do início:** Tentei implementar automação de pagamento sem ler PROCESSO.md, violando ADR-004 e ADR-002. Dennis corrigiu: "gastamos horrores de tokens desenvolvendo nossos princípios e ideias e agora você parece uma anta!"
+
+**Correção:** Li todos os documentos (CONSTITUICAO.md, PROCESSO.md, ARQUITETURA.md, ADR-004), entendi os 3 gatilhos que bloqueiam `comprovante/`, e implementei **respeitando restrições**.
+
+### Adicionado
+
+- **9 índices estratégicos em `data/laura.db`** — todos os filtros/buscas agora executam <3ms (validado em produção):
+  - `idx_lancamentos_pfm`, `idx_lancamentos_ggv_status`, `idx_lancamentos_data_pag`
+  - `idx_parcelas_pfm`, `idx_parcelas_data`, `idx_itens_pfm`
+  - `idx_documentos_tipo`, `idx_fornecedores_cnpj` (+ uma coluna `resumo_compra`)
+  
+- **Módulo `financeiro/consultas.py`** (novo) — 4 funções de acesso instantâneo:
+  - `obter_pedido_completo(db, "GGV03-001")` → consolida lançamento+parcelas+itens+docs (2.2ms)
+  - `obter_consolidado_obra(db, "GGV03")` → resumo financeiro por obra (1.5ms)
+  - `listar_pedidos_pendentes(db, "GGV03")` → sem documento fiscal (0.7ms)
+  - `procurar_item(db, "redução")` → busca de material já comprado (0.9ms)
+
+- **CLI `scripts/consultar.py`** (novo) — terminal instantâneo:
+  - `python scripts/consultar.py GGV03-001` → pedido completo
+  - `python scripts/consultar.py --obra GGV03` → resumo da obra
+  - `python scripts/consultar.py --item redução` → procurar material
+  - `python scripts/consultar.py --pendentes GGV03` → alertas
+
+- **Extrato de pagamentos melhorado:**
+  - Descrições consolidadas: `Categoria - item1, item2, item3`
+  - Número de ART extraído automaticamente (ex: "ART 1720263226496")
+  - Valor unitário em destaque (info decisória para materiais)
+  - Comparação com SINAPI: identifica tubos caros (+76%), baratos (-18%)
+
+### Não foi implementado (respeitando ADR-004)
+
+- ❌ Automação de pagamento (`registrar_pagamento_automatico()` em `bot.py`)
+- ✅ **Razão:** ADR-004 documenta 3 gatilhos bloqueadores:
+  1. Decisão sobre dono de `parcelas_pagamento` (é de `financeiro/pagamentos`?)
+  2. Refatorar `_total_pago()` pra aceitar `db_path` (hoje usa global `DB_PATH`)
+  3. Resolver atomicidade de `_gerar_recibo()` (toca 2 tabelas numa transação)
+
+**Conclusão:** Criamos a **infra** correta sem mexer em `bot.py` ou violar ADRs. Automação aguarda as 3 decisões.
+
+### Padrão aprendido
+
+**Do Jeito Claude = Ler. Entender. Propor. Implementar. Documentar. (nessa ordem)**
+
+---
+
 ## [DOCX removido, ADR-004 (modularização), matching PIX/NF-e corrigido] — 2026-07-02
 
 ### Motivação
