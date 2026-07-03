@@ -528,7 +528,13 @@ def buscar_obra(codigo):
             "encarregado_fone", "responsavel_nome", "responsavel_fone", "pasta_onedrive"]
     return dict(zip(keys, row))
 
+_COLUNAS_OBRA = {"descricao", "endereco_entrega", "encarregado_nome", "encarregado_fone",
+                 "responsavel_nome", "responsavel_fone", "pasta_onedrive", "ativa"}
+
 def atualizar_obra(codigo, **kwargs):
+    colunas_invalidas = set(kwargs) - _COLUNAS_OBRA
+    if colunas_invalidas:
+        raise ValueError(f"Coluna(s) não permitida(s) em atualizar_obra: {colunas_invalidas}")
     cols = ", ".join(f"{k}=?" for k in kwargs)
     vals = list(kwargs.values()) + [codigo]
     with sqlite3.connect(DB_PATH) as con:
@@ -557,7 +563,14 @@ def registrar(nome, caminho, hash_arquivo, tipo, ggv, dados_claude):
         )
         return cur.lastrowid
 
+_COLUNAS_DOCUMENTO = {"tipo", "ggv", "dados_claude", "condicao_pgto", "data_entrega",
+                      "endereco_entrega", "desconto_rs", "pfm_numero", "status",
+                      "vencimento_pgto", "encarregado", "rev_numero", "caminho_pfm"}
+
 def atualizar(doc_id, **campos):
+    colunas_invalidas = set(campos) - _COLUNAS_DOCUMENTO
+    if colunas_invalidas:
+        raise ValueError(f"Coluna(s) não permitida(s) em atualizar: {colunas_invalidas}")
     sets = ", ".join(f"{k}=?" for k in campos)
     with sqlite3.connect(DB_PATH) as con:
         con.execute(f"UPDATE documentos SET {sets} WHERE id=?", (*campos.values(), doc_id))
@@ -4030,6 +4043,8 @@ _CB_DISPATCH = {
 }
 
 async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != DONO_ID:
+        return
     query = update.callback_query
     partes = query.data.split(":")
     acao   = partes[0]
