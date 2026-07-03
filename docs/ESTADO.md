@@ -1,7 +1,9 @@
 # Estado do Projeto Laura
 
-> Atualizado em: 2026-07-02
-> Sessão: Preparação para produção — migração, limpeza, auto-cadastro via Receita, organização automática de arquivos, taxas/impostos/serviços públicos, pagamento parcelado + recibo assinado, base de insumos SINAPI, ativação em produção + cadastro retroativo ao vivo de GGV03, enriquecimento de fornecedor via Receita (e-mail, telefone, CNAE), incidente crítico de exclusão de documento + correção. **Sessão seguinte**: remoção do DOCX (PC 2.0 é o único formato agora), correção de segurança crítica (`bot.py` sem guard `__main__`), auditoria de bibliotecas por 7 agentes especializados, **ADR-004 — modularização parcial de `bot.py`** (dispatch table + módulo `nfe/`), recibo com texto narrativo + valor por extenso, correções de matching PIX/NF-e (lista completa + regra de elegibilidade), restrição de custo de IA (deep-research)
+> Atualizado em: 2026-07-03
+> Sessão: **Otimização de BD + CLI (memória rápida)**
+
+Implementado: Estratégia de banco otimizado com 9 índices + CLI instantânea (`scripts/consultar.py`) + extrato de pagamentos consolidado com descrições por categoria, número de ART, valor unitário destacado, comparação com SINAPI. Laura agora é uma **memória rápida e acessível** (consultas <3ms). **Não foi implementada** automação de pagamento — aguarda os 3 gatilhos de ADR-004 (dono de `parcelas_pagamento`, `_total_pago()` com `db_path`, atomicidade de `_gerar_recibo()`). Sessão anterior (2026-07-02): remoção do DOCX, ADR-004 (dispatch table + módulo `nfe/`), recibo com texto narrativo, correções de matching PIX/NF-e, restrição de custo de IA
 
 ---
 
