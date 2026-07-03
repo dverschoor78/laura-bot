@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pedido de Compra #GGV03-009 — Alternativa B</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #DDE1E7;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      padding: 56px 32px 80px;
+      min-height: 100vh;
+    }
+
+    .label {
+      display: block;
+      text-align: center;
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #94A3B8;
+      margin-bottom: 16px;
+    }
+
+    /* PAGE */
+    .page {
+      width: 794px;
+      margin: 0 auto;
+      background: #FFFFFF;
+      overflow: hidden;
+      box-shadow:
+        0 0 0 1px rgba(0,0,0,0.06),
+        0 4px 8px rgba(0,0,0,0.05),
+        0 16px 40px rgba(0,0,0,0.12);
+    }
+
+    /* ── DARK HEADER ────────────────────────────────── */
+    .page-header {
+      background: #0F172A;
+      padding: 34px 64px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .hdr-company .brand {
+      font-size: 12.5px;
+      font-weight: 700;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: #F8FAFC;
+    }
+
+    .hdr-company .legal {
+      font-size: 9.5px;
+      color: #475569;
+      margin-top: 7px;
+      line-height: 1.75;
+    }
+
+    .hdr-doc {
+      text-align: right;
+    }
+
+    .hdr-doc .number {
+      font-size: 30px;
+      font-weight: 700;
+      color: #F8FAFC;
+      letter-spacing: -0.025em;
+      line-height: 1;
+    }
+
+    .hdr-doc .meta {
+      font-size: 9.5px;
+      color: #475569;
+      margin-top: 7px;
+      letter-spacing: 0.01em;
+    }
+
+    /* ── CONTEXT BAR ───────────────────────────────── */
+    .context-bar {
+      background: #F8FAFC;
+      border-bottom: 1px solid #E2E8F0;
+      padding: 11px 64px;
+      font-size: 10px;
+      font-weight: 500;
+      color: #475569;
+      letter-spacing: 0.02em;
+    }
+
+    /* ── BODY ──────────────────────────────────────── */
+    .body {
+      padding: 44px 64px 48px;
+    }
+
+    /* SECTION LABEL */
+    .section-label {
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: #94A3B8;
+      margin-bottom: 12px;
+    }
+
+    /* SUPPLIER CARD */
+    .supplier-card {
+      border: 1.5px solid #E2E8F0;
+      border-radius: 8px;
+      padding: 20px 24px;
+      margin-bottom: 40px;
+    }
+
+    .supplier-name {
+      font-size: 18px;
+      font-weight: 700;
+      color: #0F172A;
+      letter-spacing: 0.01em;
+      line-height: 1.2;
+    }
+
+    .supplier-trade {
+      font-size: 11px;
+      color: #64748B;
+      margin-top: 5px;
+    }
+
+    .supplier-meta {
+      font-size: 10px;
+      color: #94A3B8;
+      margin-top: 3px;
+    }
+
+    /* ITEMS */
+    .item {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 14px 0;
+      border-bottom: 1px solid #F1F5F9;
+    }
+
+    .item:last-child {
+      border-bottom: 1.5px solid #E2E8F0;
+    }
+
+    .item-left {
+      display: flex;
+      gap: 14px;
+    }
+
+    .item-num {
+      font-size: 10px;
+      font-weight: 600;
+      color: #CBD5E1;
+      min-width: 20px;
+      padding-top: 1px;
+      flex-shrink: 0;
+    }
+
+    .item-desc {
+      font-size: 11.5px;
+      font-weight: 500;
+      color: #1E293B;
+      line-height: 1.4;
+    }
+
+    .item-qty {
+      font-size: 10px;
+      color: #94A3B8;
+      margin-top: 3px;
+    }
+
+    .item-value {
+      font-size: 12px;
+      font-weight: 600;
+      color: #1E293B;
+      white-space: nowrap;
+    }
+
+    /* FINANCIAL */
+    .financial-outer {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 22px;
+      margin-bottom: 36px;
+    }
+
+    .financial-inner {
+      min-width: 220px;
+    }
+
+    .fin-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 56px;
+      padding: 4px 0;
+    }
+
+    .fin-l {
+      font-size: 10px;
+      color: #94A3B8;
+    }
+
+    .fin-v {
+      font-size: 10px;
+      color: #475569;
+    }
+
+    .fin-rule {
+      border: none;
+      border-top: 1px solid #E2E8F0;
+      margin: 10px 0;
+    }
+
+    .fin-total-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 56px;
+    }
+
+    .fin-total-l {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #0F172A;
+    }
+
+    .fin-total-v {
+      font-size: 24px;
+      font-weight: 700;
+      color: #0F172A;
+      letter-spacing: -0.025em;
+    }
+
+    /* CONDITIONS */
+    .conditions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 40px;
+      padding-top: 28px;
+      border-top: 1.5px solid #E2E8F0;
+    }
+
+    .cond-label {
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: #94A3B8;
+      margin-bottom: 10px;
+    }
+
+    .cond-main {
+      font-size: 11.5px;
+      font-weight: 500;
+      color: #1E293B;
+      margin-bottom: 5px;
+    }
+
+    .cond-detail {
+      font-size: 10px;
+      color: #64748B;
+      line-height: 1.7;
+    }
+
+    /* ── FOOTER ────────────────────────────────────── */
+    .page-footer {
+      background: #F8FAFC;
+      border-top: 1px solid #E2E8F0;
+      padding: 14px 64px;
+      font-size: 9.5px;
+      color: #94A3B8;
+      letter-spacing: 0.01em;
+    }
+  </style>
+</head>
+<body>
+
+  <span class="label">Alternativa B &nbsp;—&nbsp; O Brief</span>
+
+  <div class="page">
+
+    <!-- DARK HEADER -->
+    <div class="page-header">
+      <div class="hdr-company">
+        <div class="brand">DeltaD</div>
+        <div class="legal">
+          Verschoor Investimentos Imobiliários Ltda<br>
+          CNPJ 58.358.802/0001-58 &nbsp;·&nbsp; I.E. Isento<br>
+          Av. dos Pioneiros, 1380 &nbsp;·&nbsp; Carambeí &nbsp;·&nbsp; PR
+        </div>
+      </div>
+      <div class="hdr-doc">
+        <div class="number">#GGV03-009</div>
+        <div class="meta">Pedido de Compra &nbsp;·&nbsp; 12 de julho de 2026</div>
+      </div>
+    </div>
+
+    <!-- CONTEXT BAR -->
+    <div class="context-bar">
+      Obra GGV03 &nbsp;&middot;&nbsp; Jd das Nações, Carambeí &nbsp;&middot;&nbsp; Encarregado: Sabiá
+    </div>
+
+    <!-- BODY -->
+    <div class="body">
+
+      <!-- SUPPLIER -->
+      <div class="section-label">Para</div>
+      <div class="supplier-card">
+        <div class="supplier-name">Costa Ferro Ponta Grossa Comercial</div>
+        <div class="supplier-trade">Comércio de Materiais de Construção</div>
+        <div class="supplier-meta">CNPJ 82.345.678/0001-90 &nbsp;·&nbsp; Ponta Grossa &nbsp;·&nbsp; PR</div>
+      </div>
+
+      <!-- ITEMS -->
+      <div class="section-label">Itens solicitados</div>
+
+      <div class="item">
+        <div class="item-left">
+          <span class="item-num">01</span>
+          <div>
+            <div class="item-desc">Vergalhão CA-50 ø10mm</div>
+            <div class="item-qty">100 kg</div>
+          </div>
+        </div>
+        <div class="item-value">R$ 780,00</div>
+      </div>
+
+      <div class="item">
+        <div class="item-left">
+          <span class="item-num">02</span>
+          <div>
+            <div class="item-desc">Arame recozido #18</div>
+            <div class="item-qty">5 kg</div>
+          </div>
+        </div>
+        <div class="item-value">R$ 45,00</div>
+      </div>
+
+      <div class="item">
+        <div class="item-left">
+          <span class="item-num">03</span>
+          <div>
+            <div class="item-desc">Espaçador plástico circular 25mm</div>
+            <div class="item-qty">200 un</div>
+          </div>
+        </div>
+        <div class="item-value">R$ 60,00</div>
+      </div>
+
+      <!-- FINANCIAL -->
+      <div class="financial-outer">
+        <div class="financial-inner">
+          <div class="fin-row">
+            <span class="fin-l">Subtotal</span>
+            <span class="fin-v">R$ 885,00</span>
+          </div>
+          <div class="fin-row">
+            <span class="fin-l">Desconto</span>
+            <span class="fin-v">−R$ 35,00</span>
+          </div>
+          <hr class="fin-rule">
+          <div class="fin-total-row">
+            <span class="fin-total-l">Total</span>
+            <span class="fin-total-v">R$ 850,00</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- CONDITIONS -->
+      <div class="conditions">
+        <div>
+          <div class="cond-label">Pagamento</div>
+          <div class="cond-main">PIX à vista</div>
+          <div class="cond-detail">
+            Chave: 82.345.678/0001-90<br>
+            Vencimento: 15 de julho de 2026
+          </div>
+        </div>
+        <div>
+          <div class="cond-label">Entrega</div>
+          <div class="cond-main">Até 15 de julho de 2026</div>
+          <div class="cond-detail">
+            Rua Índia, em frente ao nº 139<br>
+            Jd das Nações &nbsp;·&nbsp; Carambeí &nbsp;·&nbsp; PR<br>
+            CEP 84.145-000
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- FOOTER -->
+    <div class="page-footer">
+      Dennis Verschoor &nbsp;·&nbsp; Verschoor Investimentos Imobiliários Ltda &nbsp;·&nbsp; Carambeí, 12 de julho de 2026
+    </div>
+
+  </div>
+
+</body>
+</html>

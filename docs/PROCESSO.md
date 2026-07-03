@@ -44,18 +44,23 @@ Isso é o Jeito da Laura. Comunicação assertiva. O produto não descreve — r
 
 **ANTES DE QUALQUER ALTERAÇÃO, IMPLANTAÇÃO OU PROPOSTA:**
 
-Leia os documentos NESTA ORDEM. Não é opcional. Não é "quando tiver tempo".
+Leia os documentos NESTA ORDEM EXATA (ver `docs/00-Fluxo da cadeia do projeto.txt`).
+Não é opcional. Não é "quando tiver tempo". É **obrigatório**.
 
-### 1.0. Sempre, toda sessão, sem exceção:
+### 1.0. Sempre, toda sessão, sem exceção (NESTA ORDEM):
 
-1. **README.md** — O que é Laura, como rodar
-2. **CONSTITUICAO.md** — 11 princípios do projeto
-3. **IDENTIDADE_DO_PRODUTO.md** — Quem é Laura, promessa central
-4. **GLOSSARIO.md** — Como Laura fala
-5. **ESTADO.md** — Onde está agora
-6. **ROADMAP.md** — O que vem a seguir
+1. **CONSTITUICAO.md** — 11 princípios do projeto (fundação)
+2. **PROCESSO.md** — Este documento (como funciona uma sessão)
+3. **ESTADO.md** — Onde está agora
+4. **ROADMAP.md** — O que vem a seguir
+5. **ARQUITETURA.md** — Estrutura técnica (se Sessão Engenharia)
 
-**Se não fez esses 6, PARE. Volte e leia.**
+**Se não fez esses, PARE. Volte e leia.**
+
+**Complementar conforme necessário:**
+- `IDENTIDADE_DO_PRODUTO.md` + `GLOSSARIO.md` (sessões Produto)
+- ADR relevante (se existe uma ADR relacionada)
+- `LICOES_EXTRACAO.md` (se mexer em PROMPT ou parsing)
 
 ### 1.1. Depois, identifique o tipo da fiada:
 

@@ -1,0 +1,13 @@
+CONSTITUICAO
+        │
+        ▼
+PROCESSO
+        │
+        ▼
+ESTADO
+        │
+        ▼
+ROADMAP
+        │
+        ▼
+ARQUITETURA
