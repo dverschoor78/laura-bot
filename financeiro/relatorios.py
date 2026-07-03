@@ -61,31 +61,33 @@ def _extrair_numero_documento(dados_claude: str, nome_arquivo: str) -> str:
 
 
 def _extrair_descricao(dados_claude: str, categoria: str = None, nome_arquivo: str = None) -> str:
-    """Extrai resumo dos itens comprados ou serviços do dados_claude."""
+    """Extrai resumo generico dos itens comprados ou servicos."""
     if not dados_claude:
         return "---"
 
-    # Para taxa/ART: tenta extrair "Obra Serviço", "Projetos", "Execução", etc
-    if categoria in ("taxa", "servicos"):
-        # Procura por padrão de serviços no nome do arquivo
-        if nome_arquivo and ("Projeto" in nome_arquivo or "Execução" in nome_arquivo or "Serviço" in nome_arquivo):
-            match = re.search(r'([^/_-]*(?:Projeto|Execução|Serviço|Obra)[^/_-]*)', nome_arquivo, re.IGNORECASE)
-            if match:
-                desc = match.group(1).strip()
-                return desc[:80]
-
-    # Tenta extrair "Resumo da compra:" ou similar
+    # Tenta extrair "Resumo da compra:" — formato esperado
     match = re.search(r'Resumo da compra[:\s]+([^\n]+)', dados_claude, re.IGNORECASE)
     if match:
         desc = match.group(1).strip()
-        return desc[:80]
+        desc = re.sub(r'\*\*', '', desc)  # Remove **
+        return desc[:100]
 
-    # Tenta extrair primeira linha significativa
+    # Para taxa/ART/servicos: tenta extrair do nome do arquivo
+    if categoria in ("taxa", "servicos") and nome_arquivo:
+        # Procura por padroes tipo "Obra Servico", "Projetos", etc
+        match = re.search(r'([^/_-]*(?:Projeto|Execucao|Servico|Obra|Art)[^/_-]*)', nome_arquivo, re.IGNORECASE)
+        if match:
+            desc = match.group(1).strip()
+            return desc[:100]
+
+    # Fallback: primeira linha significativa
     lines = dados_claude.split('\n')
     for line in lines:
         line = line.strip()
-        if line and not line.startswith('**') and len(line) > 10:
-            return line[:80]
+        # Remove markdown e caracteres especiais
+        line = re.sub(r'\*\*', '', line)
+        if line and len(line) > 10 and ':' not in line[:20]:
+            return line[:100]
 
     return "---"
 
