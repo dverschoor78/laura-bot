@@ -1,6 +1,9 @@
 # Arquitetura do Projeto Laura
 
-> Versão: 2026-07-02 — reflete o estado real do sistema (pós ADR-004: dispatch table + módulo `nfe/`; DOCX removido)
+> Versão: 2026-07-03 — reflete o estado real do sistema (pós ADR-004: dispatch table + módulo
+> `nfe/`; DOCX removido; segurança de `responder_botao()`/`atualizar()`/`atualizar_obra()`
+> corrigida; `itens_pedido`/`parcelas_pagamento`/`insumos_sinapi` documentadas; `financeiro/consultas.py`
+> e `financeiro/relatorios.py` adicionados)
 
 ---
 
@@ -14,7 +17,8 @@ e registra o lançamento A PAGAR no banco.
 
 **Tecnologias em uso:** Python 3.12 · python-telegram-bot 22 (+ `job-queue`/APScheduler) · SQLite ·
 Claude API (Anthropic) · Playwright Chromium (HTML → PDF) · num2words (valor por extenso) ·
-BrasilAPI (Receita Federal) · OneDrive (pasta local mapeada)
+BrasilAPI (Receita Federal) · OneDrive (pasta local mapeada) · openpyxl (relatórios `.xlsx`,
+`financeiro/relatorios.py`)
 
 `python-docx` não é mais dependência de `bot.py` (DOCX removido em 2026-07-02) — continua usado só
 por `scripts/import_fornecedores.py` (leitura de .docx legado, não geração).
@@ -36,10 +40,21 @@ Telegram ──────► bot.py ──────► Claude API (haiku-4-
 
 - **`bot.py`** — parcialmente modularizado (ADR-004, 2026-07-02): banco, IA, PFM e a maior parte
   dos handlers Telegram continuam aqui; `nfe/` (parsing/exibição de NF-e) e `financeiro/`
-  (lançamento financeiro) já são módulos próprios, importáveis sem inicializar o bot
+  (lançamento financeiro) já são módulos próprios, importáveis sem inicializar o bot. Único
+  handler de callback (`responder_botao()`) verifica `DONO_ID` antes de rotear qualquer ação
+  (corrigido 2026-07-03); helpers de UPDATE dinâmico (`atualizar()`, `atualizar_obra()`) validam
+  nome de coluna contra allowlist antes de montar o SQL
 - **`nfe/`** — parsing e exibição de NF-e (`nfe/nfe.py`); matching (`buscar_candidatos_nfe`) e
   vinculação (`vincular_nfe`) continuam em `financeiro/lancamento.py`
-- **`data/laura.db`** — banco SQLite com cinco tabelas (ver seção 3)
+- **`financeiro/consultas.py`** (2026-07-03) — 4 funções de leitura consolidada, sempre recebendo
+  `db_path` explícito (ADR-002): `obter_pedido_completo()`, `obter_consolidado_obra()`,
+  `listar_pedidos_pendentes()`, `procurar_item()`. Usadas por `scripts/consultar.py` (CLI) e por
+  `financeiro/relatorios.py`
+- **`financeiro/relatorios.py`** (2026-07-03) — gera fluxo de pagamentos por obra e relatório
+  consolidado em Excel (`data/relatorios/*.xlsx`); ainda sem botão/comando no Telegram, só roda
+  chamado manualmente
+- **`data/laura.db`** — banco SQLite com oito tabelas (ver seção 3); 9 índices estratégicos
+  criados em 2026-07-03, mas só no banco vivo — não persistidos em nenhum `CREATE INDEX` versionado
 - **`data/uploads/`** — todo arquivo recebido pelo Telegram cai aqui primeiro (pasta única,
   achatada); é a partir daqui que os documentos são copiados para a pasta certa da obra
 - **Claude API** — extração de dados dos documentos; modelo `claude-haiku-4-5-20251001`
@@ -172,6 +187,56 @@ Substitui os dicts hardcoded `GGV_ENCARREGADO`, `GGV_DESC`, `GGV_ONEDRIVE` e `EN
 
 ---
 
+**`itens_pedido`** — itens de compra estruturados por pedido (criada em 2026-07-02)
+
+| Campo | Propósito |
+|---|---|
+| `id` | Chave primária |
+| `pfm_codigo` | Pedido ao qual o item pertence — sem FK explícita com `lancamentos` |
+| `numero` | Ordem do item dentro do pedido |
+| `descricao`, `unidade`, `quantidade`, `valor_unitario`, `valor_total` | Dados do item, extraídos via `ITEM_RE`/`_itens()`; item que o regex não conseguiu parsear é salvo só com `descricao` |
+| `insumo_sinapi_codigo` | Coluna já existe no schema, mas nada grava nela ainda — vínculo futuro com `insumos_sinapi` |
+
+`_salvar_itens_pedido()` substitui (DELETE + INSERT) todos os itens de um `pfm_codigo` a cada
+geração ou revisão do PFM, sempre refletindo a lista mais recente. `scripts/backfill_itens_pedido.py`
+populou os pedidos já existentes antes desta tabela existir. Consultada por
+`financeiro/consultas.py::procurar_item()` (busca por descrição parcial) e `obter_pedido_completo()`.
+
+---
+
+**`parcelas_pagamento`** — cada pagamento parcial de um pedido (Fase 6, "Pagamento parcelado")
+
+| Campo | Propósito |
+|---|---|
+| `id` | Chave primária |
+| `pfm_codigo` | Pedido ao qual a parcela pertence — sem FK explícita com `lancamentos` |
+| `valor`, `data_pagamento` | Dados do pagamento |
+| `doc_id_comprovante`, `identificador_comprovante` | Comprovante vinculado + chave de deduplicação |
+| `doc_id_recibo`, `doc_id_recibo_assinado` | Recibo gerado e, depois, a versão assinada anexada |
+| `status` | Ciclo por parcela: `pago` → `aguardando_assinatura` → `assinado` |
+
+`lancamentos.status` só vira `pago` quando `SUM(parcelas_pagamento.valor) >= lancamentos.valor`.
+Escrita ainda 100% em `bot.py` (`_registrar_parcela()`) — dono do domínio não decidido, gatilho
+pendente da ADR-004 (ver Dívida Técnica em ROADMAP.md). `financeiro/consultas.py` só lê.
+
+---
+
+**`insumos_sinapi`** — tabela de referência de preços SINAPI, sem vínculo operacional (2026-07-01)
+
+| Campo | Propósito |
+|---|---|
+| `codigo` | Código oficial SINAPI |
+| `descricao`, `unidade`, `preco_pr` | Dados do insumo, preço de referência do Paraná |
+| `mes_referencia` | Mês/ano da planilha importada |
+| `fabricante` | Nunca sobrescrito por reimportação — preenchido manualmente aos poucos |
+| `atualizado_em` | Timestamp da última importação |
+
+Populada por `scripts/import_sinapi.py` (baixa a planilha oficial da Caixa, sem login). Tabela solta
+— nenhuma FK com `itens_pedido` ou `documentos`; `itens_pedido.insumo_sinapi_codigo` existe no schema
+mas nada grava nela ainda.
+
+---
+
 ## 4. Fluxos
 
 **Fluxo A — Orçamento → PFM → Lançamento**
@@ -227,12 +292,6 @@ Referências para navegação no arquivo (4.068 linhas):
 ---
 
 ## 6. Limitações Conhecidas
-
-- 🔴 **Vulnerabilidade de segurança real, não corrigida** — `responder_botao()` não verifica
-  `DONO_ID` (diferente de todos os outros handlers). Combinado com `atualizar()`/`atualizar_obra()`
-  (interpolam nome de coluna direto em SQL a partir de `**kwargs`, sem allowlist), permite que um
-  usuário capaz de mandar `callback_data` arbitrário dispare ações reais e potencialmente injete
-  SQL. Encontrado na auditoria de bibliotecas de 2026-07-02 — correção pequena, prioridade alta.
 
 - **Monólito parcial** — `bot.py` com 4.068 linhas, acima do teto da ADR-001 (2.500–3.000).
   ADR-004 (2026-07-02) extraiu dispatch table + módulo `nfe/`; `fornecedor/`/`obra/`/`comprovante/`

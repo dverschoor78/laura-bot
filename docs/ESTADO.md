@@ -1,9 +1,24 @@
 # Estado do Projeto Laura
 
-> Atualizado em: 2026-07-03 (continuação)
-> Sessão: **Formalização do Jeito Claude**
+> Atualizado em: 2026-07-03 (revisão de documentação — Jeito Claude)
+> Sessão: **Sincronização de documentação com o estado real do código**
 
-Implementado: Checklist obrigatório de inicialização de sessão **formalizado** em PROCESSO.md Seção 1.0 (ordem exata: CONSTITUICAO → PROCESSO → ESTADO → ROADMAP → ARQUITETURA). Lição aprendida: leitura de documentação não é opcional — evita violações de ADR, economiza horas de trabalho errado. Memória criada em `jeito_claude_checklist_obrigatorio.md`. **Sessão anterior (mesma, primeira parte):** Estratégia de banco otimizado com 9 índices + CLI instantânea (`scripts/consultar.py`) + extrato de pagamentos consolidado com descrições por categoria, número de ART, valor unitário destacado, comparação com SINAPI. Laura agora é uma **memória rápida e acessível** (consultas <3ms). **Não foi implementada** automação de pagamento — aguarda os 3 gatilhos de ADR-004 (dono de `parcelas_pagamento`, `_total_pago()` com `db_path`, atomicidade de `_gerar_recibo()`). Sessão 2026-07-02: remoção do DOCX, ADR-004 (dispatch table + módulo `nfe/`), recibo com texto narrativo, correções de matching PIX/NF-e, restrição de custo de IA
+Implementado nesta revisão: leitura do checklist obrigatório (CONSTITUICAO → PROCESSO → ESTADO →
+ROADMAP → ARQUITETURA) expôs que **duas prioridades 🔴 do topo do ROADMAP já estavam resolvidas
+havia horas**, sem nenhum documento refletir isso — a vulnerabilidade de segurança e a
+estruturação de itens de compra. Ambas corrigidas no código antes desta sessão (commits `a2077f0` e
+`95c4717`/`86a82cc`), mas nunca capturadas em ESTADO.md/ROADMAP.md/ARQUITETURA.md/CHANGELOG.md.
+Documentos corrigidos; nenhum código novo escrito nesta sessão (ver detalhes na Última Fiada
+Implementada). **Sessão anterior (checklist Jeito Claude):** Checklist obrigatório de inicialização
+de sessão formalizado em PROCESSO.md Seção 1.0. Memória criada em
+`jeito_claude_checklist_obrigatorio.md`. **Sessão anterior a essa (mesmo dia, primeira parte):**
+Estratégia de banco otimizado com 9 índices + CLI instantânea (`scripts/consultar.py`) + extrato de
+pagamentos consolidado com descrições por categoria, número de ART, valor unitário destacado,
+comparação com SINAPI. Laura agora é uma **memória rápida e acessível** (consultas <3ms). **Não foi
+implementada** automação de pagamento — aguarda os 3 gatilhos de ADR-004 (dono de
+`parcelas_pagamento`, `_total_pago()` com `db_path`, atomicidade de `_gerar_recibo()`). Sessão
+2026-07-02: remoção do DOCX, ADR-004 (dispatch table + módulo `nfe/`), recibo com texto narrativo,
+correções de matching PIX/NF-e, restrição de custo de IA
 
 ---
 
@@ -62,9 +77,21 @@ Implementado: Checklist obrigatório de inicialização de sessão **formalizado
   documento raiz de um pedido já pago (GGV03-007) — `_descartar_documento()` não tinha proteção
   contra apagar documento já vinculado a um pedido de verdade. Corrigido e pedido restaurado a
   partir dos arquivos reais no OneDrive. Ver detalhes na Última Fiada Implementada.
-- **Itens de compra ainda não são estruturados**: cada pedido guarda a lista de itens como texto
-  corrido dentro de `dados_claude`, não numa tabela própria — Dennis notou isso ao tentar achar o
-  preço de um item específico já comprado. Combinado como próxima fiada.
+- **Itens de compra estruturados em `itens_pedido`** (resolvido 2026-07-02/03): tabela própria
+  (`descricao`, `unidade`, `quantidade`, `valor_unitario`, `valor_total`, `insumo_sinapi_codigo`
+  ainda não populado), `scripts/backfill_itens_pedido.py` migrou os pedidos antigos, e
+  `python scripts/consultar.py --item <termo>` busca preço de item já comprado sem ler o pedido
+  inteiro — resolve o caso real que motivou a fiada (Te de redução 32x25, GGV03-006).
+- **Vulnerabilidade de segurança em `responder_botao()` corrigida** (2026-07-03): checagem de
+  `DONO_ID` adicionada; `atualizar()`/`atualizar_obra()` agora validam nome de coluna contra
+  allowlist antes de montar o SQL dinâmico.
+- **Módulo `financeiro/relatorios.py`** (novo, 2026-07-03): gera fluxo de pagamentos por obra e
+  relatório consolidado em Excel (`data/relatorios/`) — ainda não tem botão/comando no Telegram,
+  só roda chamado manualmente.
+- **Banco otimizado com 9 índices** + `financeiro/consultas.py` (`obter_pedido_completo`,
+  `obter_consolidado_obra`, `listar_pedidos_pendentes`, `procurar_item`) + CLI
+  `scripts/consultar.py` — consultas de pedido/obra/item em <3ms. Índices existem só no banco
+  vivo, não em código (ver Dívidas Técnicas).
 - **`_obs()` estava quebrada desde sempre**: só reconhecia "Observações" em linhas separadas, mas
   o formato real é sempre tudo na mesma linha — corrigida pra aceitar os dois formatos.
 - **Botões "Cancelar" viraram "← Voltar"**: mesmo padrão em todo lugar; ao clicar num documento já
@@ -114,6 +141,36 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 ---
 
 ## Última Fiada Implementada
+
+**Sincronização de documentação com o código real** *(2026-07-03)*
+
+Sessão aberta pelo checklist obrigatório do Jeito Claude. Ao ler ROADMAP.md/ESTADO.md/ARQUITETURA.md
+na ordem exigida, a prioridade 🔴 #1 do roadmap (vulnerabilidade de segurança) e a prioridade #2
+(estruturar itens de compra) foram propostas como próxima fiada — mas checar o código antes de
+começar mostrou que **ambas já estavam implementadas havia horas**, em commits da própria sessão
+anterior (`a2077f0`, `95c4717`, `86a82cc`) que nunca foram capturados nos documentos de estado.
+
+**Causa raiz**: os commits de encerramento de sessão (`d807b32`, `fd83224`) só registraram a parte
+"Otimização de BD + CLI" da sessão anterior — o commit `a2077f0` (segurança + `financeiro/relatorios.py`,
+cronologicamente ANTES da otimização de BD) ficou de fora, e ARQUITETURA.md não foi tocado desde
+2026-07-02, faltando `itens_pedido`, `parcelas_pagamento` e `insumos_sinapi` na seção de banco de dados.
+
+**Verificado diretamente no código antes de corrigir a documentação** (não apenas nos commits):
+- `responder_botao()` (bot.py:4046) já retorna cedo se `update.effective_user.id != DONO_ID`
+- `atualizar()`/`atualizar_obra()` já validam contra `_COLUNAS_DOCUMENTO`/`_COLUNAS_OBRA`
+- `itens_pedido` já populada por `gerar_pfm()`/revisão, com backfill dos pedidos antigos e CLI de
+  busca (`scripts/consultar.py --item`)
+
+**Corrigido**: ESTADO.md, ROADMAP.md, ARQUITETURA.md e CHANGELOG.md atualizados pra remover os dois
+itens já resolvidos das listas de pendência, documentar as duas entregas que faltavam (segurança +
+`financeiro/relatorios.py`), e adicionar as três tabelas que faltavam na seção 3 de ARQUITETURA.md.
+Nenhum código alterado nesta sessão — só documentação.
+
+**Lição**: o checklist do Jeito Claude não serve só pra ler documentação — serve pra **desconfiar**
+dela quando o código pode ter avançado mais rápido que os `.md`. "O que já construímos diz algo
+sobre isso?" inclui checar o código, não só o texto.
+
+---
 
 **Remoção do DOCX + ADR-004 (modularização) + correções de matching PIX/NF-e** *(2026-07-02)*
 
@@ -708,14 +765,9 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Dívidas Técnicas Conhecidas
 
-- 🔴 **Vulnerabilidade de segurança real, não corrigida**: `responder_botao()` (dispatcher central
-  de todo `callback_query` do Telegram) não verifica `DONO_ID` — diferente de todos os outros
-  handlers. Combinado com `atualizar()`/`atualizar_obra()` (que interpolam nomes de coluna direto
-  em SQL a partir de `**kwargs`, sem allowlist), um usuário capaz de mandar `callback_data`
-  arbitrário (via cliente Telegram customizado, ex: Telethon/Pyrogram) pode disparar ações reais e
-  potencialmente injetar SQL, sem nunca ter clicado em botão nenhum. Encontrado na auditoria de
-  bibliotecas de 2026-07-02; correção é pequena (checagem de `DONO_ID` + allowlist de colunas) mas
-  ainda não aplicada — **próxima prioridade de segurança**.
+- **9 índices de `data/laura.db` não persistidos em código** (2026-07-03): criados diretamente no
+  banco vivo, sem `CREATE INDEX` em `bot.py` ou script versionado — um banco recriado do zero não
+  os recria, performance de consulta regride silenciosamente até rodar o comando manual de novo.
 - `bot.py` com 4.068 linhas — parcialmente modularizado (ADR-004, 2026-07-02): dispatch table +
   módulo `nfe/` extraído. `fornecedor/`, `obra/`, `comprovante/` avaliados e adiados com gatilho
   próprio (ver ADR-004); extração do domínio `entrega/` continua adiada (ADR-003, motivo não mudou)
@@ -739,6 +791,10 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Decisões Recentes
 
+- **Confiar mas verificar contra o código, não só contra o commit mais recente (2026-07-03)** —
+  o checklist do Jeito Claude cobre a leitura da documentação; quando uma fiada proposta parece
+  "óbvia demais" (prioridade 🔴 há dias na lista), checar o código real antes de implementar evita
+  retrabalho. Ver Última Fiada Implementada.
 - **ADR-004 (2026-07-02)** — gatilho de linhas da ADR-003 disparou (bot.py > 3.500 linhas). Processo
   de dois agentes (propor + derrubar) reduziu o escopo original (extrair fornecedor/nfe/obra/
   comprovante + dividir dispatcher) pra só 2 fiadas: dispatch table interna + módulo `nfe/`. Ver
@@ -782,28 +838,25 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Objetivo da Próxima Sessão
 
-1. **🔴 Corrigir a vulnerabilidade de segurança em `responder_botao()`** — checagem de `DONO_ID`
-   ausente + SQL injection via nome de coluna em `atualizar()`/`atualizar_obra()`. Correção pequena
-   (duas linhas + allowlist), mas prioridade alta — bot está em produção. Ver Dívidas Técnicas.
-2. **Estruturar os itens de compra numa tabela própria** (hoje é texto corrido dentro de
-   `dados_claude`) — é o primeiro passo real da fase "lista de compras", e o gatilho concreto foi
-   Dennis não conseguir consultar o preço de um item já comprado (Te de redução 32x25, GGV03-006)
-   sem ler o texto inteiro do pedido. Pensar junto: schema da tabela de itens, como cada item se
-   liga (ou não) a `insumos_sinapi`, o que fazer com os itens dos pedidos que já estão só em texto
-3. **Fechar o GGV03-003** — pagamento parcelado em andamento; falta o restante das parcelas
-4. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-5. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
+1. **Fechar o GGV03-003** — pagamento parcelado em andamento; falta o restante das parcelas
+2. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+3. **Usar entrega em produção real** — deixar o fluxo (foto, legenda, múltiplas fotos, edição) rodar
    no dia a dia antes de qualquer nova decisão sobre extração (ver gatilho da ADR-003)
-6. **Considerar revisitar `fornecedor/`/`obra/`/`comprovante/`** quando os gatilhos específicos da
+4. **Considerar revisitar `fornecedor/`/`obra/`/`comprovante/`** quando os gatilhos específicos da
    ADR-004 ocorrerem (dono de `parcelas_pagamento` decidido, `_total_pago()` aceitar `db_path`,
    atomicidade de `_gerar_recibo()` resolvida) — não propor antes disso
-7. **Alimentar `docs/LICOES_EXTRACAO.md`** sempre que aparecer um novo bug de parsing/extração —
+5. **Alimentar `docs/LICOES_EXTRACAO.md`** sempre que aparecer um novo bug de parsing/extração —
    não só corrigir e seguir (ver [[feedback_documentar_padroes_bugs]] na memória)
-8. **Limpeza opcional no OneDrive** — 2 arquivos órfãos do pedido excluído Base Forte/GGV03-006
+6. **Limpeza opcional no OneDrive** — 2 arquivos órfãos do pedido excluído Base Forte/GGV03-006
    antigo (`.docx`, `.pdf` em `04 Compras`); a `- Copy.jpeg` foi feita pelo próprio Dennis
    (backup pessoal) — perguntar se ele quer manter essa antes de apagar
-9. **Acesso via Claude Code Remote (celular)** — sem ambiente configurado ainda; ideia de hospedar
+7. **Acesso via Claude Code Remote (celular)** — sem ambiente configurado ainda; ideia de hospedar
    Laura + banco num servidor Proxmox em casa (Eric administra) registrada, não iniciada
+8. **Persistir os 9 índices de `data/laura.db` em código** — hoje só existem no banco vivo
+9. **Integrar `financeiro/relatorios.py` a `bot.py`** — hoje só roda chamado manualmente, sem
+   botão/comando no Telegram
+10. **Popular `itens_pedido.insumo_sinapi_codigo`** — coluna existe no schema, nada grava nela
+    ainda; é o vínculo real que falta entre item comprado e `insumos_sinapi`
 
 ---
 

@@ -10,17 +10,20 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 ## [Não lançado]
 
 ### Próximas fiadas (priorizadas)
-1. 🔴 Corrigir vulnerabilidade de segurança em `responder_botao()` (sem checagem de `DONO_ID`) +
-   SQL injection via nome de coluna em `atualizar()`/`atualizar_obra()`
-2. Estruturar itens de compra numa tabela própria (hoje é texto corrido em `dados_claude`) —
-   primeiro passo real da fase "lista de compras"
-3. Fechar o GGV03-003 (pagamento parcelado em andamento)
-4. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
-5. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
-6. Revisitar `fornecedor/`/`obra/`/`comprovante/` quando os gatilhos da ADR-004 ocorrerem
-7. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
-8. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
-9. Acesso via Claude Code Remote do celular — ideia registrada, servidor Proxmox em casa (Eric)
+1. Fechar o GGV03-003 (pagamento parcelado em andamento)
+2. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
+3. Usar entrega em produção real antes de revisitar extração (gatilho na ADR-003)
+4. Revisitar `fornecedor/`/`obra/`/`comprovante/` quando os gatilhos da ADR-004 ocorrerem
+5. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
+6. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
+7. Acesso via Claude Code Remote do celular — ideia registrada, servidor Proxmox em casa (Eric)
+8. Persistir os 9 índices de `data/laura.db` em código (hoje só existem no banco vivo — um `init_db()`
+   contra um banco novo não os recria; ver Dívida Técnica em `docs/ROADMAP.md`)
+
+> Concluído desde a última revisão: vulnerabilidade de segurança em `responder_botao()`/`atualizar()`/
+> `atualizar_obra()` corrigida (ver "[Segurança + módulo financeiro/relatorios.py] — 2026-07-03"
+> abaixo) e itens de compra estruturados em `itens_pedido` (ver "[Otimização de BD..." abaixo,
+> `procurar_item()`) — nenhum dos dois estava refletido aqui até esta revisão.
 
 ---
 
@@ -57,6 +60,31 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Segurança + módulo financeiro/relatorios.py] — 2026-07-03
+
+### Corrigido
+
+- 🔴 **Vulnerabilidade de segurança real** (encontrada na auditoria de bibliotecas de 2026-07-02,
+  não corrigida até esta sessão): `responder_botao()` — dispatcher central de todo `callback_query`
+  do Telegram — não verificava `DONO_ID`, diferente de todos os outros handlers. Combinado com
+  `atualizar()`/`atualizar_obra()`, que interpolavam nome de coluna direto em SQL a partir de
+  `**kwargs` sem allowlist, um `callback_data` arbitrário (cliente Telegram customizado) podia
+  disparar ações reais e potencialmente injetar SQL sem nunca ter clicado em botão nenhum.
+- `responder_botao()` agora retorna imediatamente se `update.effective_user.id != DONO_ID`
+- `atualizar()` e `atualizar_obra()` agora validam contra allowlist (`_COLUNAS_DOCUMENTO`,
+  `_COLUNAS_OBRA`) e levantam `ValueError` para qualquer coluna fora da lista
+
+### Adicionado
+
+- **Módulo `financeiro/relatorios.py`** — gerador de fluxos e relatórios de pagamento:
+  - `gerar_fluxo_pagamentos_obra(db_path, ggv=None, output_dir=None)` — detalhe por obra (NF-e,
+    descrição, % quitado)
+  - `gerar_relatorio_pagamentos(db_path, output_dir=None)` — consolidado de todos os pagamentos
+  - Saída em `data/relatorios/*.xlsx`, com timestamp
+- Ainda não integrado a `bot.py` — funções chamadas manualmente, sem botão/comando no Telegram
+
+---
+
 ## [Otimização de BD + CLI para memória rápida] — 2026-07-03
 
 ### Motivação
@@ -78,7 +106,9 @@ Dennis: "Laura não é uma ferramenta que você usa. É uma memória que você c
   - `obter_pedido_completo(db, "GGV03-001")` → consolida lançamento+parcelas+itens+docs (2.2ms)
   - `obter_consolidado_obra(db, "GGV03")` → resumo financeiro por obra (1.5ms)
   - `listar_pedidos_pendentes(db, "GGV03")` → sem documento fiscal (0.7ms)
-  - `procurar_item(db, "redução")` → busca de material já comprado (0.9ms)
+  - `procurar_item(db, "redução")` → busca de material já comprado (0.9ms) — resolve a fiada
+    "estruturar itens de compra numa tabela própria" (`itens_pedido`, criada em 2026-07-02 na
+    sessão de modularização, agora com CLI de consulta em cima dela)
 
 - **CLI `scripts/consultar.py`** (novo) — terminal instantâneo:
   - `python scripts/consultar.py GGV03-001` → pedido completo

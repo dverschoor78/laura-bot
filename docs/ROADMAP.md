@@ -1,6 +1,6 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-02 (produção migrada e limpa; auto-cadastro via Receita; arquivos organizados por obra; taxas/impostos/serviços públicos; recibo automático; pagamento parcelado; base de insumos SINAPI; produção ativada + correções de cadastro ao vivo; enriquecimento de fornecedor via Receita — e-mail, telefone, CNAE; incidente crítico de exclusão de documento + correção; **DOCX removido, ADR-004 (modularização), recibo narrativo, matching PIX/NF-e corrigido**)
+> Atualizado em: 2026-07-03 (produção migrada e limpa; auto-cadastro via Receita; arquivos organizados por obra; taxas/impostos/serviços públicos; recibo automático; pagamento parcelado; base de insumos SINAPI; produção ativada + correções de cadastro ao vivo; enriquecimento de fornecedor via Receita — e-mail, telefone, CNAE; incidente crítico de exclusão de documento + correção; DOCX removido, ADR-004 (modularização), recibo narrativo, matching PIX/NF-e corrigido; **vulnerabilidade de segurança corrigida, itens de compra estruturados (`itens_pedido`), módulo `financeiro/relatorios.py`, BD otimizado (9 índices) + CLI de consultas rápidas**)
 
 ---
 
@@ -411,32 +411,45 @@ que `bot.py` parecia "bagunçado".
 
 ## Próximas Fiadas
 
-1. **🔴 Corrigir vulnerabilidade de segurança** — `responder_botao()` sem checagem de `DONO_ID` +
-   SQL injection via nome de coluna em `atualizar()`/`atualizar_obra()`. Prioridade alta.
-2. **Estruturar itens de compra numa tabela própria** — hoje é texto corrido dentro de
-   `dados_claude`; gatilho concreto: Dennis não conseguiu consultar o preço de um item já comprado
-   (Te de redução 32x25, GGV03-006) sem leitura manual do texto inteiro. Primeiro passo real da
-   fase "lista de compras" — decidir schema e como cada item se liga a `insumos_sinapi`
-3. **Fechar o GGV03-003** — pagamento parcelado em andamento, falta quitar o restante
-4. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-5. **Usar entrega em produção real** — deixar o fluxo rodar no dia a dia antes de revisitar extração (gatilho na ADR-003)
-6. Revisitar `fornecedor/`/`obra/`/`comprovante/` quando os gatilhos da ADR-004 ocorrerem
-7. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração encontrado
-8. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
+1. **Fechar o GGV03-003** — pagamento parcelado em andamento, falta quitar o restante
+2. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+3. **Usar entrega em produção real** — deixar o fluxo rodar no dia a dia antes de revisitar extração (gatilho na ADR-003)
+4. Revisitar `fornecedor/`/`obra/`/`comprovante/` quando os gatilhos da ADR-004 ocorrerem
+5. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração encontrado
+6. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
    — perguntar sobre a `- Copy.jpeg` antes, é backup pessoal do Dennis
-9. Acesso via Claude Code Remote do celular — sem ambiente configurado; ideia de hospedar Laura +
+7. Acesso via Claude Code Remote do celular — sem ambiente configurado; ideia de hospedar Laura +
    banco num servidor Proxmox em casa (Eric administra) registrada, não iniciada
+8. Persistir os 9 índices de `data/laura.db` em código — hoje só existem no banco vivo (nenhum
+   `CREATE INDEX` em `bot.py`/scripts); um `init_db()` contra um banco novo não os recria
+9. Integrar `financeiro/relatorios.py` a `bot.py` — hoje as funções só rodam chamadas manualmente,
+   sem botão ou comando no Telegram
+10. Popular `itens_pedido.insumo_sinapi_codigo` — coluna já existe no schema, mas nada grava nela
+    ainda; é o vínculo real entre item comprado e `insumos_sinapi` que falta pra fase "lista de compras"
+
+---
+
+### Concluídas fora de ordem, não capturadas antes desta revisão (2026-07-03)
+
+**Correção de segurança** ✓ — `responder_botao()` agora verifica `DONO_ID`; `atualizar()` e
+`atualizar_obra()` validam colunas contra allowlist (`_COLUNAS_DOCUMENTO`/`_COLUNAS_OBRA`). Ver
+CHANGELOG "[Segurança + módulo financeiro/relatorios.py]".
+
+**Itens de compra estruturados** ✓ — tabela `itens_pedido` (criada em 2026-07-02, junto da
+modularização) + `scripts/backfill_itens_pedido.py` (popula pedidos antigos) +
+`financeiro/consultas.py::procurar_item()` + `scripts/consultar.py --item <termo>` resolvem o
+gatilho original (consultar preço de item já comprado sem ler o texto inteiro do pedido).
 
 ---
 
 ## Dívida Técnica
 
-- **🔴 Crítica — vulnerabilidade de segurança em `responder_botao()`**
-  Dispatcher central de callback_query do Telegram não verifica `DONO_ID` (diferente de todos os
-  outros handlers). Combinado com `atualizar()`/`atualizar_obra()`, que interpolam nome de coluna
-  direto em SQL a partir de `**kwargs` sem allowlist, um usuário capaz de mandar `callback_data`
-  arbitrário (cliente Telegram customizado) pode disparar ações reais e potencialmente injetar SQL.
-  Encontrado na auditoria de bibliotecas de 2026-07-02. Correção pequena, ainda não aplicada.
+- **Baixa — 9 índices de `data/laura.db` não persistidos em código**
+  Criados diretamente no banco vivo durante a sessão "Otimização de BD" (2026-07-03) — não existe
+  nenhum `CREATE INDEX` em `bot.py` ou em script versionado. Se o banco for recriado do zero
+  (`init_db()` contra um arquivo novo), a performance de consulta (<3ms) regride silenciosamente
+  até alguém rodar o mesmo comando manual de novo. Baixo risco hoje (banco de produção já tem os
+  índices), mas deveria virar parte de `init_db()` ou de um script de migração versionado.
 
 - **Baixa — Separar conceito de Obra do código GGV internamente**
   Decisão 2026-06-29: a mudança é de linguagem e domínio, não de migração imediata.
