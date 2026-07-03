@@ -145,7 +145,11 @@ def main():
         else:
             print(f"\n[OK] {len(itens)} item(ns) encontrado(s):\n")
             for item in itens:
-                print(f"  {item['pfm_codigo']:15} {item['fornecedor']:30} {item['descricao']:40} {format_valor(item['valor_total'])}")
+                qtd = item['quantidade'] or 1
+                unit = item['unidade'] or 'UN'
+                unitario = item['valor_unitario'] or 0
+                total = item['valor_total'] or 0
+                print(f"  {item['pfm_codigo']:12} {item['fornecedor']:25} {unitario:>8.2f}/UN {qtd:>5.0f}{unit:>3} = {format_valor(total):>12}  ({item['descricao'][:35]})")
             print()
 
     elif sys.argv[1] == "--pendentes" and len(sys.argv) > 2:
