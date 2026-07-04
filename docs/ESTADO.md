@@ -271,6 +271,24 @@ e observação própria; efeito colateral positivo — porcelanato/revestimento 
 mesma lista casaram certo nos dois (Alta confiança), o falso positivo de categoria adjacente
 visto na Camada 2 original não se repetiu.
 
+**2026-07-04, redesenho de experiência em 3 níveis + gravação real da Lista de Compras:**
+Dennis: "a tela de conferência está muito técnica... o objetivo não é explicar como a Laura
+chegou na resposta, é eu conferir rapidamente se está correta." Proposta de UX apresentada e
+validada antes de codar. Implementado: Nível 1 (Tela de Conferência, nova tela principal —
+item em 3 linhas, indicador 🟢/🟡/🔴, alertas agrupados no rodapé, resumo com referência
+total estimada), Nível 2 (Edição — só ao escolher um item aparecem todos os campos; edição do
+item inteiro, não campo a campo, por decisão explícita de simplicidade), Nível 3 (Análise
+Técnica — a tela técnica completa que já existia, virou nível opcional). Prioridade de
+referência de preço definida: última compra própria > SINAPI convertido > nenhuma, sem
+mostrar a origem no Nível 1. Critério de indicador ajustado por Dennis: "sem referência de
+preço" é 🟡, não 🔴 — não terminar aquele item com nenhuma referência conhecida não impede
+pedir orçamento. Gravação real implementada (`_cb_lc_gerar` + `criar_ou_buscar_lista_aberta`/
+`adicionar_item`, já existiam sem conexão) — bloqueia sem obra definida. Achado: schema de
+`lista_compra_itens` nunca tinha colunas pra fabricante/código comercial — adicionadas.
+Testado com a foto real de 8 itens (soma de referência conferida manualmente), gravação
+bloqueada sem obra e bem-sucedida com obra. Pendente: edição campo a campo, Pedido de Compra
+a partir da Lista, vínculo com orçamento.
+
 **Mesmo dia, Camada 3 — corrigido falso positivo por palavra isolada:** achado registrado
 antes como dívida técnica (Revestimento Cerâmico casando com bloco/tijolo cerâmico, mesma
 unidade de busca "cerâmica"/"cerâmico" sem verificar se era o mesmo produto). Dennis pediu

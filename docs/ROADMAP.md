@@ -325,10 +325,63 @@ colateral esperado e aceito: menos matches no total (ex: um Cimento de teste com
 por coincidência de palavra. Testado: Revestimento Cerâmico não casa mais com BLOCOS;
 regressão do fluxo orçamento → pedido confirmada.
 
-**Camadas 5 e 6 — pendentes** *(não iniciadas)*
+**Redesenho de experiência em 3 níveis + gravação real** ✓ *(2026-07-04)* — Dennis: "a tela de
+conferência está muito técnica... o objetivo não é explicar como a Laura chegou na resposta,
+é eu conferir rapidamente se a Lista de Compras está correta." Princípio adotado: "A Laura
+apresenta primeiro a informação necessária para a decisão. Os detalhes técnicos aparecem
+apenas quando solicitados." Proposta de UX apresentada e validada antes de codar (mockups das
+3 telas), com 4 decisões de desenho fechadas por ele antes da implementação:
 
-1. Edição item a item (escolher item → escolher campo → digitar novo valor)
-2. Gravação final confirmada — só aqui os dois snapshots são congelados de verdade
+1. **Nível 1 — Tela de Conferência** (`_texto_lista_conferencia`/`_teclado_lista_conferencia`,
+   nova tela principal): cabeçalho com obra+endereço (destaque ⚠️ quando faltando), cada item
+   em 3 linhas (descrição, quantidade+unidade+fabricante, referência de preço já na unidade
+   comercial), indicador 🟢/🟡/🔴 por item, alertas agrupados por tipo no rodapé (sem repetir
+   por item), e um resumo (itens, referência total estimada, contagem de alertas)
+2. **Nível 2 — Edição** (`_texto_item_detalhe`/item picker): só ao escolher um item aparecem
+   todos os campos (fabricante, código, embalagem, SINAPI, última compra, observações).
+   Decisão: edição do item inteiro (reescrever a descrição como texto livre, reinterpretado
+   pelas Camadas 1+2+3), não campo a campo — "prefiro uma solução simples funcionando do que
+   uma edição extremamente refinada agora"; granularidade por campo fica pra fiada futura
+3. **Nível 3 — Análise Técnica** (`_texto_analise_tecnica`, ex-`_texto_itens_interpretados`
+   renomeada): a tela técnica completa que já existia, agora um nível opcional acessado por
+   botão, não mais a primeira coisa mostrada
+
+**Prioridade de referência de preço** (`_melhor_referencia_preco`): 1) última compra própria
+(Camada 3), 2) referência própria consolidada (não existe ainda), 3) SINAPI convertido pra
+unidade comercial, 4) nenhuma. Nível 1 mostra só "Referência: ~R$ xx,xx/SC" sem dizer a
+origem — quem quer saber de onde veio consulta o Nível 3.
+
+**Critério dos indicadores** (`_avaliar_item`) — ajustado por Dennis em relação à primeira
+proposta: 🔴 é reservado pro que **impede uma boa cotação** (quantidade ou unidade comercial
+desconhecida, item não interpretado) — "se a Laura nunca viu aquele item, isso não impede
+pedir orçamento, só significa que ela ainda não possui conhecimento suficiente"; portanto
+"sem referência de preço" é 🟡, não 🔴 (correção explícita da minha proposta original). 🟡
+cobre confiança SINAPI média/baixa, referência própria aproximada, observação da IA, ou
+ausência de referência de preço. 🟢 quando nada disso se aplica.
+
+**Gravação real da Lista de Compras** (`_cb_lc_gerar`) — "Quero implementar a gravação real.
+Essa já é a finalidade da Fiada 1... a Lista de Compras deve existir definitivamente no
+banco" (ainda sem gerar Pedido de Compra nem vínculo com orçamento). Usa
+`criar_ou_buscar_lista_aberta()` + `adicionar_item()` (já existiam, nunca conectados ao fluxo
+de interpretação). Bloqueia com mensagem clara se a obra não estiver definida (schema exige
+`ggv NOT NULL`). Achado no processo: `lista_compra_itens` nunca teve colunas pra fabricante e
+código comercial — dados que a Camada 1 já extrai desde o início — corrigido com duas colunas
+novas (`fabricante`, `codigo`) via o mesmo padrão ALTER-seguro das colunas de snapshot,
+category diferente (identidade do item, não referência externa congelada).
+
+**Estado de sessão**: `ctx.user_data["lista_itens"]`/`["lista_ggv"]` guardam a lista de
+trabalho entre telas (Nível 1 ↔ 2 ↔ 3, edição de um item) — não é persistência, só estado de
+interação; a gravação de verdade só acontece no clique em "Gerar Lista de Compras".
+
+**Testado**: os 3 níveis renderizados com a foto real de 8 itens (soma da referência estimada
+conferida manualmente — bate exato); item não interpretado (fallback string) não quebra a
+tela; gravação bloqueada sem obra e bem-sucedida com obra, todos os campos (incluindo
+fabricante) persistidos corretamente; fluxo de correção de item testado com objetos
+simulados. Regressão do fluxo orçamento → pedido confirmada.
+
+**Pendente** (fica pra fiada futura, escopo definido por Dennis): edição campo a campo
+(escolher item → escolher campo → digitar valor); geração de Pedido de Compra a partir da
+Lista de Compras; vínculo com orçamento.
 
 ---
 

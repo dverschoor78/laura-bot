@@ -3076,9 +3076,13 @@ def _fmt_qtde_segura(qtde):
     except (TypeError, ValueError):
         return str(qtde)
 
-def _texto_itens_interpretados(itens, ggv):
+def _texto_analise_tecnica(itens, ggv):
+    """Nível 3 (Análise Técnica) — tudo que a Laura sabe sobre cada item: confiança, código
+    SINAPI, preço original, conversão, histórico. Só acessada por quem quer entender como a
+    Laura chegou na referência (Dennis, 2026-07-04: "a inteligência trabalha nos bastidores;
+    a tela principal não é um relatório técnico") — não é mais a primeira tela mostrada."""
     label_ggv = f"Obra {ggv}" if ggv else "Obra ainda não definida"
-    linhas = [f"📝 <b>Lista interpretada — {label_ggv}</b>"]
+    linhas = [f"🔍 <b>Análise técnica — {label_ggv}</b>"]
     if ggv:
         obra = buscar_obra(ggv)
         if obra and obra.get("endereco_entrega"):
@@ -3163,24 +3167,292 @@ def _texto_itens_interpretados(itens, ggv):
             linhas.append(f"{i}. {item}")
     return "\n".join(linhas)
 
-def _teclado_lista_interpretada(ggv):
-    """Camada 4: tela de conferência da Lista de Compras. Edição reaproveita o mesmo padrão
-    já usado no orçamento (edit_itens) — reescrever a lista inteira como texto livre,
-    reinterpretada do zero pelas Camadas 1+2+3. Edição item a item fica pra Camada 5."""
+def _melhor_referencia_preco(item):
+    """Prioridade de referência de preço (Dennis, 2026-07-04): 1) última compra própria
+    (Camada 3, já filtrada por unidade igual), 2) referência própria consolidada da Laura
+    (não existe ainda), 3) SINAPI convertido pra unidade comercial, 4) nenhuma. Sempre em
+    R$/unidade comercial do item — nunca precisa converter de novo aqui, as Camadas 2 e 3 já
+    entregam o preço na unidade certa quando existe."""
+    if not isinstance(item, dict):
+        return None
+    if item.get("laura_preco_referencia") is not None:
+        return item["laura_preco_referencia"]
+    if item.get("sinapi_codigo"):
+        if item.get("sinapi_preco_equivalente") is not None:
+            return item["sinapi_preco_equivalente"]
+        preco = item.get("sinapi_preco_referencia")
+        if preco is not None and _mesma_unidade(item.get("unidade"), item.get("sinapi_unidade_referencia")):
+            return preco
+    return None
+
+def _avaliar_item(item):
+    """Classifica o item pra tela de conferência (Dennis, 2026-07-04):
+    🔴 atenção — existe algo que impede uma boa cotação (quantidade/unidade desconhecida,
+        item não interpretado);
+    🟡 revisar — merece conferência mas não impede pedir orçamento (confiança média/baixa,
+        correspondência aproximada, observação da IA, ou nenhuma referência de preço ainda —
+        "se a Laura nunca viu aquele item, isso não impede pedir orçamento, só significa que
+        ela ainda não possui conhecimento suficiente");
+    🟢 ok — tudo consistente."""
+    if not isinstance(item, dict):
+        return "atencao", ["Item não interpretado"]
+
+    alertas_atencao = []
+    if item.get("quantidade") is None:
+        alertas_atencao.append("Quantidade não identificada")
+    if not item.get("unidade"):
+        alertas_atencao.append("Unidade comercial não identificada")
+    if alertas_atencao:
+        return "atencao", alertas_atencao
+
+    alertas_revisar = []
+    confianca = item.get("sinapi_confianca")
+    if confianca == "media":
+        alertas_revisar.append("Correspondência SINAPI de confiança média")
+    elif confianca == "baixa":
+        alertas_revisar.append("Correspondência SINAPI de confiança baixa")
+    if item.get("laura_grau_confianca_referencia") == "aproximada":
+        alertas_revisar.append("Referência própria aproximada")
+    if item.get("observacoes"):
+        alertas_revisar.append("Observação da IA — conferir")
+    if _melhor_referencia_preco(item) is None:
+        alertas_revisar.append("Sem referência de preço conhecida")
+    if alertas_revisar:
+        return "revisar", alertas_revisar
+    return "ok", []
+
+_EMOJI_STATUS = {"ok": "🟢", "revisar": "🟡", "atencao": "🔴"}
+
+def _texto_lista_conferencia(itens, ggv):
+    """Nível 1 (Tela de Conferência) — a tela principal depois de interpretar. Objetivo não é
+    explicar como a Laura chegou na resposta, é permitir conferir rápido (Dennis, 2026-07-04):
+    "o que vou comprar, quanto, uma ideia de preço, o que precisa da minha atenção". Detalhe
+    técnico fica pro Nível 3 (Análise Técnica), edição completa de um item pro Nível 2."""
+    linhas = [f"📝 <b>Lista de Compras — Obra {ggv}</b>" if ggv else "📝 <b>Lista de Compras</b>"]
+    if ggv:
+        obra = buscar_obra(ggv)
+        endereco = obra.get("endereco_entrega") if obra else None
+        linhas.append(f"Endereço: {endereco}" if endereco else "⚠️ Endereço de entrega não definido")
+    else:
+        linhas.append("⚠️ Obra ainda não definida")
+    linhas.append("")
+
+    if not itens:
+        linhas.append("Não consegui reconhecer nenhum item nesta lista.")
+        return "\n".join(linhas)
+
+    alertas_agrupados = {}
+    n_itens_com_alerta = 0
+    total_referencia = 0.0
+    total_parcial = False
+
+    for i, item in enumerate(itens, 1):
+        status, alertas = _avaliar_item(item)
+        if status != "ok":
+            n_itens_com_alerta += 1
+        for alerta in alertas:
+            alertas_agrupados.setdefault(alerta, []).append(i)
+
+        emoji = _EMOJI_STATUS[status]
+        if not isinstance(item, dict):
+            linhas.append(f"{emoji} {i}. {item}")
+            linhas.append("")
+            continue
+
+        linhas.append(f"{emoji} {i}. {item['descricao']}")
+        qtde, und = item.get("quantidade"), item.get("unidade")
+        if qtde is not None and und:
+            detalhe = f"{_fmt_qtde_segura(qtde)} {und}"
+        elif und:
+            detalhe = f"{und} (quantidade não identificada)"
+        elif item.get("embalagem"):
+            detalhe = f"Embalagem {item['embalagem']}"
+        elif qtde is not None:
+            detalhe = f"{_fmt_qtde_segura(qtde)} (unidade não identificada)"
+        else:
+            detalhe = "quantidade/unidade não identificadas"
+        if item.get("fabricante"):
+            detalhe += f" • {item['fabricante']}"
+        linhas.append(f"     {detalhe}")
+
+        preco_ref = _melhor_referencia_preco(item)
+        if preco_ref is not None and und:
+            linhas.append(f"     Referência: ~R$ {_fmt_brl(preco_ref)}/{und}")
+            if qtde is not None:
+                total_referencia += preco_ref * qtde
+            else:
+                total_parcial = True
+        else:
+            linhas.append("     Referência: ainda não conhecida")
+            total_parcial = True
+        linhas.append("")
+
+    if alertas_agrupados:
+        linhas.append("⚠️ <b>Revisar:</b>")
+        for texto, numeros in alertas_agrupados.items():
+            rotulo = "item" if len(numeros) == 1 else "itens"
+            linhas.append(f"• {texto} — {rotulo} {', '.join(str(n) for n in numeros)}")
+        linhas.append("")
+
+    linhas.append("<b>Resumo</b>")
+    linhas.append(f"Itens: {len(itens)}")
+    total_str = f"R$ {_fmt_brl(total_referencia)}"
+    if total_parcial:
+        total_str += " (parcial — alguns itens sem quantidade ou referência)"
+    linhas.append(f"Referência estimada: {total_str}")
+    linhas.append(f"Alertas: {n_itens_com_alerta}")
+    return "\n".join(linhas)
+
+def _teclado_lista_conferencia(ggv):
+    token = ggv or "nao_identificado"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✏️ Editar itens", callback_data=f"lc_editar:{ggv or 'nao_identificado'}")],
-        [InlineKeyboardButton("✖ Fechar",       callback_data="lc_fechar")],
+        [InlineKeyboardButton("✏️ Editar item",           callback_data=f"lc_editar:{token}"),
+         InlineKeyboardButton("🔍 Análise técnica",        callback_data=f"lc_tecnico:{token}")],
+        [InlineKeyboardButton("✅ Gerar Lista de Compras", callback_data=f"lc_gerar:{token}")],
+        [InlineKeyboardButton("✖ Fechar",                  callback_data="lc_fechar")],
     ])
 
+def _teclado_item_picker(itens):
+    botoes = []
+    for i, item in enumerate(itens, 1):
+        desc = item["descricao"] if isinstance(item, dict) else str(item)
+        botoes.append([InlineKeyboardButton(f"{i}. {desc[:40]}", callback_data=f"lc_item:{i}")])
+    botoes.append([InlineKeyboardButton("← Voltar", callback_data="lc_voltar")])
+    return InlineKeyboardMarkup(botoes)
+
+_CONFIANCA_LABEL_SINAPI = {"alta": "Alta confiança", "media": "Média confiança", "baixa": "Baixa confiança"}
+
+def _texto_item_detalhe(item, indice):
+    """Nível 2 (Edição) — só aqui aparece tudo sobre o item (Dennis, 2026-07-04: "os detalhes
+    aparecem somente quando realmente preciso editar")."""
+    if not isinstance(item, dict):
+        return f"📋 <b>Item {indice}</b>\n\n{item}"
+    qtde, und = item.get("quantidade"), item.get("unidade")
+    linhas = [
+        f"📋 <b>Item {indice} — {item['descricao']}</b>", "",
+        f"Descrição: {item['descricao']}",
+        f"Fabricante: {item.get('fabricante') or '—'}",
+        f"Código comercial: {item.get('codigo') or '—'}",
+        f"Quantidade: {_fmt_qtde_segura(qtde) if qtde is not None else 'não identificada'}",
+        f"Unidade comercial: {und or 'não identificada'}",
+    ]
+    if item.get("embalagem"):
+        linhas.append(f"Embalagem: {item['embalagem']}")
+    linhas.append("")
+    preco_ref = _melhor_referencia_preco(item)
+    linhas.append(f"Referência: R$ {_fmt_brl(preco_ref)}/{und}" if preco_ref is not None and und
+                  else "Referência: sem referência conhecida")
+    if item.get("sinapi_codigo"):
+        conf = _CONFIANCA_LABEL_SINAPI.get(item.get("sinapi_confianca"), "confiança não informada")
+        linhas.append(f"SINAPI: {item['sinapi_descricao_referencia']} (cód. {item['sinapi_codigo']}) — {conf}")
+    else:
+        linhas.append("SINAPI: sem correspondência confiável")
+    if item.get("laura_preco_referencia") is not None:
+        linhas.append(f"Última compra própria: R$ {_fmt_brl(item['laura_preco_referencia'])}/"
+                       f"{item.get('laura_unidade_referencia') or '?'} — "
+                       f"{item.get('laura_fornecedor_referencia') or 'fornecedor não identificado'}")
+    if item.get("observacoes"):
+        linhas.append(f"Obs: {item['observacoes']}")
+    return "\n".join(linhas)
+
+def _teclado_item_detalhe(indice):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✏️ Corrigir este item", callback_data=f"lc_corrigir:{indice}")],
+        [InlineKeyboardButton("← Voltar à lista",       callback_data="lc_voltar")],
+    ])
+
+def _teclado_analise_tecnica():
+    return InlineKeyboardMarkup([[InlineKeyboardButton("← Voltar", callback_data="lc_voltar")]])
+
 async def _cb_lc_editar(query, ctx, partes):
-    _, ggv_token = partes
-    ctx.user_data["aguardando"] = "lista_editar_itens"
-    ctx.user_data["lista_ggv_preselecionada"] = None if ggv_token == "nao_identificado" else ggv_token
-    await query.edit_message_text("Envie a lista corrigida completa (texto):")
+    itens = ctx.user_data.get("lista_itens") or []
+    if not itens:
+        await query.edit_message_text("Lista não encontrada nesta sessão. Envie /lista novamente.")
+        return
+    await query.edit_message_text("Escolha o item que deseja corrigir:", reply_markup=_teclado_item_picker(itens))
+
+async def _cb_lc_item(query, ctx, partes):
+    indice = int(partes[1])
+    itens = ctx.user_data.get("lista_itens") or []
+    if not (1 <= indice <= len(itens)):
+        await query.edit_message_text("Item não encontrado.")
+        return
+    await query.edit_message_text(
+        _texto_item_detalhe(itens[indice - 1], indice), parse_mode="HTML",
+        reply_markup=_teclado_item_detalhe(indice)
+    )
+
+async def _cb_lc_corrigir(query, ctx, partes):
+    indice = int(partes[1])
+    ctx.user_data["aguardando"] = "lista_editar_item"
+    ctx.user_data["lista_item_editando"] = indice
+    await query.edit_message_text("Envie a descrição corrigida deste item (texto):")
+
+async def _cb_lc_tecnico(query, ctx, partes):
+    ggv_token = partes[1]
+    ggv = None if ggv_token == "nao_identificado" else ggv_token
+    itens = ctx.user_data.get("lista_itens") or []
+    await query.edit_message_text(
+        _texto_analise_tecnica(itens, ggv), parse_mode="HTML",
+        reply_markup=_teclado_analise_tecnica()
+    )
+
+async def _cb_lc_voltar(query, ctx, partes):
+    itens = ctx.user_data.get("lista_itens") or []
+    ggv = ctx.user_data.get("lista_ggv")
+    await query.edit_message_text(
+        _texto_lista_conferencia(itens, ggv), parse_mode="HTML",
+        reply_markup=_teclado_lista_conferencia(ggv)
+    )
+
+async def _cb_lc_gerar(query, ctx, partes):
+    ggv_token = partes[1]
+    ggv = None if ggv_token == "nao_identificado" else ggv_token
+    itens = ctx.user_data.get("lista_itens") or []
+    if not ggv:
+        await query.edit_message_text(
+            "Não dá pra gravar sem obra definida. Refaça com /lista e o código da obra "
+            "(ex: /lista GGV03).",
+            reply_markup=_teclado_lista_conferencia(ggv)
+        )
+        return
+    itens_validos = [item for item in itens if isinstance(item, dict)]
+    if not itens_validos:
+        await query.edit_message_text("Lista vazia — nada pra gravar.")
+        return
+    lista_id, _criada = criar_ou_buscar_lista_aberta(DB_PATH, ggv)
+    for item in itens_validos:
+        adicionar_item(
+            DB_PATH, lista_id,
+            descricao=item["descricao"],
+            unidade=item.get("unidade") or "",
+            quantidade=item.get("quantidade"),
+            fabricante=item.get("fabricante"),
+            codigo=item.get("codigo"),
+            sinapi_codigo=item.get("sinapi_codigo"),
+            sinapi_descricao_referencia=item.get("sinapi_descricao_referencia"),
+            sinapi_unidade_referencia=item.get("sinapi_unidade_referencia"),
+            sinapi_preco_referencia=item.get("sinapi_preco_referencia"),
+            sinapi_mes_referencia=item.get("sinapi_mes_referencia"),
+            observacoes=item.get("observacoes"),
+            laura_preco_referencia=item.get("laura_preco_referencia"),
+            laura_data_referencia=item.get("laura_data_referencia"),
+            laura_fornecedor_referencia=item.get("laura_fornecedor_referencia"),
+            laura_origem_referencia=item.get("laura_origem_referencia"),
+            laura_grau_confianca_referencia=item.get("laura_grau_confianca_referencia"),
+        )
+    ctx.user_data["aguardando"] = None
+    ctx.user_data.pop("lista_itens", None)
+    ctx.user_data.pop("lista_ggv", None)
+    n = len(itens_validos)
+    await query.edit_message_text(f"✅ Lista de Compras da Obra {ggv} salva — {n} ite{'m' if n == 1 else 'ns'}.")
 
 async def _cb_lc_fechar(query, ctx, partes):
     ctx.user_data["aguardando"] = None
     ctx.user_data.pop("lista_ggv_preselecionada", None)
+    ctx.user_data.pop("lista_itens", None)
+    ctx.user_data.pop("lista_ggv", None)
+    ctx.user_data.pop("lista_item_editando", None)
     await query.edit_message_text("Fechado.")
 
 def _itens_lista_materiais(dados):
@@ -3271,9 +3543,11 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.user_data.pop("lista_ggv_preselecionada", None)
         await update.message.reply_text("Interpretando...")
         itens = await _interpretar_lista_arquivo(bytes(conteudo), mime)
+        ctx.user_data["lista_itens"] = itens
+        ctx.user_data["lista_ggv"] = ggv
         await update.message.reply_text(
-            _texto_itens_interpretados(itens, ggv), parse_mode="HTML",
-            reply_markup=_teclado_lista_interpretada(ggv)
+            _texto_lista_conferencia(itens, ggv), parse_mode="HTML",
+            reply_markup=_teclado_lista_conferencia(ggv)
         )
         return
 
@@ -3569,15 +3843,39 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ctx.user_data["aguardando"] = None
             await update.message.reply_text("Contexto perdido. Envie o código da obra novamente.")
 
-    elif aguardando in ("lista_conteudo", "lista_editar_itens"):
+    elif aguardando == "lista_conteudo":
         ggv = ctx.user_data.get("lista_ggv_preselecionada")
         ctx.user_data["aguardando"] = None
         ctx.user_data.pop("lista_ggv_preselecionada", None)
         await update.message.reply_text("Interpretando...")
         itens = await _interpretar_lista_texto(texto)
+        ctx.user_data["lista_itens"] = itens
+        ctx.user_data["lista_ggv"] = ggv
         await update.message.reply_text(
-            _texto_itens_interpretados(itens, ggv), parse_mode="HTML",
-            reply_markup=_teclado_lista_interpretada(ggv)
+            _texto_lista_conferencia(itens, ggv), parse_mode="HTML",
+            reply_markup=_teclado_lista_conferencia(ggv)
+        )
+
+    elif aguardando == "lista_editar_item":
+        indice = ctx.user_data.get("lista_item_editando")
+        itens = ctx.user_data.get("lista_itens") or []
+        ctx.user_data["aguardando"] = None
+        ctx.user_data.pop("lista_item_editando", None)
+        if not indice or not (1 <= indice <= len(itens)):
+            await update.message.reply_text("Contexto perdido. Envie /lista novamente.")
+            return
+        await update.message.reply_text("Interpretando...")
+        novos = await _interpretar_lista_texto(texto)
+        novo_item = next((it for it in novos if isinstance(it, dict)), novos[0] if novos else None)
+        if novo_item is None:
+            await update.message.reply_text("Não consegui interpretar. Tente novamente.")
+            return
+        itens[indice - 1] = novo_item
+        ctx.user_data["lista_itens"] = itens
+        ggv = ctx.user_data.get("lista_ggv")
+        await update.message.reply_text(
+            _texto_lista_conferencia(itens, ggv), parse_mode="HTML",
+            reply_markup=_teclado_lista_conferencia(ggv)
         )
 
 async def _cb_ok(query, ctx, partes):
@@ -3672,9 +3970,11 @@ async def _cb_sel_tipo_inicial(query, ctx, partes):
         conteudo_lista = Path(caminho_doc).read_bytes()
         await query.edit_message_text("Interpretando...")
         itens = await _interpretar_lista_arquivo(conteudo_lista, mime_inf_lista)
+        ctx.user_data["lista_itens"] = itens
+        ctx.user_data["lista_ggv"] = None
         await query.edit_message_text(
-            _texto_itens_interpretados(itens, None), parse_mode="HTML",
-            reply_markup=_teclado_lista_interpretada(None)
+            _texto_lista_conferencia(itens, None), parse_mode="HTML",
+            reply_markup=_teclado_lista_conferencia(None)
         )
         return
 
@@ -4631,6 +4931,11 @@ _CB_DISPATCH = {
     "menu_ajuda": _cb_menu_ajuda,
     "menu_nova_obra": _cb_menu_nova_obra,
     "lc_editar": _cb_lc_editar,
+    "lc_item": _cb_lc_item,
+    "lc_corrigir": _cb_lc_corrigir,
+    "lc_tecnico": _cb_lc_tecnico,
+    "lc_voltar": _cb_lc_voltar,
+    "lc_gerar": _cb_lc_gerar,
     "lc_fechar": _cb_lc_fechar,
 }
 

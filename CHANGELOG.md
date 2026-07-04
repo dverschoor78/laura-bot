@@ -15,12 +15,14 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > sozinhas com o uso do dia a dia não entram aqui (ex: fechar um pedido parcelado esperando
 > pagamento). Ver Dívida Técnica em `docs/ROADMAP.md`.
 
-1. Camadas 5-6 do módulo de Compras — edição item a item, gravação final confirmada
-2. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
-3. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
-4. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
-5. Acesso via Claude Code Remote do celular — ideia registrada, servidor Proxmox em casa (Eric)
-6. Persistir os 9 índices de `data/laura.db` em código (hoje só existem no banco vivo — um `init_db()`
+1. Edição campo a campo da Lista de Compras (escolher item → escolher campo → digitar valor) —
+   hoje a edição é do item inteiro, por decisão explícita de simplicidade
+2. Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento
+3. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
+4. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
+5. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
+6. Acesso via Claude Code Remote do celular — ideia registrada, servidor Proxmox em casa (Eric)
+7. Persistir os 9 índices de `data/laura.db` em código (hoje só existem no banco vivo — um `init_db()`
    contra um banco novo não os recria; ver Dívida Técnica em `docs/ROADMAP.md`)
 
 > Fiadas próprias, não priorizadas ainda: "Motor de Interpretação e Classificação de Documentos"
@@ -28,11 +30,67 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > Produto antes da Correspondência SINAPI" (atributos técnicos completos antes de casar com
 > SINAPI — deliberadamente não persistido ainda, ver Visão de Longo Prazo em `docs/ROADMAP.md`).
 
-> Concluído desde a última revisão: Camada 2 do módulo de Compras (candidatos SINAPI, grau de
-> confiança, equivalência de unidade) — ver entrada abaixo; endereço da Lista de Compras
-> resolvido (herda da obra, não vira atributo novo); Fiadas 1/2 de 2026-07-03 substituídas pelo
-> redesenho em camadas de 2026-07-04 (Camada 1 concluída, depois reescrita pra saída JSON
-> estruturada no mesmo dia) — ver `docs/ROADMAP.md`.
+> Concluído desde a última revisão: redesenho de experiência em 3 níveis + gravação real da
+> Lista de Compras (2026-07-04) — ver entrada abaixo; Camada 3 com filtro obrigatório de
+> unidade igual; Camada 4 (tela de conferência) substituída pelo redesenho de 3 níveis no
+> mesmo dia.
+
+---
+
+## [Redesenho de experiência em 3 níveis + gravação real] — 2026-07-04 (mesmo dia)
+
+### Motivação
+
+"A tela de conferência está muito técnica. Ela mostra praticamente tudo o que a Laura sabe ao
+mesmo tempo. Mas o objetivo dessa tela não é explicar como a Laura chegou na resposta. O
+objetivo é eu conferir rapidamente se a Lista de Compras está correta." Proposta de UX
+apresentada e validada com o Dennis antes de qualquer código (mockups das 3 telas). Princípio
+adotado: "A Laura apresenta primeiro a informação necessária para a decisão. Os detalhes
+técnicos aparecem apenas quando solicitados."
+
+### Adicionado
+
+- **Nível 1 — Tela de Conferência** (`_texto_lista_conferencia`/`_teclado_lista_conferencia`):
+  nova tela principal; cabeçalho com obra+endereço (destaque ⚠️ quando faltando); item em 3
+  linhas (descrição, quantidade+unidade+fabricante, referência já convertida pra unidade
+  comercial); indicador 🟢/🟡/🔴 por item; alertas agrupados por tipo no rodapé (sem repetir
+  por item); resumo (itens, referência total estimada, contagem de alertas)
+- **Nível 2 — Edição** (`_texto_item_detalhe`, `_teclado_item_picker`, `_teclado_item_detalhe`):
+  ao escolher um item aparecem todos os campos (fabricante, código, embalagem, SINAPI, última
+  compra, observações). Edição do item inteiro como texto livre, reinterpretado pelas
+  Camadas 1+2+3 — não campo a campo (decisão explícita: "prefiro uma solução simples
+  funcionando do que uma edição extremamente refinada agora")
+- **Nível 3 — Análise Técnica** (`_texto_analise_tecnica`, renomeada de
+  `_texto_itens_interpretados`): a tela técnica completa que já existia, agora nível opcional
+  acessado por botão
+- `_melhor_referencia_preco()`: prioridade 1) última compra própria, 2) referência própria
+  consolidada (não existe ainda), 3) SINAPI convertido pra unidade comercial, 4) nenhuma —
+  Nível 1 mostra só o valor final, nunca a origem
+- `_avaliar_item()`: classifica 🔴 (impede boa cotação — quantidade/unidade desconhecida, item
+  não interpretado), 🟡 (merece conferência mas não impede — confiança média/baixa,
+  correspondência aproximada, observação da IA, ou **sem referência de preço ainda** — ajuste
+  do Dennis em relação à minha proposta original: "se a Laura nunca viu aquele item, isso não
+  impede pedir orçamento, só significa que ela ainda não possui conhecimento suficiente"), 🟢
+  (tudo consistente)
+- Gravação real da Lista de Compras (`_cb_lc_gerar`): usa `criar_ou_buscar_lista_aberta()` +
+  `adicionar_item()` (já existiam, nunca conectados ao fluxo de interpretação); bloqueia com
+  mensagem clara se a obra não estiver definida; ainda não gera Pedido de Compra nem cria
+  vínculo com orçamento — só a Lista de Compras passa a existir de verdade no banco
+- `compras/lista.py`: colunas `fabricante`/`codigo` em `lista_compra_itens` (achado no
+  processo — nunca existiam, embora a Camada 1 já extraia esses dados desde o início)
+- Novos callbacks: `lc_item`, `lc_corrigir`, `lc_tecnico`, `lc_voltar`, `lc_gerar`; `lc_editar`
+  repurpose (agora abre o seletor de item, não mais reescreve a lista inteira)
+- Estado de sessão `ctx.user_data["lista_itens"]`/`["lista_ggv"]` — guarda a lista de trabalho
+  entre as telas (não é persistência; gravação de verdade só no clique em "Gerar Lista de
+  Compras")
+
+### Testado
+
+3 níveis renderizados com a foto real de 8 itens — soma da referência estimada conferida
+manualmente (bate exato); item não interpretado (fallback string) não quebra a tela; gravação
+bloqueada sem obra e bem-sucedida com obra (todos os campos, incluindo fabricante,
+persistidos corretamente); fluxo de seleção → detalhe → correção de item testado com objetos
+simulados. Regressão do fluxo orçamento → pedido confirmada.
 
 ---
 

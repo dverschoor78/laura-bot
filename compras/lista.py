@@ -60,6 +60,15 @@ _COLUNAS_SNAPSHOT = (
     "laura_grau_confianca_referencia TEXT",
 )
 
+# Identidade comercial do item — mesma categoria de descricao/unidade/quantidade, não
+# "referência externa" como as colunas de snapshot acima. Adicionadas 2026-07-04 junto com a
+# primeira gravação real de Lista de Compras: sem elas, fabricante e código comercial (já
+# extraídos pela Camada 1 desde o início) seriam descartados silenciosamente ao salvar.
+_COLUNAS_ITEM = (
+    "fabricante TEXT",
+    "codigo TEXT",
+)
+
 
 def init_db_compras(db_path):
     with sqlite3.connect(db_path) as con:
@@ -78,13 +87,14 @@ def init_db_compras(db_path):
                 descricao     TEXT NOT NULL,
                 unidade       TEXT,
                 quantidade    REAL,
+                {", ".join(_COLUNAS_ITEM)},
                 {", ".join(_COLUNAS_SNAPSHOT)},
                 status        TEXT NOT NULL DEFAULT 'pendente',
                 criado_em     TEXT DEFAULT (datetime('now','localtime'))
             )
         """)
         # ALTER seguro — cobre bancos onde a tabela já existia antes destas colunas
-        for col in _COLUNAS_SNAPSHOT:
+        for col in _COLUNAS_ITEM + _COLUNAS_SNAPSHOT:
             try:
                 con.execute(f"ALTER TABLE lista_compra_itens ADD COLUMN {col}")
             except sqlite3.OperationalError:
@@ -163,6 +173,7 @@ def sugerir_itens(db_path, ggv, limite=8):
 
 def adicionar_item(
     db_path, lista_id, descricao, unidade="", quantidade=None,
+    fabricante=None, codigo=None,
     sinapi_codigo=None, sinapi_descricao_referencia=None, sinapi_unidade_referencia=None,
     sinapi_preco_referencia=None, sinapi_mes_referencia=None,
     observacoes=None,
@@ -178,14 +189,15 @@ def adicionar_item(
     with sqlite3.connect(db_path) as con:
         cur = con.execute(
             """INSERT INTO lista_compra_itens (
-                lista_id, descricao, unidade, quantidade, status,
+                lista_id, descricao, unidade, quantidade, fabricante, codigo, status,
                 sinapi_codigo, sinapi_descricao_referencia, sinapi_unidade_referencia,
                 sinapi_preco_referencia, sinapi_mes_referencia, observacoes,
                 laura_preco_referencia, laura_data_referencia, laura_fornecedor_referencia,
                 laura_origem_referencia, laura_grau_confianca_referencia
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                lista_id, descricao.strip(), (unidade or "").strip(), quantidade, StatusItem.PENDENTE.value,
+                lista_id, descricao.strip(), (unidade or "").strip(), quantidade, fabricante, codigo,
+                StatusItem.PENDENTE.value,
                 sinapi_codigo, sinapi_descricao_referencia, sinapi_unidade_referencia,
                 sinapi_preco_referencia, sinapi_mes_referencia, observacoes,
                 laura_preco_referencia, laura_data_referencia, laura_fornecedor_referencia,
