@@ -271,6 +271,16 @@ e observação própria; efeito colateral positivo — porcelanato/revestimento 
 mesma lista casaram certo nos dois (Alta confiança), o falso positivo de categoria adjacente
 visto na Camada 2 original não se repetiu.
 
+**Mesmo dia, investigação — "sc" e "6,0" legíveis, Laura não lia:** Dennis reportou a linha do
+Rejunte (unidade "sc", quantidade "6,0") bem legível na imagem retornando errada. Causa raiz:
+a foto real tem só 631×161 pixels — Telegram compacta agressivamente uploads tipo "foto" (o
+app reamplia na tela, mascarando a perda real). Confirmado repetindo a extração 3x na mesma
+imagem: respostas diferentes pras mesmas duas linhas, batendo com limite de pixels, não falha
+de prompt. Adicionada checagem de plausibilidade em `PROMPT_INTERPRETAR_LISTA` (releitura
+quando a unidade não faz sentido técnico pro produto) — ajudou parcialmente numa rodada, mas
+não resolve resolução insuficiente. Documentado em `docs/ARQUITETURA.md`: mitigação sem
+código é enviar a lista como arquivo/documento no Telegram, não como foto.
+
 **Mesmo dia, Camada 3 — referência de último preço pago (própria Laura):**
 `_referencia_laura_item()` reaproveita `procurar_item()` (`financeiro/consultas.py`, já
 existia, sem chamada de IA) — tenta a descrição inteira primeiro, cai pra palavra

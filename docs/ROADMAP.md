@@ -246,6 +246,20 @@ lista — o par porcelanato/revestimento cerâmico (que antes gerava falso posit
 adjacente) casou certo nos dois, Alta confiança nos dois, porque a lista contendo os dois
 juntos ajudou a distinguir um do outro. Regressão do fluxo orçamento → pedido confirmada.
 
+**Investigação — "sc" e "6,0" claramente legíveis, Laura não lia"** *(2026-07-04, mesmo dia)*
+— Dennis reportou a linha do Rejunte com unidade "sc" e quantidade "6,0" bem legíveis na
+imagem, mas a Laura retornando `null`/valor errado. Causa raiz encontrada: a foto real
+enviada tem só **631×161 pixels** (Telegram compacta agressivamente uploads tipo "foto",
+mesmo parecendo nítida no app) — testado repetindo a mesma extração 3x na mesma imagem e
+obtendo respostas diferentes pras mesmas duas linhas problemáticas, confirmando que é limite
+de pixels disponíveis, não falha de lógica. `PROMPT_INTERPRETAR_LISTA` ganhou uma checagem de
+plausibilidade (se a unidade lida não faz sentido técnico pro produto — ex: rejunte por metro
+linear — releia a coluna antes de decidir) que ajudou parcialmente numa das rodadas de teste,
+mas o problema de fundo é a resolução da imagem, não o prompt. Documentado em
+`docs/ARQUITETURA.md` (Limitações Conhecidas) com a mitigação sem código: enviar a lista como
+arquivo/documento no Telegram, não como foto — `receber_arquivo()` já trata os dois caminhos,
+e documento preserva resolução original.
+
 **Camada 3 — Referência de último preço pago (própria Laura)** ✓ *(2026-07-04, mesmo dia)*
 
 Reaproveita `procurar_item()` (`financeiro/consultas.py`), sem chamada de IA — busca

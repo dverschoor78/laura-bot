@@ -410,6 +410,22 @@ Referências para navegação no arquivo (4.365 linhas):
   nasceram de suposições de formato fixo. Catálogo completo e lição geral em
   `docs/LICOES_EXTRACAO.md` — ler antes de mexer em PROMPT ou qualquer regex de extração.
 
+- **Fotos enviadas como "photo" no Telegram chegam com resolução baixa demais pra tabela
+  densa** — descoberto 2026-07-04: uma foto real de lista de materiais (8 itens) chegou ao bot
+  com apenas **631×161 pixels**, mesmo parecendo legível no app do Telegram (o app reamplia
+  pra exibição). Nessa resolução, colunas próximas (ex: "m2" vs "m", "sc" vs valor da linha
+  vizinha) ficam genuinamente ambíguas pro Claude — confirmado repetindo a mesma extração 3x
+  e obtendo respostas diferentes a cada vez pras mesmas duas linhas problemáticas. Não é bug
+  de prompt: `receber_arquivo()` já baixa exatamente o que o Telegram fornece
+  (`update.message.photo[-1].get_file()`, sem recompressão própria) — a perda de qualidade é
+  do Telegram, que compacta agressivamente uploads do tipo "foto" (mais ainda em imagens
+  simples tipo tabela em fundo branco). **Mitigação disponível sem código**: enviar a lista
+  como arquivo/documento no Telegram (anexo, não como foto) — `receber_arquivo()` já trata
+  esse caminho via `update.message.document`, que preserva a resolução original sem
+  compressão. `PROMPT_INTERPRETAR_LISTA` ganhou uma checagem de plausibilidade (releitura
+  quando a unidade lida não faz sentido técnico pro produto) que ajuda parcialmente, mas não
+  substitui ter pixels suficientes pra ler a tabela.
+
 ---
 
 ## 7. Decisões Arquiteturais Registradas

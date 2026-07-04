@@ -2731,6 +2731,14 @@ REGRAS — nunca violar, mesmo sob a tentação de "completar" um campo:
   objetivo com base no que pareceria mais provável.
 - Nunca invente ou escreva preço, mesmo que consiga estimar um valor de mercado — preço não
   existe nesse tipo de documento.
+- Depois de ler a unidade de uma linha, verifique se ela faz sentido técnico pro produto
+  daquela linha (ex: cimento/argamassa/rejunte/cal são vendidos por peso — SC, KG — não por
+  metro linear; porcelanato/revestimento/forro são vendidos por área — M2 — não por metro
+  linear). Se a unidade lida não fizer sentido técnico pro produto, releia a coluna da tabela
+  especificamente para essa linha antes de decidir — é mais provável ter confundido com a
+  linha vizinha (erro de alinhamento de coluna) do que a obra realmente comprar rejunte por
+  metro. Só use `null` se a releitura confirmar que a coluna genuinamente não dá pra ler com
+  confiança, não porque o valor pareceu estranho à primeira vista.
 
 ANTES DE CONCLUIR QUE UMA INFORMAÇÃO NÃO EXISTE, tente compreender tecnicamente o produto e
 separe duas coisas diferentes:

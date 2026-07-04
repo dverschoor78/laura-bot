@@ -37,6 +37,31 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Investigação — resolução de foto no Telegram] — 2026-07-04 (mesmo dia)
+
+### Motivação
+
+Dennis reportou uma linha (Rejunte, unidade "sc", quantidade "6,0") claramente legível na
+imagem que a Laura retornava `null`/errada.
+
+### Corrigido
+
+- `PROMPT_INTERPRETAR_LISTA`: nova checagem de plausibilidade — se a unidade lida não fizer
+  sentido técnico pro produto da linha (ex: metro linear pra rejunte), releia a coluna da
+  tabela pra essa linha específica antes de decidir, em vez de aceitar o valor incoerente
+
+### Diagnosticado, não é bug de código
+
+A foto real enviada tem **631×161 pixels** — Telegram compacta agressivamente uploads tipo
+"foto" (o app reamplia pra exibição, mascarando a perda). Confirmado repetindo a mesma
+extração 3x na mesma imagem: respostas diferentes pras mesmas duas linhas problemáticas,
+consistente com limite de pixels disponíveis, não falha de lógica de prompt. `receber_arquivo()`
+já baixa exatamente o que o Telegram fornece, sem recompressão própria. Documentado em
+`docs/ARQUITETURA.md`: mitigação sem código é enviar a lista como arquivo/documento (não
+foto) no Telegram — já suportado, preserva resolução original.
+
+---
+
 ## [Camadas 1 e 2 — Compreensão de produto e contexto de lista] — 2026-07-04 (mesmo dia)
 
 ### Motivação
