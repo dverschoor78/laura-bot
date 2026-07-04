@@ -2706,6 +2706,15 @@ PROCEDIMENTO — siga esta ordem antes de responder:
    quantidade SEPARADAMENTE — nunca misture uma com a outra.
 4. Só depois de separar as colunas, interprete semanticamente o texto de cada campo (ex:
    normalizar "sc" como unidade, identificar o fabricante dentro da descrição).
+5. Depois de identificar todos os itens, olhe a lista COMO UM TODO antes de finalizar a
+   interpretação de cada um. Os itens juntos costumam indicar a etapa da obra (ex: cimento +
+   argamassa + rejunte + porcelanato + revestimento cerâmico = revestimentos e acabamentos;
+   tubo + conexão + registro + joelho + luva = instalação hidráulica; eletroduto + cabo +
+   caixa + disjuntor = instalação elétrica). Um engenheiro lendo essa lista não interpreta
+   cada item isolado — ele entende primeiro o contexto da compra e só depois cada material
+   dentro desse contexto. Use esse contexto coletivo pra reduzir ambiguidade (ex: numa lista
+   de revestimentos, "argamassa" é mais provavelmente argamassa colante do que reboco; um
+   "rejunte" nessa mesma lista é rejunte cimentício de junta).
 
 REGRAS — nunca violar, mesmo sob a tentação de "completar" um campo:
 - Quantidade e unidade vêm da coluna correspondente da tabela. Se não for possível ler com
@@ -2723,16 +2732,44 @@ REGRAS — nunca violar, mesmo sob a tentação de "completar" um campo:
 - Nunca invente ou escreva preço, mesmo que consiga estimar um valor de mercado — preço não
   existe nesse tipo de documento.
 
+ANTES DE CONCLUIR QUE UMA INFORMAÇÃO NÃO EXISTE, tente compreender tecnicamente o produto e
+separe duas coisas diferentes:
+- características PERMANENTES do produto (embalagem/tamanho de uma unidade de venda,
+  fabricante, dimensões) — normalmente estão dentro do próprio nome/descrição do produto
+  (ex: "Rejunte Cinza Ártico 5kg" → a embalagem de uma unidade é 5 kg, isso está na descrição
+  mesmo sem tabela legível);
+- características DA COMPRA (quantidade de unidades pedidas, unidade comercial de compra,
+  preço) — essas só vêm da tabela/documento, nunca invente.
+
+Preencha "embalagem" sempre que a descrição indicar claramente o tamanho de UMA unidade de
+venda (ex: "20 KG", "5 KG", "18 L"), mesmo que "quantidade"/"unidade" fiquem `null` por falta
+de leitura confiável na tabela — "5kg" no nome do produto quase sempre é o tamanho da
+embalagem, não a quantidade comprada. Nunca confunda as duas coisas: identificar a embalagem
+não significa que você pode inferir a quantidade pedida a partir dela.
+
+Preencha também "termo_busca_sinapi": uma descrição curta, genérica e técnica do produto (o
+que ele É e para que SERVE — categoria, função, aplicação, material), sem marca e sem nome
+comercial/código do fabricante, usada só pra buscar a referência SINAPI depois. Nomes
+comerciais não descrevem a função técnica do produto (ex: "Argamassa EXT 10 EM 1" é só o nome
+comercial da Hipermassa — numa lista de revestimentos, contendo porcelanato/revestimento
+cerâmico, o termo técnico correto é algo como "argamassa colante para porcelanato área
+externa", não "argamassa ext 10 em 1"). Use o contexto da lista inteira (passo 5) pra inferir
+isso com mais segurança. Se a própria descrição já for genérica o suficiente (ex: "Areia média
+lavada"), repita algo equivalente sem marca.
+
 Responda APENAS com um array JSON, sem markdown, sem texto antes ou depois, neste formato:
 [
   {"numero": 1, "descricao": "Cimento CP II 50 kg", "fabricante": "Cauê", "codigo": null,
-   "unidade": "SC", "quantidade": 250.0, "observacoes": null}
+   "unidade": "SC", "quantidade": 250.0, "embalagem": "50 KG",
+   "termo_busca_sinapi": "cimento portland composto", "observacoes": null}
 ]
 
 Campos: "numero" (inteiro — número do item na lista original, ou null se não houver
 numeração), "descricao" (string, obrigatório), "fabricante" (string ou null), "codigo"
-(string ou null), "unidade" (string ou null), "quantidade" (número ou null), "observacoes"
-(string ou null).
+(string ou null), "unidade" (string ou null), "quantidade" (número ou null), "embalagem"
+(string ou null — tamanho de UMA unidade de venda, quando identificável na descrição),
+"termo_busca_sinapi" (string ou null — descrição técnica genérica pra busca SINAPI),
+"observacoes" (string ou null).
 """
 
 async def _interpretar_lista_texto(texto):
@@ -2812,12 +2849,27 @@ Para cada item da lista abaixo, você recebeu candidatos de insumos SINAPI (base
 oficial da construção civil) encontrados por busca de palavra-chave — a busca é só um filtro
 inicial, pode trazer candidato errado ou nenhum candidato certo.
 
+Antes de decidir qualquer item, olhe a LISTA INTEIRA e identifique que etapa de obra ela
+representa como conjunto (ex: cimento + argamassa + rejunte + porcelanato + revestimento
+cerâmico = revestimentos e acabamentos; tubo + conexão + registro + joelho + luva = instalação
+hidráulica; eletroduto + cabo + caixa + disjuntor = instalação elétrica). Um engenheiro lendo
+essa lista não decide item por item isolado — ele entende o contexto da compra primeiro. Use
+esse contexto pra reduzir ambiguidade em cada item (ex: numa lista de revestimentos, uma
+"argamassa" é mais provavelmente argamassa colante pra assentamento do que reboco).
+
+Cada item pode trazer "termo_tecnico" (a função/categoria do produto já inferida na etapa
+anterior, sem marca nem nome comercial) — quando presente, é o sinal mais confiável do que o
+produto realmente É e PARA QUE SERVE; o nome comercial ("descricao") pode ser só o nome de
+venda do fabricante (ex: "Argamassa EXT 10 EM 1" da Hipermassa é argamassa colante — o nome
+comercial não descreve isso). Nomes comerciais e códigos de produto NUNCA aparecem no SINAPI
+(base genérica, sem marca) — não busque semelhança textual com eles, busque semelhança
+funcional com o que o produto faz.
+
 Antes de decidir, entenda o produto de verdade — não compare só a descrição como texto.
 Considere internamente: o que é este produto, qual sua categoria, é material ou ferramenta,
 qual a aplicação (piso, parede, teto, estrutura...), qual o material predominante, quais as
-dimensões, qual a embalagem/tamanho unitário de venda, quais características técnicas aparecem
-na descrição. Você não precisa escrever essas respostas — use-as só pra decidir melhor. SINAPI
-é referência genérica de material, sem marca — ignore a marca do item ao comparar.
+dimensões, quais características técnicas aparecem na descrição. Você não precisa escrever
+essas respostas — use-as só pra decidir melhor.
 
 Escolha, para cada item, o candidato que representa exatamente o MESMO produto (mesma
 categoria, aplicação e especificação técnica relevante). Preste atenção especial a categorias
@@ -2840,11 +2892,13 @@ conversão a fazer: deixe preco_equivalente_unidade_comercial como `null` (o pre
 já está direto na unidade comercial, sem precisar de equivalência).
 
 Se a unidade comercial for DIFERENTE da unidade do candidato (ex: item vendido em SC/saco,
-SINAPI referencia por KG) e você conseguir determinar com segurança o peso/volume de UMA
-unidade de venda a partir da própria descrição do item (ex: "50 kg" no nome do produto indica
-que 1 SC pesa 50 kg), calcule o INVERSO: o preço de referência do SINAPI convertido para a
-unidade comercial do item (preço por SC, não quantidade em KG). Exemplo: SINAPI = R$ 0,80/KG,
-embalagem = 50 kg/SC → preço_equivalente_unidade_comercial = 40.00 (R$ por SC).
+SINAPI referencia por KG), use o campo "embalagem" do item, se vier preenchido — já é o
+tamanho de UMA unidade de venda, extraído na etapa anterior (ex: embalagem "50 KG" pra um item
+vendido em SC significa que 1 SC pesa 50 kg). Se "embalagem" vier `null`, tente determinar o
+mesmo dado a partir da própria descrição do item, só quando tiver certeza. Calcule o INVERSO:
+o preço de referência do SINAPI convertido para a unidade comercial do item (preço por SC, não
+quantidade em KG). Exemplo: SINAPI = R$ 0,80/KG, embalagem = 50 kg/SC →
+preço_equivalente_unidade_comercial = 40.00 (R$ por SC).
 
 O fator de conversão vem SEMPRE do tamanho de UMA embalagem/unidade de venda (quanto pesa ou
 mede uma única SC, LT, CX...), nunca da quantidade pedida no item — quantidade pedida é
@@ -2872,12 +2926,19 @@ async def _adicionar_correspondencia_sinapi(itens):
     for item in itens:
         if not isinstance(item, dict):
             continue
-        candidatos = _candidatos_sinapi(item["descricao"])
+        # Busca pelo termo técnico (categoria/função/aplicação, sem marca nem nome comercial)
+        # quando a Camada 1 conseguiu inferir um — nome comercial (ex: "Argamassa EXT 10 EM 1")
+        # raramente contém vocabulário que bate com a base SINAPI. Cai pra descrição crua
+        # quando não há termo técnico inferido.
+        termo_busca = item.get("termo_busca_sinapi") or item["descricao"]
+        candidatos = _candidatos_sinapi(termo_busca)
         candidatos_por_numero[item.get("numero")] = candidatos
         if candidatos:
             itens_para_claude.append({
                 "numero": item.get("numero"),
                 "descricao": item["descricao"],
+                "termo_tecnico": item.get("termo_busca_sinapi"),
+                "embalagem": item.get("embalagem"),
                 "unidade_comercial": item.get("unidade"),
                 "candidatos_sinapi": [
                     {"codigo": c["codigo"], "descricao": c["descricao"], "unidade": c["unidade"],
@@ -3008,13 +3069,18 @@ def _texto_itens_interpretados(itens, ggv):
                 partes.append(f"(cód. {item['codigo']})")
             linha = " ".join(partes)
 
-            qtde, und = item.get("quantidade"), item.get("unidade")
+            qtde, und, embalagem = item.get("quantidade"), item.get("unidade"), item.get("embalagem")
             if qtde is not None and und:
                 linha += f" — {_fmt_qtde_segura(qtde)} {und}"
             elif qtde is not None:
                 linha += f" — {_fmt_qtde_segura(qtde)} (unidade não identificada)"
             elif und:
                 linha += f" — quantidade não identificada ({und})"
+            elif embalagem:
+                # Não achar a quantidade pedida não é o mesmo que não saber nada do produto —
+                # a embalagem (tamanho de uma unidade de venda) já é uma informação útil por si
+                # só, mesmo sem tabela legível o bastante pra dizer quantas foram compradas.
+                linha += f" — embalagem {embalagem}, quantidade comercial não identificada"
             else:
                 linha += " — quantidade e unidade não identificadas"
 
@@ -3097,6 +3163,8 @@ def _itens_lista_materiais(dados):
                 "codigo": item.get("codigo") or None,
                 "unidade": item.get("unidade") or None,
                 "quantidade": item.get("quantidade"),
+                "embalagem": item.get("embalagem") or None,
+                "termo_busca_sinapi": item.get("termo_busca_sinapi") or None,
                 "observacoes": item.get("observacoes") or None,
             })
         return resultado

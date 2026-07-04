@@ -251,6 +251,26 @@ unidades iguais" após ver dois itens (Forro PVC, Revestimento Cerâmico) marcad
 unidade); o bug estava só na exibição, que lia esse `null` como "não consegui calcular" em
 vez de "não precisa calcular". Corrigido com `_mesma_unidade()` (ignora caixa/espaço).
 
+**Mesmo dia, compreender o produto antes de concluir ausência ou buscar por texto literal:**
+dois casos reais de falso negativo: "Argamassa EXT 10 EM 1 - 20KG" (Hipermassa) não casava no
+SINAPI porque a busca usava o nome comercial literal, que não descreve a função técnica
+(argamassa colante); "Rejunte Cinza Ártico 5kg Quartzolit" retornava "quantidade e unidade não
+identificadas" descartando a informação de embalagem (5kg) junto com a quantidade que
+realmente não dava pra ler. Terceiro ponto levantado durante a implementação: cada item
+estava sendo interpretado isoladamente, sem usar o contexto da lista inteira ("um engenheiro
+não olha item isolado, ele entende o contexto da compra primeiro"). Corrigido nos dois
+prompts, sem nova entidade: `PROMPT_INTERPRETAR_LISTA` ganhou um passo de olhar a lista como
+conjunto (indica a etapa de obra — revestimentos, hidráulica, elétrica) e dois campos novos —
+`embalagem` (tamanho de uma unidade de venda, distinto de quantidade/unidade da compra) e
+`termo_busca_sinapi` (descrição técnica genérica, sem marca, só pra buscar candidato SINAPI,
+nunca exibida). `PROMPT_ESCOLHER_SINAPI` ganhou o mesmo reforço de contexto de lista e passou
+a usar `termo_busca_sinapi`/`embalagem` quando disponíveis em vez de re-inferir do zero.
+Testado com a lista completa do Dennis: argamassa casou em Alta confiança (antes não achava
+nada buscando "ext 10 em 1"); rejunte extraiu embalagem "5 KG" com quantidade/unidade `null`
+e observação própria; efeito colateral positivo — porcelanato/revestimento cerâmico juntos na
+mesma lista casaram certo nos dois (Alta confiança), o falso positivo de categoria adjacente
+visto na Camada 2 original não se repetiu.
+
 **Mesmo dia, Camada 3 — referência de último preço pago (própria Laura):**
 `_referencia_laura_item()` reaproveita `procurar_item()` (`financeiro/consultas.py`, já
 existia, sem chamada de IA) — tenta a descrição inteira primeiro, cai pra palavra

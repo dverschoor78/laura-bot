@@ -37,6 +37,54 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Camadas 1 e 2 — Compreensão de produto e contexto de lista] — 2026-07-04 (mesmo dia)
+
+### Motivação
+
+Dois falsos negativos reais: "Argamassa EXT 10 EM 1 - 20KG" (Hipermassa) não casava com
+nenhum candidato SINAPI relevante porque a busca usava o nome comercial literalmente — "EXT 10
+EM 1" é só o nome de venda, não descreve que o produto é argamassa colante pra porcelanato em
+área externa. "Rejunte Cinza Ártico 5kg Quartzolit" retornava "quantidade e unidade não
+identificadas", descartando junto a informação de que "5kg" é a embalagem comercial do
+produto. Terceiro ponto levantado por Dennis durante a implementação: os itens estavam sendo
+interpretados isoladamente, sem o contexto da lista inteira — "um engenheiro não olha item
+isolado, ele entende o contexto da compra primeiro".
+
+### Adicionado
+
+- `PROMPT_INTERPRETAR_LISTA`: novo passo de olhar a lista inteira como conjunto antes de
+  finalizar cada item — os itens juntos indicam a etapa de obra (revestimentos, hidráulica,
+  elétrica...) e isso reduz ambiguidade individual
+- Campo `embalagem` (Camada 1): tamanho de UMA unidade de venda, inferido da própria
+  descrição, distinto de `quantidade`/`unidade` (características da compra, não do produto) —
+  preenchido mesmo quando a tabela não permite ler a quantidade pedida
+- Campo `termo_busca_sinapi` (Camada 1): descrição técnica genérica (categoria + função +
+  aplicação), sem marca nem nome comercial — usado só internamente pra buscar candidatos
+  SINAPI, nunca exibido na tela
+- `PROMPT_ESCOLHER_SINAPI`: mesmo reforço de contexto de lista; passa a considerar
+  `termo_tecnico` como sinal mais confiável que o nome comercial pra decidir a categoria do
+  produto; usa `embalagem` já extraída como fator de conversão em vez de re-inferir do zero
+
+### Alterado
+
+- `_candidatos_sinapi()` (chamada dentro de `_adicionar_correspondencia_sinapi()`): busca
+  agora por `termo_busca_sinapi` quando disponível, com fallback pra descrição crua
+- `_texto_itens_interpretados()`: quando quantidade/unidade não identificadas mas embalagem
+  sim, mostra "embalagem 5 KG, quantidade comercial não identificada" em vez do genérico
+  "quantidade e unidade não identificadas" — ausência de informação parcial não apaga a
+  informação que existe
+
+### Testado
+
+Lista completa (cimento, cal, a argamassa Hipermassa, o rejunte Quartzolit, porcelanato e
+revestimento cerâmico juntos): argamassa casou com "ARGAMASSA COLANTE AC II" em Alta
+confiança; rejunte extraiu embalagem "5 KG" com quantidade/unidade `null` e observação
+própria; efeito colateral positivo do contexto de lista — o par porcelanato/revestimento
+cerâmico (que gerava falso positivo de categoria adjacente na Camada 2 original) casou certo
+nos dois, Alta confiança. Regressão do fluxo orçamento → pedido confirmada.
+
+---
+
 ## [Camada 2 — Corrige falso "unidade diferente" (m2 vs M2)] — 2026-07-04 (mesmo dia)
 
 ### Motivação

@@ -203,6 +203,49 @@ interpretava esse `null` como "não consegui calcular" em vez de "não precisa c
 Corrigido com `_mesma_unidade(a, b)` (compara ignorando caixa e espaço nas pontas), usado na
 única checagem de igualdade de unidade que existia no código.
 
+**Compreender o produto antes de concluir ausência ou buscar por texto literal** ✓
+*(2026-07-04, mesmo dia)* — Dennis trouxe dois casos reais de falso negativo:
+
+1. **"Argamassa EXT 10 EM 1 - 20KG" (Hipermassa)** não casava bem no SINAPI porque a busca
+   usava a descrição comercial literalmente ("EXT 10 EM 1" é só o nome de venda do produto,
+   não descreve sua função — argamassa colante pra porcelanato em área externa). "A descrição
+   comercial é um meio de identificação, não o significado do produto."
+2. **"Rejunte Cinza Ártico 5kg Quartzolit"** retornava "quantidade e unidade não
+   identificadas" quando na verdade "5kg" quase certamente é o tamanho da embalagem comercial
+   do produto, não a quantidade comprada — informação útil que estava sendo descartada junto
+   com a quantidade que de fato não dava pra ler.
+
+Terceiro ponto, chegado durante a implementação: **cada item estava sendo interpretado
+isoladamente.** "A Laura não deve interpretar apenas o item. Ela deve interpretar também o
+conjunto dos itens... Isso é muito parecido com a forma como um engenheiro faz a leitura de
+uma lista: ele não olha um item isolado, ele entende primeiro o contexto da compra."
+
+Implementado nos dois prompts (Camada 1 e Camada 2), sem criar nenhuma entidade nova:
+
+- **Contexto da lista inteira**: novo passo no `PROMPT_INTERPRETAR_LISTA` (e reforço no
+  `PROMPT_ESCOLHER_SINAPI`, que já recebe a lista inteira numa única chamada) pra olhar os
+  itens como conjunto antes de decidir cada um — os itens juntos indicam a etapa de obra
+  (revestimentos, hidráulica, elétrica...) e isso reduz ambiguidade individual
+- **Campo novo `embalagem`**: tamanho de UMA unidade de venda, inferido da própria descrição
+  (ex: "5 KG"), sempre que identificável — mesmo quando `quantidade`/`unidade` (característica
+  da compra, não do produto) ficam `null` por falta de leitura confiável na tabela. As duas
+  coisas nunca se confundem: saber a embalagem não autoriza inventar a quantidade
+- **Campo novo `termo_busca_sinapi`**: descrição técnica genérica (categoria + função +
+  aplicação), sem marca nem nome comercial, inferida usando o contexto da lista — usada só
+  internamente pra buscar candidatos SINAPI (`_candidatos_sinapi()` passou a buscar por esse
+  termo, com fallback pra descrição crua quando não inferido); nunca aparece na tela
+- `embalagem` também reaproveitado na Camada 2: quando presente, vira o fator de conversão do
+  preço equivalente direto, sem o Claude precisar re-inferir do zero a cada chamada
+
+**Testado** com a lista completa do Dennis (cimento, cal, a argamassa Hipermassa, o rejunte
+Quartzolit, porcelanato e revestimento cerâmico juntos): argamassa casou com "ARGAMASSA
+COLANTE AC II" em Alta confiança (antes buscava por "ext 10 em 1" e não achava nada
+relevante); rejunte extraiu embalagem "5 KG" com quantidade/unidade corretamente `null` e
+observação própria "quantidade não especificada"; efeito colateral positivo do contexto de
+lista — o par porcelanato/revestimento cerâmico (que antes gerava falso positivo de categoria
+adjacente) casou certo nos dois, Alta confiança nos dois, porque a lista contendo os dois
+juntos ajudou a distinguir um do outro. Regressão do fluxo orçamento → pedido confirmada.
+
 **Camada 3 — Referência de último preço pago (própria Laura)** ✓ *(2026-07-04, mesmo dia)*
 
 Reaproveita `procurar_item()` (`financeiro/consultas.py`), sem chamada de IA — busca
