@@ -36,6 +36,35 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Camada 3 — Filtro obrigatório de unidade igual] — 2026-07-04 (mesmo dia)
+
+### Motivação
+
+Achado real, registrado antes como dívida técnica pendente de planejamento: "Revestimento
+Cerâmico HD 32x57,5" casava com um item histórico de bloco/tijolo cerâmico (R$0,87/BLOCOS) —
+a busca por palavra isolada ("cerâmica"/"cerâmico") não verificava se era o mesmo tipo de
+produto. Dennis definiu a regra depois de planejar: "comparar as unidades da lista e do
+pedido, estas devem ser iguais, isso não deveria mudar" — ao contrário da Camada 2 (SINAPI),
+aqui não existe conversão de unidade.
+
+### Alterado
+
+- `_referencia_laura_item(descricao, unidade)`: ganhou o parâmetro `unidade`; candidato só é
+  aceito se a unidade do pedido histórico for igual (via `_mesma_unidade()`) à unidade
+  comercial do item atual — filtro aplicado tanto na busca pela descrição inteira quanto no
+  fallback por palavra isolada. Sem a unidade do item pra comparar, retorna `None` (nenhuma
+  referência) em vez de arriscar comparar produtos diferentes
+- `_adicionar_referencia_laura()`: passa `item.get("unidade")` na chamada
+
+### Testado
+
+Revestimento Cerâmico não casa mais com BLOCOS. Efeito colateral esperado e aceito: menos
+matches no total (ex: item de teste comprado em "UND" não bate mais com o mesmo pedido em
+"SC") — precisão em troca de recall, por decisão explícita. Regressão do fluxo orçamento →
+pedido confirmada.
+
+---
+
 ## [Camada 4 — Tela de conferência editável] — 2026-07-04 (mesmo dia)
 
 ### Motivação

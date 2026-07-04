@@ -308,6 +308,23 @@ duplicar lógica entre eles (mesmo princípio de convergência da Camada 1). Est
 fica só em `ctx.user_data` (obra selecionada) — a lista de itens em si não precisa persistir
 entre telas, porque editar sempre reconstrói do zero a partir do texto novo enviado.
 
+**Camada 3 — corrigido falso positivo por palavra isolada** ✓ *(2026-07-04, mesmo dia)* —
+achado real registrado antes como dívida técnica: "Revestimento Cerâmico HD 32x57,5" casava
+com um item histórico de **bloco/tijolo cerâmico** (R$0,87/BLOCOS) via fallback de busca por
+palavra isolada ("cerâmica"/"cerâmico"), sem nenhuma verificação de que era o mesmo tipo de
+produto. Dennis pediu pra planejar antes de mexer (dado que `procurar_item()`/`itens_pedido`
+são dados de produção compartilhados com o fluxo de pedido/financeiro) e definiu a regra:
+"comparar as unidades da lista e do pedido, estas devem ser iguais, isso não deveria mudar" —
+ao contrário da Camada 2 (SINAPI), aqui **não existe conversão de unidade**, é um filtro
+obrigatório binário. Implementado em `_referencia_laura_item()`: candidato só é aceito se a
+unidade do pedido histórico for igual (via `_mesma_unidade()`, já criada pra Camada 2) à
+unidade comercial do item atual; sem a unidade do item pra comparar, não retorna referência
+nenhuma — melhor admitir ausência do que arriscar comparar produtos diferentes. Efeito
+colateral esperado e aceito: menos matches no total (ex: um Cimento de teste comprado em
+"UND" no histórico não bate mais com o mesmo item pedido em "SC"), mas nenhum falso positivo
+por coincidência de palavra. Testado: Revestimento Cerâmico não casa mais com BLOCOS;
+regressão do fluxo orçamento → pedido confirmada.
+
 **Camadas 5 e 6 — pendentes** *(não iniciadas)*
 
 1. Edição item a item (escolher item → escolher campo → digitar novo valor)
@@ -743,16 +760,6 @@ gatilho original (consultar preço de item já comprado sem ler o texto inteiro 
 - **Média — `gerar_pfm()` acumula responsabilidades**
   Grava no banco, cria lançamento e arquiva em disco (a geração do documento em si — Word — foi
   removida em 2026-07-02). Justificativa: dificulta testes e futuras extensões.
-
-- **Média — Camada 3 (referência de última compra) pode casar produto errado por palavra
-  isolada** — achado real 2026-07-04: "Revestimento Cerâmico HD 32x57,5" casou com um item
-  histórico de **bloco/tijolo cerâmico** (R$0,87/BLOCOS), porque a busca caiu no fallback de
-  palavra isolada ("cerâmica"/"cerâmico") sem nenhuma verificação de que é o mesmo tipo de
-  produto — mesma classe de problema já resolvida na Camada 2 (SINAPI), mas ainda não levada
-  pra Camada 3. Diferença importante: `procurar_item()`/`itens_pedido` são dados de produção
-  compartilhados com o fluxo de pedido/financeiro já em uso, não isolados da Lista de Compras
-  — Dennis pediu explicitamente pra **planejar antes de mexer**, não corrigir on-the-fly.
-  Não implementar nada aqui sem esse planejamento.
 
 - **Baixa — GGV02 sem `pasta_onedrive` configurada**
   Estrutura real da pasta (sem "00 Orçamentos", com "51 Obra - Materiais e serviços") não

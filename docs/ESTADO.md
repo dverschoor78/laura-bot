@@ -271,12 +271,15 @@ e observação própria; efeito colateral positivo — porcelanato/revestimento 
 mesma lista casaram certo nos dois (Alta confiança), o falso positivo de categoria adjacente
 visto na Camada 2 original não se repetiu.
 
-**Mesmo dia, achado registrado (não corrigido) — Camada 3 pode casar produto errado:**
-Dennis encontrou "Revestimento Cerâmico" casando com um item histórico de bloco/tijolo
-cerâmico (mesma classe de bug já resolvida na Camada 2, ainda não levada pra Camada 3) e
-pediu explicitamente pra **planejar antes de mexer**, já que `procurar_item()`/`itens_pedido`
-são dados de produção compartilhados com o fluxo de pedido/financeiro. Registrado em
-`docs/ROADMAP.md` (Dívida Técnica), nenhum código alterado.
+**Mesmo dia, Camada 3 — corrigido falso positivo por palavra isolada:** achado registrado
+antes como dívida técnica (Revestimento Cerâmico casando com bloco/tijolo cerâmico, mesma
+unidade de busca "cerâmica"/"cerâmico" sem verificar se era o mesmo produto). Dennis pediu
+planejamento antes de mexer, depois definiu a regra: unidade do item da lista e unidade do
+pedido histórico devem ser iguais, sem conversão (ao contrário da Camada 2/SINAPI) — "isso
+não deveria mudar". Implementado como filtro obrigatório em `_referencia_laura_item()`
+(reaproveitando `_mesma_unidade()` já criada pra Camada 2); sem a unidade do item, não
+retorna referência nenhuma. Testado: falso positivo eliminado; efeito colateral aceito de
+menos matches no total (precisão em troca de recall). Regressão confirmada.
 
 **Mesmo dia, Camada 4 — tela de conferência editável:** antes desta camada, a interpretação
 parava em texto puro, sem nenhuma ação possível depois de ler a lista. Investigado o padrão

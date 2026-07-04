@@ -3007,7 +3007,7 @@ async def _adicionar_correspondencia_sinapi(itens):
         item["sinapi_preco_equivalente"] = escolha.get("preco_equivalente_unidade_comercial")
     return itens
 
-def _referencia_laura_item(descricao):
+def _referencia_laura_item(descricao, unidade):
     """Camada 3: procura no histórico real de compras da própria Laura (itens_pedido) se algo
     parecido já foi comprado, e retorna o último preço pago como referência adicional à
     SINAPI (Princípio 5 da Política de Compras: "último preço pago" é referência de primeira
@@ -3018,13 +3018,27 @@ def _referencia_laura_item(descricao):
     diferente entre compras — ex: "Cimento CP II 50 kg" vs "Cimento CP-II 50kg" já registrado);
     cai pra busca por palavra significativa isolada se não achar nada. O grau de confiança
     (Princípio 8: toda referência declara origem e confiança) muda conforme a estratégia que
-    funcionou — nunca apresenta um achado aproximado como se fosse exato."""
-    resultado = procurar_item(DB_PATH, descricao)
+    funcionou — nunca apresenta um achado aproximado como se fosse exato.
+
+    Filtro obrigatório de unidade igual (Dennis, 2026-07-04, achado real: "Revestimento
+    Cerâmico" em M2 casou com um item histórico de bloco cerâmico em BLOCOS — unidades
+    diferentes, produtos diferentes): candidato só é aceito se a unidade do pedido histórico
+    for a mesma da unidade comercial do item atual. Ao contrário da Camada 2 (SINAPI), aqui
+    NÃO existe conversão de unidade — "isso não deveria mudar". Sem a unidade do item pra
+    comparar, não há como validar o filtro, então não retorna referência nenhuma (melhor
+    admitir ausência do que arriscar comparar produtos diferentes)."""
+    if not unidade:
+        return None
+
+    def _so_mesma_unidade(candidatos):
+        return [c for c in candidatos if _mesma_unidade(c["unidade"], unidade)]
+
+    resultado = _so_mesma_unidade(procurar_item(DB_PATH, descricao))
     grau = GrauConfianca.CONFIRMADA
     if not resultado:
         palavras = [p for p in _SINAPI_PALAVRA_RE.findall(descricao.lower()) if len(p) >= 3]
         for palavra in palavras:
-            resultado = procurar_item(DB_PATH, palavra)
+            resultado = _so_mesma_unidade(procurar_item(DB_PATH, palavra))
             if resultado:
                 grau = GrauConfianca.APROXIMADA
                 break
@@ -3047,7 +3061,7 @@ def _adicionar_referencia_laura(itens):
     for item in itens:
         if not isinstance(item, dict):
             continue
-        referencia = _referencia_laura_item(item["descricao"]) or {}
+        referencia = _referencia_laura_item(item["descricao"], item.get("unidade")) or {}
         item["laura_preco_referencia"] = referencia.get("laura_preco_referencia")
         item["laura_unidade_referencia"] = referencia.get("laura_unidade_referencia")
         item["laura_data_referencia"] = referencia.get("laura_data_referencia")
