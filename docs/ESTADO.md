@@ -1,24 +1,23 @@
 # Estado do Projeto Laura
 
-> Atualizado em: 2026-07-03 (encerramento — módulo de Compras, Fiadas 1 e 2)
-> Sessão: **Fundação do domínio de Compras + primeiras duas fiadas de engenharia**
+> Atualizado em: 2026-07-04 (encerramento — redesenho do módulo de Compras, Camada 1)
+> Sessão: **Redesenho conceitual da Lista de Compras + Camada 1 (interpretação) implementada**
 
-Dia completo em uma única sessão longa, em três partes. **Parte 1 (manhã):** fundação
-documental do domínio de Compras — `docs/POLITICA_COMPRAS.md`, `docs/CASOS_DE_USO_COMPRAS.md`
-(15 casos + "Três Momentos da Laura" + 7 padrões), `docs/MODELO_DOMINIO_COMPRAS.md` (objetos
-conceituais, ciclo de vida, eventos, responsabilidades) — 100% conceitual, zero código,
-por decisão explícita do Dennis. `PROCESSO.md` ganhou o mecanismo generalizado "Políticas
-de Domínio". **Parte 2 (engenharia):** primeira fiada real do módulo `compras/` — comando
-`/lista` (Fiada 1: criar/consultar Lista de Compras, sugestão só com histórico real, nunca
-inventada) e, depois de um pedido do Dennis no meio do trabalho, Fiada 2 (foto de lista de
-materiais → extração por IA → confirmação → Lista de Compras), reaproveitando a mesma
-lógica já validada do fluxo de orçamento. **Parte 3 (teste ao vivo, parcial):** bot subido
-em `LAURA_ENV=test`, testado com foto real do Dennis (11 itens de material hidráulico,
-extraídos corretamente) — mas a saída inicial (tela de edição contínua da Fiada 1) não era
-o que o Dennis queria; corrigido na hora para uma "lista finalizada" só leitura. **Teste
-completo adiado para amanhã** — sessão encerrada antes de validação total no Telegram.
-Ver detalhes completos na Última Fiada Implementada — histórico das sessões anteriores
-preservado nas entradas abaixo, sem repetir aqui.
+Sessão de continuação direta de ontem, testando ao vivo o que tinha sido implementado. O
+teste expôs que o design das Fiadas 1/2 de 2026-07-03 não era o que Dennis realmente queria:
+ele pediu um redesenho — a Lista de Compras deve nascer com a mesma lógica de segurança do
+Pedido de Compra (IA interpreta o que for enviado, tenta padronizar contra o SINAPI, só grava
+depois de conferência/edição humana) — e um princípio arquitetural surgiu no meio do trabalho:
+**"Entradas diferentes podem existir. Processos diferentes não."** As duas fiadas de ontem
+foram substituídas, não complementadas; nada do código antigo sobreviveu. Implementada e
+testada hoje: Camada 1 (interpretação unificada — `/lista` e "foto + botão" convergem pra
+mesma função). Um bug real de extração foi encontrado e corrigido (marca confundida com
+unidade — Lição #12), e uma investigação à parte (a pedido do Dennis) revelou que o pipeline
+de confirmação de `comprovante_pix`/`nota_fiscal` tem o mesmo tipo de divergência — registrada
+como dívida técnica e visão de longo prazo, não corrigida agora. Camadas 2-6 do módulo de
+Compras (SINAPI, referência de preço, tela de conferência, edição, gravação) continuam
+pendentes. Ver detalhes completos na Última Fiada Implementada — histórico das sessões
+anteriores preservado nas entradas abaixo, sem repetir aqui.
 
 ---
 
@@ -88,11 +87,14 @@ preservado nas entradas abaixo, sem repetir aqui.
 - **Módulo `financeiro/relatorios.py`** (novo, 2026-07-03): gera fluxo de pagamentos por obra e
   relatório consolidado em Excel (`data/relatorios/`) — ainda não tem botão/comando no Telegram,
   só roda chamado manualmente.
-- **Domínio de Compras — fundação conceitual + primeiras duas fiadas** (2026-07-03): política,
-  15 casos de uso e modelo de domínio documentados; módulo `compras/` nasce (ADR-002). Lista de
-  Compras acessível por dois caminhos — comando `/lista` (Fiada 1) e foto de lista de materiais
-  (Fiada 2, tipo de documento `lista_materiais`). Sugestão de itens só com histórico real, nunca
-  inventada. Fluxo orçamento → pedido intocado. **Teste completo no Telegram fica para amanhã.**
+- **Domínio de Compras — fundação conceitual + Camada 1 (interpretação)** (2026-07-03/04):
+  política, 15 casos de uso e modelo de domínio documentados; módulo `compras/` nasce
+  (ADR-002). Lista de Compras acessível por dois caminhos — `/lista` e "foto + botão" — que
+  **convergem pra mesma função de interpretação** (redesenho de 2026-07-04, substituindo as
+  fiadas item-a-item/foto-direta de 2026-07-03). IA interpreta texto/foto/PDF de uma vez,
+  ainda sem SINAPI/referência de preço/gravação (camadas seguintes). `lista_compra_itens`
+  ganhou 11 colunas de snapshot (SINAPI + referência interna da Laura), congeladas pra sempre
+  no momento da confirmação. Fluxo orçamento → pedido intocado.
 - **Banco otimizado com 9 índices** + `financeiro/consultas.py` (`obter_pedido_completo`,
   `obter_consolidado_obra`, `listar_pedidos_pendentes`, `procurar_item`) + CLI
   `scripts/consultar.py` — consultas de pedido/obra/item em <3ms. Índices existem só no banco
@@ -147,7 +149,83 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 
 ## Última Fiada Implementada
 
+**Módulo de Compras — Redesenho conceitual + Camada 1 (interpretação)** *(2026-07-04)*
+
+Sessão de continuação: retomar o teste ao vivo das Fiadas 1/2 de ontem. O teste (foto real de
+material hidráulico, 11 itens Tigre) expôs que a saída não era o que Dennis queria, e a
+conversa evoluiu pra um redesenho conceitual completo, não um ajuste pontual.
+
+**O redesenho:** a Lista de Compras deve nascer com a mesma lógica de segurança do Pedido de
+Compra — IA interpreta o que for enviado (texto, foto ou PDF) de uma vez só, tenta padronizar
+cada item contra o SINAPI, e só grava depois de conferência/edição humana. Princípio que
+emergiu da conversa, agora orientando a arquitetura: **"Entradas diferentes podem existir.
+Processos diferentes não. Sempre que o resultado esperado for o mesmo, a implementação deve
+convergir para um único fluxo interno."**
+
+**Checagem de infraestrutura antes de codar** (a pedido do Dennis, antes de qualquer camada
+nova): medido contra `data/laura.db` real — busca por `LIKE '%termo%'` em `insumos_sinapi`
+(4.365 linhas) já é rápida (~1-2ms), o problema real é precisão, não performance (`'tubo pvc
+25'` como frase inteira dava zero resultados). Aplicado: tabela virtual `insumos_sinapi_fts`
+(FTS5, busca por palavra). Achado durante a implementação: `DELETE FROM` numa tabela FTS5
+externa é instável nesta versão do SQLite (3.50.4) — "database disk image is malformed" de
+forma intermitente, sem corrupção real (`PRAGMA integrity_check` sempre "ok"); resolvido com
+`DROP`+`CREATE`+`INSERT`, nunca `DELETE` na tabela virtual. Diagnóstico rápido do resto do
+projeto: só `procurar_item()` usa `LIKE` de verdade; achado um índice morto
+(`idx_fornecedores_cnpj`, nunca usado pela query real — confirmado com `EXPLAIN QUERY PLAN`,
+irrelevante com 31 linhas, registrado como dívida menor).
+
+**Snapshot histórico, dois pedidos complementares do Dennis:** `lista_compra_itens` ganhou 11
+colunas — snapshot SINAPI (código, descrição, unidade, preço, mês de referência) e snapshot
+da referência interna da Laura (preço, data, fornecedor, origem, grau de confiança) — ambos
+congelados no momento da confirmação, nunca recalculados depois. Motivo declarado pelo Dennis:
+não é só "não perder o preço antigo" — é a base de uma série histórica de 4 pontos por item
+(SINAPI da época, referência da Laura da época, preço negociado, SINAPI atual) que no futuro
+vai responder perguntas como "pra cimento CP-II, o preço negociado ficou 3% abaixo do SINAPI
+nas últimas 28 compras" e até medir a confiabilidade do próprio SINAPI como referência de
+mercado. Registrado em memória (`project_snapshots_historicos_compras`). Verificado no código
+real que `adicionar_item()` ainda não gravava nenhum desses campos (função escrita antes
+dessa decisão existir) — corrigido como parte da própria fiada, não como pendência futura.
+
+**Camada 1 — Interpretação, implementada e testada:** `PROMPT_INTERPRETAR_LISTA` (dedicado,
+não passa pela classificação compartilhada do orçamento) + `_interpretar_lista_texto()`/
+`_interpretar_lista_arquivo()`, chamadas pelos dois pontos de entrada (`/lista` e botão "📝
+Lista de materiais" no menu de documento) — testado estruturalmente que são a mesma função,
+não duas cópias. `/lista` muda de papel: não abre mais edição item a item, pede "Envie a
+lista — texto, foto ou PDF" e interpreta tudo de uma vez.
+
+**Bug real encontrado e corrigido (Lição #12 de `LICOES_EXTRACAO.md`):** Dennis reportou
+"unidade não é quartzolit, é sc" — marca/fabricante sendo confundida com unidade de medida
+quando aparece perto da quantidade no texto/foto original. Mesma classe de bug da Lição #1
+(instrução implícita não basta). Corrigido nos dois PROMPTs com lista explícita de unidades
+válidas e proibição nomeada; validado com 8 fraseados diferentes antes de aplicar.
+
+**Limpeza:** todo o código das duas fiadas de ontem que ficou órfão com o redesenho foi
+removido (`_tela_lista_compras`, `_teclado_lista_compras`, `_abrir_lista_compras`,
+`_parse_item_lista`, `_resumo_lista_materiais`, `teclado_lista_materiais`,
+`_tela_lista_finalizada`, `_cb_lista_mat_confirmar`, `_cb_lista_fechar`,
+`_cb_lista_add_sug`, `_cb_lista_rem_item`); `[lista_materiais]` saiu do `PROMPT` compartilhado
+de classificação. `mostrar_ajuda()` corrigida (ainda descrevia o `/lista` de ontem).
+
+**Achado arquitetural, registrado e não corrigido agora:** ao unificar os dois caminhos de
+`lista_materiais`, Dennis perguntou se `comprovante_pix`/`nota_fiscal` já convergiam do mesmo
+jeito. Não convergem — três pontos de entrada (`_cb_sel_tipo_inicial`, `_cb_set_tipo`,
+`_cb_ok`) fazem a mesma coisa de formas diferentes, um deles com bug real (`_cb_set_tipo()`
+sempre mostra tela de orçamento, não importa o tipo escolhido). Por pedido explícito do
+Dennis, **não corrigido nesta fiada** — "não é apenas trocar uma chamada por outra... toca o
+coração da Laura". Registrado como dívida técnica e nova visão de longo prazo ("Motor de
+Interpretação e Classificação de Documentos") em `docs/ROADMAP.md`, com o princípio geral que
+emergiu da conversa e uma fiada de investigação própria a fazer antes de qualquer código.
+
+**Não concluído:** Camadas 2-6 do módulo de Compras (candidatos SINAPI, referência de último
+preço, tela de conferência editável, edição item a item, gravação final confirmada) — ver
+ROADMAP.md. Validação completa ao vivo no Telegram com a foto real que motivou o redesenho.
+
+---
+
 **Módulo de Compras — Fiada 1 (comando `/lista`) e Fiada 2 (foto → Lista de Compras)** *(2026-07-03)*
+
+> **Substituída em 2026-07-04** — não complementada. Ver entrada acima. Preservada aqui só
+> como histórico da decisão original.
 
 Primeiras duas fiadas de engenharia do domínio de Compras, na mesma sessão da fundação
 conceitual (ver entrada seguinte). Aprovadas separadamente por Dennis, cada uma com seu
@@ -870,6 +948,11 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Dívidas Técnicas Conhecidas
 
+- **Pipeline de confirmação de documento diverge por ponto de entrada** (2026-07-04): achado
+  ao unificar `lista_materiais` — `_cb_sel_tipo_inicial()`, `_cb_set_tipo()` (bug real: sempre
+  mostra tela de orçamento, não importa o tipo) e `_cb_ok()` (comprovante_pix incompleto,
+  nota_fiscal nem trata) fazem o mesmo objetivo de três formas diferentes. Não corrigir dentro
+  de outra fiada — ver "Motor de Interpretação e Classificação de Documentos" em `docs/ROADMAP.md`.
 - **9 índices de `data/laura.db` não persistidos em código** (2026-07-03): criados diretamente no
   banco vivo, sem `CREATE INDEX` em `bot.py` ou script versionado — um banco recriado do zero não
   os recria, performance de consulta regride silenciosamente até rodar o comando manual de novo.
@@ -896,6 +979,14 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Decisões Recentes
 
+- **"Entradas diferentes podem existir. Processos diferentes não." (2026-07-04)** — princípio
+  que emergiu ao redesenhar a Lista de Compras: sempre que o resultado esperado for o mesmo,
+  a implementação deve convergir pra um único fluxo interno. Motivou o redesenho completo das
+  Fiadas 1/2 de 2026-07-03 e a descoberta da divergência em `comprovante_pix`/`nota_fiscal`
+  (ver Dívidas Técnicas). Registrado como visão de longo prazo em `docs/ROADMAP.md`.
+- **Snapshot histórico é patrimônio de conhecimento, não só cache de preço (2026-07-04)** —
+  `lista_compra_itens` congela SINAPI + referência da Laura por item, pensando numa série
+  histórica de anos, não só "não perder o dado". Ver memória `project_snapshots_historicos_compras`.
 - **Confiar mas verificar contra o código, não só contra o commit mais recente (2026-07-03)** —
   o checklist do Jeito Claude cobre a leitura da documentação; quando uma fiada proposta parece
   "óbvia demais" (prioridade 🔴 há dias na lista), checar o código real antes de implementar evita
@@ -948,14 +1039,12 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 > gatilho arquitetural que ainda não ocorreu) não são fiada — ficam em Dívida Técnica/ADR, sem
 > duplicar aqui como se fossem tarefa da próxima sessão.
 
-1. **Retomar e concluir o teste ao vivo das Fiadas 1 e 2 do módulo de Compras** —
-   código escrito e testado via script (ver ROADMAP.md, Fase — Módulo de Compras); falta
-   percorrer `/lista GGV03` e o fluxo de foto de lista de materiais do início ao fim, sem
-   interrupção, no Telegram real (`LAURA_ENV=test`), antes de considerar as fiadas fechadas
-   e voltar `LAURA_ENV=prod`
-2. **Decidir se/como a Lista de Compras ganha endereço** — Dennis apontou que frete é parte
-   da negociação do orçamento; avaliar se herda de `obras.endereco_entrega` ou precisa de
-   campo próprio (ver ROADMAP.md, Fase — Módulo de Compras)
+1. **Camada 2 do módulo de Compras — candidatos SINAPI** — busca FTS5 filtra candidatos,
+   Claude escolhe o melhor ou declara "sem correspondência confiável"; infra de banco já
+   pronta (`insumos_sinapi_fts`) — ver ROADMAP.md, Fase — Módulo de Compras
+2. **Validar a Camada 1 (interpretação) ao vivo no Telegram** — reenviar a foto real de
+   material hidráulico que motivou o redesenho, agora com os dois caminhos (`/lista` e
+   "foto + botão") unificados, antes de seguir pras próximas camadas
 3. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
 4. **Alimentar `docs/LICOES_EXTRACAO.md`** sempre que aparecer um novo bug de parsing/extração —
    não só corrigir e seguir (ver [[feedback_documentar_padroes_bugs]] na memória)
@@ -969,6 +1058,9 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
    botão/comando no Telegram
 9. **Popular `itens_pedido.insumo_sinapi_codigo`** — coluna existe no schema, nada grava nela
    ainda; é o vínculo real que falta entre item comprado e `insumos_sinapi`
+10. **Fiada de investigação — Motor de Interpretação e Classificação de Documentos** — não
+    priorizada ainda, mas registrada; entender por que os 3 caminhos de confirmação de
+    documento divergiram antes de qualquer código (ver ROADMAP.md)
 
 ---
 
@@ -988,6 +1080,6 @@ Arquitetura detalhada:
 
 ---
 
-*Última atualização: 2026-07-02*
+*Última atualização: 2026-07-04*
 *Responsáveis: Dennis + Claude*
 *Próxima revisão: ao final da próxima sessão*

@@ -56,10 +56,11 @@ Telegram ──────► bot.py ──────► Claude API (haiku-4-
   chamado manualmente
 - **`compras/`** (2026-07-03) — domínio de Compras, nasce modular desde o primeiro dia (ADR-002).
   `compras/lista.py`: Lista de Compras e Item da Lista (Modelo de Domínio: `docs/MODELO_DOMINIO_COMPRAS.md`),
-  todas as funções recebendo `db_path`. Dois pontos de entrada em `bot.py`: comando `/lista`
-  (cria/consulta lista direto) e tipo de documento `lista_materiais` (foto/PDF de lista de
-  materiais → extração por IA → confirmação → itens entram na lista). Sem vínculo com orçamento,
-  sem alertas proativos ainda — ver ROADMAP.md
+  todas as funções recebendo `db_path`. Dois pontos de entrada em `bot.py` — comando `/lista` e
+  tipo de documento `lista_materiais` — convergem pra mesma função de interpretação (`_interpretar_lista_texto`/
+  `_interpretar_lista_arquivo`), nunca implementações separadas (ver Fluxo C). Camada 1 apenas:
+  interpretação por IA, ainda sem correspondência SINAPI, sem referência de preço, sem edição e
+  sem gravação em `listas_compra`/`lista_compra_itens` — ver ROADMAP.md
 - **`data/laura.db`** — banco SQLite com dez tabelas (ver seção 3); 9 índices estratégicos
   criados em 2026-07-03, mas só no banco vivo — não persistidos em nenhum `CREATE INDEX` versionado
 - **`data/uploads/`** — todo arquivo recebido pelo Telegram cai aqui primeiro (pasta única,
@@ -242,6 +243,13 @@ Populada por `scripts/import_sinapi.py` (baixa a planilha oficial da Caixa, sem 
 — nenhuma FK com `itens_pedido` ou `documentos`; `itens_pedido.insumo_sinapi_codigo` existe no schema
 mas nada grava nela ainda.
 
+**`insumos_sinapi_fts`** (2026-07-04) — tabela virtual FTS5, busca por palavra (não por frase
+inteira) contra `descricao`. "External content" — não duplica dado, só indexa; `content_rowid`
+aponta pro `codigo` já existente. Reconstruída do zero (`DROP` + `CREATE` + `INSERT`, nunca
+`DELETE` — instável nesta versão do SQLite, ver comentário em `scripts/import_sinapi.py`) a cada
+reimportação, via `reconstruir_indice_fts()`. Motivo: `LIKE '%termo%'` falha quando a ordem das
+palavras muda (ex: "tubo pvc 25" não batia com "PVC, SOLDAVEL, DE 25 MM"); FTS5 tokeniza e resolve.
+
 ---
 
 **`listas_compra`** — Lista de Compras, momento "antes da compra" (domínio Compras, 2026-07-03)
@@ -264,14 +272,19 @@ reaproveitam a mesma lista em vez de criar outra.
 |---|---|
 | `id` | Chave primária |
 | `lista_id` | Lista à qual o item pertence — sem FK explícita |
-| `descricao`, `unidade`, `quantidade` | Dados do item — quantidade pode ser `NULL` (item adicionado por sugestão, sem quantidade ainda definida) |
+| `descricao`, `unidade`, `quantidade` | Dados do item — quantidade pode ser `NULL` |
+| `sinapi_codigo` | Vínculo/rastreabilidade com `insumos_sinapi` — não usar pra exibição histórica |
+| `sinapi_descricao_referencia`, `sinapi_unidade_referencia`, `sinapi_preco_referencia`, `sinapi_mes_referencia` | **Snapshot** SINAPI congelado no momento da confirmação — `insumos_sinapi` muda todo mês, a leitura de uma lista antiga não pode mudar de valor sozinha (CONSTITUICAO.md, "Dados são sagrados") |
+| `laura_preco_referencia`, `laura_data_referencia`, `laura_fornecedor_referencia`, `laura_origem_referencia`, `laura_grau_confianca_referencia` | **Snapshot** da referência interna da Laura (último preço pago/média/item semelhante/sem referência), mesmo motivo — nunca recalculado depois. Vocabulário de confiança do Princípio 8 da Política de Compras |
+| `observacoes` | Texto livre por item |
 | `status` | `pendente` / `comprado` / `removido` — hoje só `pendente`/`removido` são alcançáveis (vínculo com Pedido de Compra é fiada futura) |
 | `criado_em` | Timestamp de inserção |
 
-Populada por três caminhos: sugestão do histórico (`sugerir_itens()`, lê `itens_pedido`/`lancamentos`
-— nunca inventa, retorna vazio sem histórico), texto livre digitado (`/lista`, parser tolerante
-`_parse_item_lista()`), ou extração por IA de uma foto de lista de materiais (`_itens_lista_materiais()`,
-tipo de documento `lista_materiais`).
+2026-07-04: `adicionar_item()` (`compras/lista.py`) aceita e grava todos os campos de snapshot,
+todos opcionais — mas **nada no código ainda os preenche**. Camada 1 (interpretação, implementada)
+não grava nada nesta tabela ainda; Camadas 2-3 (SINAPI, referência de preço) são o que vai calcular
+esses valores; Camada 6 (gravação final) é quem efetivamente chama `adicionar_item()` com os
+snapshots prontos. Ver ROADMAP.md, Fase — Módulo de Compras.
 
 ---
 
@@ -307,21 +320,29 @@ Dennis digita o código (ex: GGV03-009)
   → bot exibe tela do pedido com botões de ação
 ```
 
-**Fluxo C — Lista de materiais → Lista de Compras** *(2026-07-03)*
+**Fluxo C — Interpretação de lista de materiais (Camada 1, ainda sem gravação)** *(2026-07-04)*
 
 ```
-Dennis envia foto ou PDF de uma lista de materiais (sem preço, sem fornecedor)
-  → mesmo pipeline de recepção do Fluxo A (SHA256, staging, Claude API)
-  → Claude classifica [lista_materiais] e extrai itens (descrição, quantidade, unidade)
-  → bot exibe itens extraídos para confirmação (_resumo_lista_materiais)
-  → se obra não identificada, Dennis define a obra primeiro (reaproveita sel_ggv/set_ggv)
-  → Dennis confirma ("✅ Gerar Lista de Compras")
-  → itens entram em lista_compra_itens via compras.adicionar_item() (cria a lista se não houver uma aberta)
-  → bot exibe a lista finalizada — resumo só leitura, não a tela de edição contínua
+Dennis dispara por dois caminhos, que convergem pra mesma função:
+  (a) /lista [GGV opcional] → bot pede "Envie a lista — texto, foto ou PDF"
+  (b) envia foto/PDF → escolhe "📝 Lista de materiais" no menu de tipo de documento
+
+  → texto: _interpretar_lista_texto() | foto/PDF: _interpretar_lista_arquivo()
+    (mesmo PROMPT_INTERPRETAR_LISTA nos dois casos — nunca passa pelo PROMPT de
+    classificação compartilhado; nunca inventa preço; distingue marca/fabricante de
+    unidade de medida, Lição #12 de LICOES_EXTRACAO.md)
+  → bot exibe os itens interpretados (_texto_itens_interpretados) — leitura simples,
+    ainda sem edição nem gravação em listas_compra/lista_compra_itens
 ```
 
-Ponto de entrada alternativo, sem foto: comando `/lista GGV03` cria/reabre a lista
-diretamente, com Laura sugerindo itens recorrentes do histórico (`sugerir_itens()`).
+Camadas seguintes (ainda não implementadas): correspondência SINAPI, referência de último
+preço pago, tela de conferência editável, gravação final confirmada — ver ROADMAP.md,
+Fase — Módulo de Compras.
+
+⚠️ **Divergência conhecida, fora do escopo desta fiada**: o pipeline de confirmação de
+`comprovante_pix`/`nota_fiscal` (Fluxo A) tem três pontos de entrada que não convergem
+entre si — ver Dívida Técnica e "Motor de Interpretação e Classificação de Documentos" em
+`docs/ROADMAP.md`.
 
 ---
 
@@ -347,6 +368,13 @@ Referências para navegação no arquivo (4.365 linhas):
 ---
 
 ## 6. Limitações Conhecidas
+
+- **Confirmação de documento diverge por ponto de entrada** — `_cb_sel_tipo_inicial()` (fluxo
+  automático), `_cb_set_tipo()` (correção manual — bug real: chama `_resumo_gerar()` sempre,
+  não importa o tipo) e `_cb_ok()` (confirmação genérica — trata `comprovante_pix` incompleto,
+  `nota_fiscal` nem trata) implementam o mesmo objetivo de três formas diferentes. Achado
+  2026-07-03; fiada de investigação própria antes de mexer — ver "Motor de Interpretação e
+  Classificação de Documentos" em `docs/ROADMAP.md`.
 
 - **Monólito parcial** — `bot.py` com 4.068 linhas, acima do teto da ADR-001 (2.500–3.000).
   ADR-004 (2026-07-02) extraiu dispatch table + módulo `nfe/`; `fornecedor/`/`obra/`/`comprovante/`

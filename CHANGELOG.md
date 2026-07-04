@@ -15,9 +15,10 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > sozinhas com o uso do dia a dia não entram aqui (ex: fechar um pedido parcelado esperando
 > pagamento). Ver Dívida Técnica em `docs/ROADMAP.md`.
 
-1. Retomar e concluir teste ao vivo das Fiadas 1 e 2 do módulo de Compras (código pronto,
-   testado via script; falta percorrer o Telegram real do início ao fim — ver `docs/ROADMAP.md`)
-2. Decidir se/como a Lista de Compras ganha endereço (frete é parte da negociação do orçamento)
+1. Camada 2 do módulo de Compras — candidatos SINAPI (busca FTS5 + Claude decide);
+   infra de banco já pronta (`insumos_sinapi_fts`) — ver `docs/ROADMAP.md`
+2. Camadas 3-6 — referência de último preço, tela de conferência editável, edição
+   item a item, gravação final confirmada
 3. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
 4. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
 5. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
@@ -25,14 +26,102 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 7. Persistir os 9 índices de `data/laura.db` em código (hoje só existem no banco vivo — um `init_db()`
    contra um banco novo não os recria; ver Dívida Técnica em `docs/ROADMAP.md`)
 
-> Concluído desde a última revisão: vulnerabilidade de segurança em `responder_botao()`/`atualizar()`/
-> `atualizar_obra()` corrigida (ver "[Segurança + módulo financeiro/relatorios.py] — 2026-07-03"
-> abaixo) e itens de compra estruturados em `itens_pedido` (ver "[Otimização de BD..." abaixo,
-> `procurar_item()`) — nenhum dos dois estava refletido aqui até esta revisão.
+> Fiada própria, não priorizada ainda: "Motor de Interpretação e Classificação de Documentos" —
+> convergência dos três caminhos divergentes de confirmação de documento (achado 2026-07-04,
+> ver Dívida Técnica e Visão de Longo Prazo em `docs/ROADMAP.md`). Precisa de investigação antes
+> de qualquer código — não é uma troca simples de chamada.
+
+> Concluído desde a última revisão: endereço da Lista de Compras resolvido (herda da obra, não
+> vira atributo novo — ver `docs/ROADMAP.md`); Fiadas 1/2 de 2026-07-03 substituídas pelo
+> redesenho em camadas de 2026-07-04 (Camada 1 concluída) — ver entrada abaixo.
+
+---
+
+## [Módulo de Compras — Redesenho em camadas, Camada 1 concluída] — 2026-07-04
+
+### Motivação
+
+Ao testar as Fiadas 1/2 de ontem, Dennis pediu um redesenho conceitual antes de continuar:
+a Lista de Compras deve nascer com a mesma lógica de segurança do Pedido de Compra — IA
+interpreta o que for enviado (texto, foto ou PDF) de uma vez, tenta padronizar contra o
+SINAPI, só grava depois de conferência/edição humana. "Entradas diferentes podem existir.
+Processos diferentes não" — princípio que emergiu desta sessão e passou a orientar tudo.
+
+### Alterado — redesenho
+
+- Schema de `lista_compra_itens`: 11 colunas novas de **snapshot**, congeladas no momento da
+  confirmação e nunca recalculadas depois — `sinapi_codigo` + 4 campos de referência SINAPI
+  (descrição/unidade/preço/mês) e 5 campos de referência interna da Laura (preço/data/
+  fornecedor/origem/grau de confiança). `insumos_sinapi` muda todo mês; a leitura de uma
+  lista antiga não pode mudar de valor sozinha (CONSTITUICAO.md, "Dados são sagrados")
+- `adicionar_item()` (`compras/lista.py`) aceita e grava os 11 campos, todos opcionais
+- Migração aplicada e verificada em produção e teste — `PRAGMA integrity_check` ok nas duas
+
+### Adicionado — infraestrutura de busca
+
+- `insumos_sinapi_fts`: tabela virtual FTS5, busca por palavra (não por frase inteira) —
+  `LIKE '%termo%'` falhava quando a ordem das palavras mudava. Reconstruída do zero a cada
+  reimportação via `scripts/import_sinapi.py::reconstruir_indice_fts()`
+- Achado durante a implementação: `DELETE FROM` numa tabela FTS5 externa é instável nesta
+  versão do SQLite (3.50.4) — retorna "database disk image is malformed" de forma
+  intermitente, sem nenhuma corrupção real de dado. Resolvido com `DROP` + `CREATE` +
+  `INSERT`, nunca `DELETE` na tabela virtual
+- Diagnóstico rápido da infraestrutura de busca do projeto todo, a pedido do Dennis: só um
+  lugar usa `LIKE '%texto%'` (`procurar_item`); achado um índice morto (`idx_fornecedores_cnpj`,
+  nunca usado pela query real — confirmado com `EXPLAIN QUERY PLAN`); nenhuma mudança urgente
+  fora do SINAPI, registrado como dívida técnica menor
+
+### Adicionado — Camada 1 (interpretação)
+
+- `PROMPT_INTERPRETAR_LISTA`: prompt dedicado para lista de materiais, não passa pela
+  classificação compartilhada do orçamento
+- `_interpretar_lista_texto()`/`_interpretar_lista_arquivo()`: mesma função pros dois pontos
+  de entrada (`/lista` e botão "📝 Lista de materiais" no menu de documento) — testado
+  estruturalmente que chamam o mesmo código, não duas implementações paralelas
+- `/lista` muda de papel: não abre mais edição item a item — pede "Envie a lista — texto,
+  foto ou PDF" e interpreta o conteúdo inteiro de uma vez
+
+### Corrigido
+
+- **Lição #12 de `LICOES_EXTRACAO.md`**: marca/fabricante (ex: "Quartzolit") confundida com
+  unidade de medida quando aparece perto da quantidade no texto original. Prompt corrigido
+  com lista explícita de unidades válidas e proibição explícita de usar marca no lugar da
+  unidade — mesma classe de bug da Lição #1 (instrução implícita não basta)
+- `mostrar_ajuda()` ainda descrevia o `/lista` de ontem — corrigido pro comportamento real
+
+### Removido
+
+- Todo o código das duas fiadas de 2026-07-03, órfão depois do redesenho: `_tela_lista_compras`,
+  `_teclado_lista_compras`, `_abrir_lista_compras`, `_parse_item_lista`,
+  `_resumo_lista_materiais`, `teclado_lista_materiais`, `_tela_lista_finalizada`,
+  `_cb_lista_mat_confirmar`, `_cb_lista_fechar`, `_cb_lista_add_sug`, `_cb_lista_rem_item`
+- `[lista_materiais]` saiu do `PROMPT` compartilhado de classificação (PASSO 1, PASSO 3,
+  "valores aceitos") — não é mais usado por nenhum caminho
+- Duplicação morta em `_cb_set_ggv()` (branch de `lista_materiais` que nunca mais é
+  alcançado) encontrada e removida durante a limpeza
+
+### Achado arquitetural — registrado, não corrigido nesta fiada
+
+Durante a unificação, encontrado que o pipeline de confirmação de `comprovante_pix`/
+`nota_fiscal` tem três pontos de entrada que não convergem entre si — um deles
+(`_cb_set_tipo()`) com bug real (sempre mostra tela de orçamento, não importa o tipo
+escolhido). Por pedido do Dennis, registrado como dívida técnica + visão de longo prazo
+("Motor de Interpretação e Classificação de Documentos") em `docs/ROADMAP.md` — merece
+fiada própria de investigação, não é uma troca simples de chamada.
+
+### Não concluído
+
+- Camadas 2-6 (SINAPI, referência de preço, tela de conferência editável, edição, gravação
+  final) — ver `docs/ROADMAP.md`, Fase — Módulo de Compras
+- Validação completa ao vivo no Telegram com a foto real que motivou o redesenho
 
 ---
 
 ## [Módulo de Compras — Fiada 1 e Fiada 2] — 2026-07-03
+
+> **Substituída em 2026-07-04** — não complementada. Depois do primeiro teste real, Dennis
+> pediu um redesenho conceitual (ver entrada acima); nenhum código desta entrada sobreviveu
+> à reescrita. Preservada aqui só como histórico da decisão.
 
 ### Motivação
 

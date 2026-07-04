@@ -1,6 +1,15 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-03 (produção migrada e limpa; auto-cadastro via Receita; arquivos organizados por obra; taxas/impostos/serviços públicos; recibo automático; pagamento parcelado; base de insumos SINAPI; produção ativada + correções de cadastro ao vivo; enriquecimento de fornecedor via Receita — e-mail, telefone, CNAE; incidente crítico de exclusão de documento + correção; DOCX removido, ADR-004 (modularização), recibo narrativo, matching PIX/NF-e corrigido; **vulnerabilidade de segurança corrigida, itens de compra estruturados (`itens_pedido`), módulo `financeiro/relatorios.py`, BD otimizado (9 índices) + CLI de consultas rápidas**)
+> Atualizado em: 2026-07-04 (**módulo de Compras redesenhado — Camada 1 interpretação
+> unificada, snapshot histórico SINAPI+Laura, FTS5 de busca, Lição #12 corrigida; achado
+> arquitetural registrado — Motor de Interpretação e Classificação de Documentos**); histórico
+> anterior: produção migrada e limpa; auto-cadastro via Receita; arquivos organizados por obra;
+> taxas/impostos/serviços públicos; recibo automático; pagamento parcelado; base de insumos
+> SINAPI; produção ativada + correções de cadastro ao vivo; enriquecimento de fornecedor via
+> Receita — e-mail, telefone, CNAE; incidente crítico de exclusão de documento + correção;
+> DOCX removido, ADR-004 (modularização), recibo narrativo, matching PIX/NF-e corrigido;
+> vulnerabilidade de segurança corrigida, itens de compra estruturados (`itens_pedido`),
+> módulo `financeiro/relatorios.py`, BD otimizado (9 índices) + CLI de consultas rápidas
 
 ---
 
@@ -48,56 +57,66 @@ Antes de qualquer código, três documentos em sequência constroem o domínio:
   Lista, Orçamento, Alerta — cada um com ciclo de vida próprio), eventos,
   responsabilidades Laura/usuário, regras por momento — sem banco de dados/classes/APIs
 
-**Fiada 1 — Criar e consultar Lista de Compras** ✓ *(implementada 2026-07-03, aguardando teste real no Telegram)*
+**Fiada 1 — Redesenhada em 2026-07-04, depois do primeiro teste real**
 
-Primeira fiada de engenharia, nasce em módulo próprio `compras/` (ADR-002: todo novo
-domínio nasce modular). Escopo: só o momento "antes da compra" — `/lista GGV03` cria ou
-reabre a lista da obra, Laura sugere itens recorrentes de `itens_pedido` com o último
-preço pago, Dennis adiciona (por botão ou texto livre) e remove itens, lista fica
-consultável. Sem vínculo com orçamento, sem alertas proativos (Casos 11-15), sem tocar o
-fluxo existente de `gerar_pfm()`.
+As duas fiadas separadas implementadas em 2026-07-03 (`/lista` item-a-item + foto→confirmar)
+foram **substituídas**, não complementadas, depois que Dennis testou ao vivo e pediu um
+redesenho conceitual: a Lista de Compras deve nascer com a mesma lógica de segurança do
+Pedido de Compra — a IA interpreta o que for enviado (texto, foto ou PDF) de uma vez só,
+tenta padronizar cada item contra o SINAPI, e só grava depois de conferência/edição humana.
+Nada do código de 2026-07-03 sobreviveu à reescrita; as duas fiadas antigas ficam registradas
+aqui só como histórico da decisão, não como estado atual — ver ESTADO.md para a crônica
+completa do que mudou e por quê.
 
-- `compras/lista.py`: `StatusLista`/`StatusItem`, `init_db_compras()`, `sugerir_itens()`
-  (retorna lista vazia se não houver histórico — nunca inventa), `criar_ou_buscar_lista_aberta()`,
-  `adicionar_item()`, `remover_item()`, `listar_itens()` — todas recebendo `db_path`
-- `bot.py`: comando `/lista`, três callbacks (`lista_add_sug`, `lista_rem_item`,
-  `lista_fechar`), parser tolerante de item por texto livre (`_parse_item_lista()`,
-  mesmo espírito de `_itens()` — nunca bloqueia)
-- Testado via script contra `data/laura_test.db`: sugestão real para GGV03 (histórico
-  existente) e "sem histórico" explícito para obra sem nenhum item — critério do Dennis
-  cumprido; regressão do fluxo orçamento → pedido confirmada com
-  `scripts/teste_gerar_pedido.py`, sem alteração de comportamento
+Escopo confirmado do redesenho:
+- Entrada única (texto/foto/PDF) por dois pontos de disparo (`/lista` ou botão no menu de
+  documento) que **convergem pra mesma função** — não duas implementações paralelas
+- Cada item tenta casar com SINAPI (busca de candidatos + Claude escolhe ou declara "sem
+  correspondência confiável") — abordagem em duas etapas (FTS5 filtra, IA decide), não
+  substring simples
+- Referência de último preço pago da própria Laura, mostrada ao lado, não misturada com
+  sugestão de item novo
+- Dois **snapshots** por item, congelados no momento da confirmação e nunca recalculados
+  depois (`CONSTITUICAO.md` — "Dados são sagrados"): snapshot SINAPI (código, descrição,
+  unidade, preço, mês de referência) e snapshot da referência interna da Laura (preço, data,
+  fornecedor, origem, grau de confiança) — ver memória `project_snapshots_historicos_compras`
+  pro raciocínio completo (série histórica de preço, medir confiabilidade do SINAPI ao longo
+  do tempo)
+- Endereço de entrega herdado da obra na tela de conferência, sem virar atributo novo do
+  objeto Lista de Compras (evita reabrir o Modelo de Domínio, que Dennis marcou como encerrado)
+- Ainda fora de escopo: vínculo com orçamento recebido, qualquer mudança no fluxo
+  orçamento → pedido
 
-**Fiada 2 — Lista de materiais por foto → Lista de Compras** ✓ *(implementada 2026-07-03, teste real adiado para amanhã)*
+**Camada 1 — Interpretação** ✓ *(implementada e testada 2026-07-04)*
 
-Pedido de Dennis no meio da sessão: reaproveitar a mesma lógica já usada pra orçamento
-(extração por IA → tela de revisão → confirmar) num ponto mais cedo do processo — a partir
-de uma lista de materiais fotografada ou impressa, sem preço nem fornecedor.
+- `PROMPT_INTERPRETAR_LISTA`: prompt dedicado, não passa pela classificação compartilhada
+  do orçamento — sabe de antemão que é uma lista, nunca inventa preço
+- `_interpretar_lista_texto()`/`_interpretar_lista_arquivo()`: mesma função pros dois pontos
+  de entrada (`/lista` e botão "📝 Lista de materiais" no menu de documento) — testado
+  estruturalmente que chamam o mesmo código, não duas cópias
+- Testado com texto digitado e com a foto real de material hidráulico (11 itens Tigre) que
+  motivou o redesenho — extração correta nos dois formatos
+- **Bug real encontrado e corrigido (Lição #12 de `LICOES_EXTRACAO.md`):** marca/fabricante
+  (ex: "Quartzolit") sendo confundida com unidade de medida quando aparece perto da
+  quantidade no texto original. Prompt corrigido nos dois lugares que ainda tinham essa
+  falta (o novo dedicado e o antigo compartilhado, antes de esse último ser aposentado)
+- **Limpeza feita junto:** removido todo o código das duas fiadas de 2026-07-03 que ficou
+  órfão com o redesenho — `_tela_lista_compras`, `_teclado_lista_compras`,
+  `_abrir_lista_compras`, `_parse_item_lista`, `_resumo_lista_materiais`,
+  `teclado_lista_materiais`, `_tela_lista_finalizada`, `_cb_lista_mat_confirmar`,
+  `_cb_lista_fechar`, `_cb_lista_add_sug`, `_cb_lista_rem_item`, e `[lista_materiais]` saiu
+  do `PROMPT` compartilhado de classificação
+- Ainda não grava nada em `listas_compra`/`lista_compra_itens` — é leitura/interpretação,
+  pré-confirmação
 
-- Novo tipo de documento reconhecido: **Lista de materiais** (`lista_materiais`), com
-  classificação e template de extração próprios no `PROMPT` — explícito que preço/fornecedor
-  nunca devem ser inventados nesse tipo (mesmo cuidado da Lição #1 de `LICOES_EXTRACAO.md`)
-- Novo botão no menu de tipo de documento, ao lado de Orçamento/Comprovante/NF-e
-- Tela de confirmação (`_resumo_lista_materiais()`) reaproveita o padrão de revisão do
-  orçamento, mais simples (sem fornecedor/valor/condição — não existem nesse tipo)
-- Ao confirmar, os itens entram na Lista de Compras da obra via `compras.adicionar_item()`
-  — mesma função da Fiada 1
-- **Ajuste feito ainda hoje, depois do primeiro teste real:** a saída da confirmação
-  originalmente caía na tela de edição da Fiada 1 (`_tela_lista_compras`, "adicionar mais
-  itens / fechar"). Dennis pediu que a saída fosse uma **lista finalizada**, fechada, sem
-  virar modo de edição contínua — implementado como `_tela_lista_finalizada()`, resumo só
-  leitura. O modelo/PDF oficial da lista fica para decidir depois; por hoje é texto.
-- Testado com dado real do Dennis: 11 itens de material hidráulico (Tigre) extraídos
-  corretamente de uma foto real, incluindo obra não identificada → fluxo de definir obra
-  → lista finalizada. Confirmado direto no banco de teste, não só por script.
-- **Pendente:** Dennis retoma o teste ao vivo amanhã antes de considerar a fiada fechada
+**Camadas 2 a 6 — pendentes** *(não iniciadas)*
 
-**Aprendizado registrado hoje, não implementado:** Dennis apontou que a Lista de Compras
-provavelmente precisa de um endereço — o frete faz parte da negociação do orçamento, e sem
-saber pra onde entrega, falta informação relevante pra comparar propostas. Não é
-prioridade agora (a `Fiada 1`/`2` não usam isso); registrado aqui para quando o Modelo de
-Domínio for revisitado. Pode já existir via `obras.endereco_entrega` — decidir se a Lista
-de Compras herda isso da obra ou precisa de campo próprio é decisão de implementação futura.
+1. Candidatos SINAPI (busca FTS5 + Claude decide) — infra de banco já pronta
+   (`insumos_sinapi_fts`, ver Dívida Técnica/infra abaixo)
+2. Referência de último preço pago (própria Laura)
+3. Tela de conferência editável (obra, endereço, itens com SINAPI/referência visíveis)
+4. Edição item a item (escolher item → escolher campo → digitar novo valor)
+5. Gravação final confirmada — só aqui os dois snapshots são congelados de verdade
 
 ---
 
@@ -559,6 +578,71 @@ gatilho original (consultar preço de item já comprado sem ler o texto inteiro 
 - **Baixa — `_parse_nfe()` não reusa `_parse_brl()` já corrigido**
   Reimplementa limpeza de valor BRL na mão — reintroduz o bug da Lição #4 especificamente pra NF-e
   (valores sem centavos, ex: "R$ 10.99", seriam interpretados errado).
+
+- **Alta — três caminhos divergentes para confirmar o mesmo tipo de documento**
+  Achado em 2026-07-03, durante a unificação de `lista_materiais` (ver Fase — Módulo de Compras).
+  Existem hoje 3 pontos de entrada que terminam confirmando um documento e não convergem:
+  `_cb_sel_tipo_inicial()` (classificação automática, trata `comprovante_pix`/`nota_fiscal`
+  corretamente), `_cb_set_tipo()` (correção manual de tipo — **bug real**: chama `_resumo_gerar()`
+  sempre, não importa o tipo escolhido; `_resumo_gerar()` é feita só pra orçamento) e `_cb_ok()`
+  (confirmação genérica pós-correção — trata `comprovante_pix` de forma incompleta, sem checagem
+  de duplicidade e sem `reply_markup` com os botões de candidato; não trata `nota_fiscal` de jeito
+  nenhum, cai no genérico "Confirmado: Nota Fiscal" sem buscar candidato). **Não corrigir dentro de
+  outra fiada** — ver "Motor de Interpretação e Classificação de Documentos" abaixo; merece fiada
+  própria de investigação antes de qualquer mudança (Dennis, 2026-07-03: "não é apenas trocar uma
+  chamada por outra... toca o coração da Laura").
+
+---
+
+## Visão de Longo Prazo — Motor de Interpretação e Classificação de Documentos
+
+*Registrado em 2026-07-03, a partir do achado de divergência acima. Não implementar dentro de
+outra fiada — merece investigação própria antes de qualquer mudança de código.*
+
+### O princípio
+
+> **Entradas diferentes podem existir. Processos diferentes não.** Sempre que o resultado
+> esperado for o mesmo, a implementação deve convergir para um único fluxo interno.
+
+A leitura, interpretação e condução de documentos (orçamento, comprovante PIX, NF-e, lista de
+compras, taxas, documentos obrigatórios) é um dos núcleos da Laura — não um detalhe de
+implementação. Cada tipo de documento hoje tem sua própria variação de "quem processa" dependendo
+de qual caminho o usuário seguiu (classificação automática, correção manual, tipo vindo de um
+comando explícito como `/lista`) — o achado acima é o primeiro sintoma concreto disso, mas
+provavelmente não o único.
+
+### Antes de mudar qualquer código, uma fiada de investigação precisa responder
+
+- Por que esses caminhos ficaram separados (arqueologia: qual foi adicionado depois de qual, e
+  por quê a atualização não se propagou pros outros)
+- Quais tipos de documento existem hoje, de fato, no código (não só os documentados)
+- Quais etapas são realmente comuns entre eles (recepção, dedup por hash, chamada à IA,
+  apresentação pro usuário, confirmação, gravação) vs. quais são específicas de cada tipo
+- Onde a convergência deve ocorrer (um único dispatcher de pós-classificação? uma função por
+  etapa comum, chamada de todos os pontos de entrada?)
+- Quais riscos existem em mexer nisso — este é o código mais atravessado do sistema, tocado por
+  toda fiada de tipo de documento desde o início do projeto
+- Qual seria o menor redesenho seguro — não uma reescrita completa
+
+### Direção de longo prazo — para além da convergência
+
+Hoje o usuário ainda diz do que se trata cada documento antes da IA processar. A visão de longo
+prazo é a Laura evoluir gradualmente para:
+
+1. Receber qualquer documento
+2. Ler o conteúdo
+3. Classificar o tipo provável
+4. Declarar o grau de confiança da classificação (mesmo vocabulário do Princípio 8 da Política de
+   Compras — confirmada/aproximada/ausente)
+5. Apresentar para conferência humana
+6. Permitir correção
+7. Aprender com a correção
+8. Encaminhar para o pipeline correto
+
+A Laura não precisa acertar tudo sozinha desde o começo — precisa de uma arquitetura que permita
+melhorar continuamente. Sair de "o usuário informa o tipo" para "a Laura sugere o tipo com base no
+conteúdo e pede confirmação humana" é o horizonte; a convergência dos caminhos hoje divergentes é
+o primeiro passo necessário antes disso ser sequer possível.
 
 ---
 

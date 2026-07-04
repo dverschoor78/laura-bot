@@ -227,6 +227,33 @@ Confirmado contra o pedido real GGV03-010 (Cerâmica Tio Nardo, teste em 2026-07
 
 ---
 
+## 12. Marca/fabricante confundida com unidade de medida (lista de materiais)
+
+**Sintoma:** item "Rejunte cinza ártico 5kg" de uma lista de materiais real (foto) voltou como
+"(1 QUARTZOLIT)" em vez de "(1 SC)" — "Quartzolit" é marca, não unidade. Dennis reportou:
+"unidade não é quartzolit, é sc".
+
+**Causa raiz:** o PROMPT (tanto o `[lista_materiais]` do template compartilhado quanto
+`PROMPT_INTERPRETAR_LISTA`, dedicado ao domínio de Compras) só dizia "formato: N. Descrição
+(QTDE UND)" — sem nunca definir o que É uma unidade válida. Quando a marca aparece perto da
+quantidade no texto/foto original, o Claude não tem nenhuma instrução que o impeça de tratá-la
+como se fosse a unidade.
+
+**Correção:** ambos os PROMPTs ganharam uma linha explícita: UND é sempre uma unidade de medida
+real (lista de exemplos: kg, sc/saco, un, m, m², m³, L, cx, rolo, barra, pç); marca/fabricante
+nunca vai nesse lugar — se aparecer perto da quantidade, deve ficar dentro da descrição.
+Validado com 8 fraseados diferentes (marca antes/depois/no meio da quantidade, com e sem
+abreviação de unidade) — todos corretos depois da correção; nenhum reproduzido exatamente
+igual ao caso real do Dennis, mas a classe de erro é a mesma da Lição #1 (instrução implícita
+não basta).
+
+**Lição geral:** todo PROMPT que pede pra Claude extrair uma "unidade" de texto livre precisa
+dizer explicitamente o que conta como unidade válida, não só o formato de onde ela vai. O
+Claude vai preencher a posição sintaticamente certa com o token mais próximo disponível
+(marca, adjetivo, o que for) se não houver uma regra semântica clara sobre o que pertence ali.
+
+---
+
 ## Padrão geral por trás de tudo isso
 
 Duas famílias de bug, não uma só.

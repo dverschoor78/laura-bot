@@ -112,6 +112,29 @@ def criar_tabela():
         """)
 
 
+def reconstruir_indice_fts():
+    """Reconstrói do zero o índice de busca por palavra (FTS5) a partir de insumos_sinapi.
+
+    Busca por palavra, não por frase inteira — "tubo pvc 25" só bate com LIKE se a ordem
+    das palavras coincidir exatamente. FTS5 tokeniza e resolve isso, nativo do SQLite.
+
+    DROP + CREATE + INSERT, nunca DELETE: testado e confirmado que `DELETE FROM` numa
+    tabela FTS5 externa (content=) é instável nesta versão do SQLite (3.50.4) — retorna
+    "database disk image is malformed" de forma intermitente, mesmo sem nenhuma corrupção
+    real do banco (confirmado com PRAGMA integrity_check). Tabela pequena e reimportada
+    raramente (mensal) — reconstrução completa do zero é barata e muito mais confiável."""
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("DROP TABLE IF EXISTS insumos_sinapi_fts")
+        con.execute("""
+            CREATE VIRTUAL TABLE insumos_sinapi_fts
+            USING fts5(descricao, content='insumos_sinapi', content_rowid='codigo')
+        """)
+        con.execute(
+            "INSERT INTO insumos_sinapi_fts(rowid, descricao) "
+            "SELECT codigo, descricao FROM insumos_sinapi"
+        )
+
+
 def gravar(insumos, mes_referencia):
     with sqlite3.connect(DB_PATH) as con:
         for it in insumos:
@@ -133,9 +156,11 @@ def main():
     wb = extrair_planilha_referencia(zip_bytes)
     insumos = ler_insumos(wb)
     gravar(insumos, mes_referencia)
+    reconstruir_indice_fts()
     print(f"\nOK {len(insumos)} insumos de MATERIAL importados "
           f"(referência {mes_referencia}, UF {UF_REFERENCIA}, sem desoneração)")
     print("Coluna 'fabricante' preservada em execuções futuras — preencha manualmente quando quiser.")
+    print("Índice de busca (FTS5) reconstruído.")
 
 
 if __name__ == "__main__":
