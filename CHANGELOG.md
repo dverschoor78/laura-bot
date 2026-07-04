@@ -37,6 +37,48 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Camada 2 — Correção de direção da equivalência de unidade] — 2026-07-04 (mesmo dia)
+
+### Motivação
+
+Dennis revisou a equivalência de unidade recém-implementada e corrigiu o sentido da conversão:
+"A Lista de Compras deve manter sempre a unidade comercial... A Laura nunca converte o item
+comercial para a unidade do SINAPI. A Laura converte a referência do SINAPI para a unidade
+comercial do item." A primeira versão fazia o oposto — convertia a quantidade do item pra
+unidade do SINAPI ("Equivalência: 12.500 KG").
+
+### Alterado
+
+- `PROMPT_ESCOLHER_SINAPI`: pede `preco_equivalente_unidade_comercial` (preço do SINAPI
+  convertido pra R$/unidade comercial do item) no lugar de `quantidade_equivalente`/
+  `unidade_equivalente`
+- `_adicionar_correspondencia_sinapi()`: envia o preço de cada candidato SINAPI pro Claude
+  (faltava — sem ele a conversão de preço é impossível de calcular); anota
+  `item["sinapi_preco_equivalente"]` no lugar dos dois campos antigos
+- `_texto_itens_interpretados()`: exibe "Referência SINAPI: R$ 40,00 / SC" com
+  "(equivalente a R$ 0,80/KG)" como contexto secundário; unidade comercial nunca aparece
+  convertida em lugar nenhum da tela
+
+### Corrigido
+
+- Parsing do JSON da escolha SINAPI quebrava quando Claude acrescentava um parágrafo de
+  justificativa em texto livre após o array, apesar da instrução de responder só com JSON —
+  trocado por extração via regex do bloco `[...]`, tolerante a texto antes/depois
+- Prompt não distinguia "unidade igual → sem conversão" de "unidade diferente → converter";
+  Claude chegou a usar a quantidade pedida como fator de conversão quando a unidade já era
+  igual (136 × 10 em vez de manter 136,00/M3) — corrigido explicitando que o fator vem do
+  tamanho da embalagem, nunca da quantidade pedida, e que unidade igual não gera equivalência
+
+### Testado
+
+3 casos: unidade igual (sem falsa conversão — Areia em M3), unidade diferente sem tamanho de
+embalagem informável pela descrição (honesto, `null`, mostra preço bruto com aviso — Tinta em
+LT vs L do SINAPI), e unidade diferente com conversão calculável (bate exato com o exemplo do
+Dennis: 250 SC de Cimento CP II 50kg, SINAPI R$0,80/KG → R$40,00/SC). Regressão do fluxo
+orçamento → pedido confirmada (`scripts/teste_gerar_pedido.py`).
+
+---
+
 ## [Camada 2 — Candidatos SINAPI, confiança e equivalência de unidade] — 2026-07-04 (mesmo dia)
 
 ### Motivação

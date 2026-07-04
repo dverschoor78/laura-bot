@@ -171,6 +171,24 @@ permanente antes de comprovar seu valor."
   vez de "Alta" — mudança de natureza do erro, mesmo padrão da Camada 1: de confiante-e-errado
   pra sinalizado-como-incerto
 
+**Correção de direção da equivalência de unidade** *(2026-07-04, mesmo dia)* — a primeira
+versão convertia a quantidade do item pra unidade do SINAPI (ex: mostrava "Equivalência:
+12.500 KG"). Dennis corrigiu: a unidade comercial (como se compra e negocia — SC, LT, CX...)
+nunca muda, em lugar nenhum — nem na lista, nem no pedido, nem na negociação. É o preço do
+SINAPI que deve ser convertido pra unidade comercial do item, nunca o contrário. Regra final:
+"A Laura nunca converte o item comercial para a unidade do SINAPI. A Laura converte a
+referência do SINAPI para a unidade comercial do item." `PROMPT_ESCOLHER_SINAPI` agora pede
+`preco_equivalente_unidade_comercial` (preço por SC, não quantidade em KG); exibido como
+"Referência SINAPI: R$ 40,00 / SC" com "(equivalente a R$ 0,80/KG)" como contexto secundário.
+Dois bugs reais apareceram e foram corrigidos no processo: (1) o preço do candidato SINAPI
+nunca era enviado pro Claude — sem ele, a conversão é impossível de calcular; (2) o parsing
+do JSON quebrava quando Claude acrescentava um parágrafo de justificativa depois do array,
+apesar da instrução contrária — trocado por extração via regex do array `[...]`, robusta a
+texto extra antes/depois. Um terceiro problema de raciocínio também apareceu no teste (Claude
+usava a quantidade pedida como se fosse o fator de conversão, ex: 136 × 10 quando a unidade já
+era a mesma) — corrigido explicitando no prompt que o fator vem do tamanho da embalagem, nunca
+da quantidade pedida, e que unidades iguais não geram equivalência nenhuma (`null`).
+
 **Visão de longo prazo registrada, não implementada:** ver seção própria mais abaixo —
 "Compreensão de Produto antes da Correspondência SINAPI".
 

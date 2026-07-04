@@ -2821,17 +2821,31 @@ Classifique seu grau de confiança em cada correspondência:
   dúvida; prefira "baixa" a forçar "alta"/"media" quando não tiver certeza
 - "nenhuma": nenhum candidato representa o mesmo produto (nesse caso, sinapi_codigo é `null`)
 
-Se a unidade comercial do item for diferente da unidade do candidato escolhido (ex: item
-vendido em SC/saco, SINAPI referencia por KG) e você conseguir determinar com segurança o
-peso/volume de uma unidade de venda a partir da própria descrição do item, calcule a
-quantidade equivalente na unidade do SINAPI. Só calcule quando tiver certeza — senão `null`.
+A Lista de Compras mantém sempre a unidade comercial do item (como se compra e negocia —
+ex: SC, LT, CX) — isso nunca muda e nunca é convertido para a unidade do SINAPI.
+
+Se a unidade comercial do item já for IGUAL à unidade do candidato escolhido, não existe
+conversão a fazer: deixe preco_equivalente_unidade_comercial como `null` (o preço do SINAPI
+já está direto na unidade comercial, sem precisar de equivalência).
+
+Se a unidade comercial for DIFERENTE da unidade do candidato (ex: item vendido em SC/saco,
+SINAPI referencia por KG) e você conseguir determinar com segurança o peso/volume de UMA
+unidade de venda a partir da própria descrição do item (ex: "50 kg" no nome do produto indica
+que 1 SC pesa 50 kg), calcule o INVERSO: o preço de referência do SINAPI convertido para a
+unidade comercial do item (preço por SC, não quantidade em KG). Exemplo: SINAPI = R$ 0,80/KG,
+embalagem = 50 kg/SC → preço_equivalente_unidade_comercial = 40.00 (R$ por SC).
+
+O fator de conversão vem SEMPRE do tamanho de UMA embalagem/unidade de venda (quanto pesa ou
+mede uma única SC, LT, CX...), nunca da quantidade pedida no item — quantidade pedida é
+irrelevante pra essa conta. Só calcule quando tiver certeza do tamanho da embalagem — senão
+`null`.
 
 Responda APENAS com um array JSON, sem markdown, sem texto antes ou depois, neste formato:
 [
   {"numero": 1, "sinapi_codigo": 12345, "confianca": "alta",
-   "quantidade_equivalente": 12500.0, "unidade_equivalente": "KG"},
+   "preco_equivalente_unidade_comercial": 40.00},
   {"numero": 2, "sinapi_codigo": null, "confianca": "nenhuma",
-   "quantidade_equivalente": null, "unidade_equivalente": null}
+   "preco_equivalente_unidade_comercial": null}
 ]
 """
 
@@ -2854,9 +2868,9 @@ async def _adicionar_correspondencia_sinapi(itens):
                 "numero": item.get("numero"),
                 "descricao": item["descricao"],
                 "unidade_comercial": item.get("unidade"),
-                "quantidade_comercial": item.get("quantidade"),
                 "candidatos_sinapi": [
-                    {"codigo": c["codigo"], "descricao": c["descricao"], "unidade": c["unidade"]}
+                    {"codigo": c["codigo"], "descricao": c["descricao"], "unidade": c["unidade"],
+                     "preco": c["preco_pr"]}
                     for c in candidatos
                 ],
             })
@@ -2876,9 +2890,12 @@ async def _adicionar_correspondencia_sinapi(itens):
                 }]
             )
             texto_resposta = resposta.content[0].text.strip()
-            if texto_resposta.startswith("```"):
-                texto_resposta = re.sub(r"^```[a-zA-Z]*\n?", "", texto_resposta)
-                texto_resposta = re.sub(r"\n?```$", "", texto_resposta).strip()
+            # Extrai só o array JSON mesmo se vier cercado por markdown ou seguido de
+            # texto de justificativa — Claude às vezes explica a decisão após o array,
+            # apesar da instrução de responder só com JSON.
+            m = re.search(r"\[.*\]", texto_resposta, re.DOTALL)
+            if m:
+                texto_resposta = m.group(0)
             for escolha in json.loads(texto_resposta):
                 escolhas[escolha.get("numero")] = escolha
         except (json.JSONDecodeError, ValueError, TypeError, anthropic.APIError):
@@ -2900,12 +2917,14 @@ async def _adicionar_correspondencia_sinapi(itens):
         item["sinapi_unidade_referencia"] = candidato["unidade"] if candidato else None
         item["sinapi_preco_referencia"] = candidato["preco_pr"] if candidato else None
         item["sinapi_mes_referencia"] = candidato["mes_referencia"] if candidato else None
-        # Confiança e equivalência de unidade: raciocínio da própria etapa de interpretação
+        # Confiança e preço equivalente: raciocínio da própria etapa de interpretação
         # (Camada 2), não um atributo persistido — Dennis, 2026-07-04: "não quero criar uma
-        # estrutura permanente antes de comprovar seu valor".
+        # estrutura permanente antes de comprovar seu valor". A unidade comercial do item
+        # nunca é convertida; é o preço do SINAPI que é convertido pra ela (Dennis, 2026-07-04:
+        # "A Laura nunca converte o item comercial para a unidade do SINAPI. A Laura converte
+        # a referência do SINAPI para a unidade comercial do item.").
         item["sinapi_confianca"] = escolha.get("confianca") if candidato else ("nenhuma" if escolha else None)
-        item["sinapi_quantidade_equivalente"] = escolha.get("quantidade_equivalente")
-        item["sinapi_unidade_equivalente"] = escolha.get("unidade_equivalente")
+        item["sinapi_preco_equivalente"] = escolha.get("preco_equivalente_unidade_comercial")
     return itens
 
 def _fmt_qtde_segura(qtde):
@@ -2945,15 +2964,27 @@ def _texto_itens_interpretados(itens, ggv):
                                  "baixa": "Baixa confiança", "nenhuma": "Sem correspondência"}
             if item.get("sinapi_codigo"):
                 preco = item.get("sinapi_preco_referencia")
-                preco_fmt = f", R$ {_fmt_brl(preco)}/{item['sinapi_unidade_referencia']}" if preco else ""
+                und_sinapi = item.get("sinapi_unidade_referencia")
                 confianca = _CONFIANCA_LABEL.get(item.get("sinapi_confianca"), "confiança não informada")
                 linhas.append(
                     f"   SINAPI ({confianca}): {item['sinapi_descricao_referencia']} "
-                    f"(cód. {item['sinapi_codigo']}{preco_fmt}, ref. {item.get('sinapi_mes_referencia') or '?'})"
+                    f"(cód. {item['sinapi_codigo']}, ref. {item.get('sinapi_mes_referencia') or '?'})"
                 )
-                qtde_equiv, und_equiv = item.get("sinapi_quantidade_equivalente"), item.get("sinapi_unidade_equivalente")
-                if qtde_equiv is not None and und_equiv:
-                    linhas.append(f"   Equivalência: {_fmt_qtde_segura(qtde_equiv)} {und_equiv}")
+                preco_equiv = item.get("sinapi_preco_equivalente")
+                if preco_equiv is not None and und:
+                    # Referência sempre expressa na unidade comercial do item — nunca o
+                    # contrário. O preço do SINAPI na unidade original vem só como contexto.
+                    linhas.append(f"   Referência SINAPI: R$ {_fmt_brl(preco_equiv)} / {und}")
+                    if preco:
+                        linhas.append(f"   (equivalente a R$ {_fmt_brl(preco)}/{und_sinapi})")
+                elif preco:
+                    if und and und_sinapi and und != und_sinapi:
+                        linhas.append(
+                            f"   Referência SINAPI: R$ {_fmt_brl(preco)}/{und_sinapi} "
+                            f"(unidade diferente da comercial — conversão não calculada)"
+                        )
+                    else:
+                        linhas.append(f"   Referência SINAPI: R$ {_fmt_brl(preco)}/{und_sinapi}")
             else:
                 linhas.append("   SINAPI: sem correspondência confiável")
 

@@ -222,6 +222,26 @@ vez de "Alta" — de confiante-e-errado pra sinalizado-como-incerto, mesmo padr�
 Visão de longo prazo (atributos técnicos completos, catálogo próprio da Laura) registrada em
 `docs/ROADMAP.md`, deliberadamente não implementada como entidade.
 
+**Mesmo dia, correção de direção da equivalência de unidade:** Dennis revisou a Camada 2 recém
+implementada e corrigiu o sentido da conversão — a primeira versão convertia a quantidade do
+item pra unidade do SINAPI ("Equivalência: 12.500 KG"); a unidade comercial (como se compra e
+negocia) não pode mudar em lugar nenhum, nem na lista, nem no pedido, nem na negociação. Regra:
+"A Laura nunca converte o item comercial para a unidade do SINAPI. A Laura converte a
+referência do SINAPI para a unidade comercial do item." Corrigido: `PROMPT_ESCOLHER_SINAPI`
+agora pede `preco_equivalente_unidade_comercial` (preço do SINAPI convertido pra R$/unidade
+comercial); exibição virou "Referência SINAPI: R$ 40,00 / SC" com "(equivalente a
+R$ 0,80/KG)" como contexto secundário. Testado e corrigidos dois bugs reais expostos no
+processo: o preço do candidato SINAPI nunca era enviado ao Claude (sem ele a conversão é
+impossível) e o parsing do JSON quebrava quando Claude acrescentava justificativa em texto
+livre após o array (trocado por extração via regex do bloco `[...]`, tolerante a texto
+extra). Um terceiro problema de raciocínio apareceu no teste — Claude usou a quantidade
+pedida como fator de conversão quando as unidades já eram iguais (136 × 10 em vez de manter
+136) — corrigido explicitando no prompt que o fator vem do tamanho da embalagem, nunca da
+quantidade pedida, e que unidade igual não gera equivalência (`null`). Validado com 3 casos:
+unidade igual (sem falsa conversão), unidade diferente sem tamanho de embalagem informado
+(honesto, `null`, mostra preço bruto) e unidade diferente com conversão calculável (bate
+exato com o exemplo do Dennis: 250 SC de cimento 50kg, SINAPI R$0,80/KG → R$40,00/SC).
+
 **Bug real encontrado e corrigido (Lição #12 de `LICOES_EXTRACAO.md`):** Dennis reportou
 "unidade não é quartzolit, é sc" — marca/fabricante sendo confundida com unidade de medida
 quando aparece perto da quantidade no texto/foto original. Mesma classe de bug da Lição #1
@@ -245,9 +265,9 @@ coração da Laura". Registrado como dívida técnica e nova visão de longo pra
 Interpretação e Classificação de Documentos") em `docs/ROADMAP.md`, com o princípio geral que
 emergiu da conversa e uma fiada de investigação própria a fazer antes de qualquer código.
 
-**Não concluído:** Camadas 2-6 do módulo de Compras (candidatos SINAPI, referência de último
-preço, tela de conferência editável, edição item a item, gravação final confirmada) — ver
-ROADMAP.md. Validação completa ao vivo no Telegram com a foto real que motivou o redesenho.
+**Não concluído:** Camadas 3-6 do módulo de Compras (referência de último preço, tela de
+conferência editável, edição item a item, gravação final confirmada) — ver ROADMAP.md.
+Validação completa ao vivo no Telegram com a foto real que motivou o redesenho.
 
 ---
 
