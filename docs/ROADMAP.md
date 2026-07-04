@@ -192,6 +192,17 @@ da quantidade pedida, e que unidades iguais não geram equivalência nenhuma (`n
 **Visão de longo prazo registrada, não implementada:** ver seção própria mais abaixo —
 "Compreensão de Produto antes da Correspondência SINAPI".
 
+**Bug real na Camada 2 — falso "unidade diferente"** *(2026-07-04, mesmo dia)* — Dennis
+reportou dois itens com unidade comercial `m2` e unidade SINAPI `M2` (mesma unidade, metro
+quadrado) mostrando "unidade diferente da comercial — conversão não calculada". Causa: a
+comparação de unidades na tela (`und != und_sinapi`) era sensível a maiúsculas/minúsculas —
+`"m2" != "M2"` dá `True` em Python mesmo sendo a mesma unidade fisicamente. O Claude já tinha
+retornado `preco_equivalente_unidade_comercial: null` corretamente (nenhuma conversão é
+necessária quando a unidade já é a mesma); o problema estava só na camada de exibição, que
+interpretava esse `null` como "não consegui calcular" em vez de "não precisa calcular".
+Corrigido com `_mesma_unidade(a, b)` (compara ignorando caixa e espaço nas pontas), usado na
+única checagem de igualdade de unidade que existia no código.
+
 **Camada 3 — Referência de último preço pago (própria Laura)** ✓ *(2026-07-04, mesmo dia)*
 
 Reaproveita `procurar_item()` (`financeiro/consultas.py`), sem chamada de IA — busca

@@ -242,6 +242,15 @@ unidade igual (sem falsa conversão), unidade diferente sem tamanho de embalagem
 (honesto, `null`, mostra preço bruto) e unidade diferente com conversão calculável (bate
 exato com o exemplo do Dennis: 250 SC de cimento 50kg, SINAPI R$0,80/KG → R$40,00/SC).
 
+**Mesmo dia, bug real na Camada 2 — falso "unidade diferente":** Dennis reportou "M2 e m2 são
+unidades iguais" após ver dois itens (Forro PVC, Revestimento Cerâmico) marcados como
+"unidade diferente da comercial — conversão não calculada" quando a unidade comercial era
+`m2` e a do SINAPI `M2` — a mesma unidade, metro quadrado. Causa raiz: a comparação
+`und != und_sinapi` na tela era sensível a maiúsculas/minúsculas. O Claude já retornava
+`preco_equivalente_unidade_comercial: null` corretamente (sem conversão porque já é a mesma
+unidade); o bug estava só na exibição, que lia esse `null` como "não consegui calcular" em
+vez de "não precisa calcular". Corrigido com `_mesma_unidade()` (ignora caixa/espaço).
+
 **Mesmo dia, Camada 3 — referência de último preço pago (própria Laura):**
 `_referencia_laura_item()` reaproveita `procurar_item()` (`financeiro/consultas.py`, já
 existia, sem chamada de IA) — tenta a descrição inteira primeiro, cai pra palavra

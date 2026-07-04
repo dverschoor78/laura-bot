@@ -2776,6 +2776,13 @@ async def _interpretar_lista_arquivo(conteudo_bytes, mime_inf):
 
 _SINAPI_PALAVRA_RE = re.compile(r"[A-Za-zÀ-ÿ0-9]+")
 
+def _mesma_unidade(a, b):
+    """Compara duas unidades ignorando maiúsculas/minúsculas e espaço nas pontas — 'm2' e
+    'M2' são a mesma unidade (metro quadrado), não unidades diferentes. Evitar esse tipo de
+    falso "unidade diferente" é o que motivou esta função (Dennis, 2026-07-04: "M2 e m2 são
+    unidades iguais metro quadrado")."""
+    return (a or "").strip().upper() == (b or "").strip().upper()
+
 def _candidatos_sinapi(descricao, limite=6):
     """Busca candidatos SINAPI por palavra-chave (FTS5) para a descrição de um item.
     Recall alto, não precisão — a decisão final é do Claude na segunda etapa. Nunca
@@ -3031,7 +3038,7 @@ def _texto_itens_interpretados(itens, ggv):
                     if preco:
                         linhas.append(f"   (equivalente a R$ {_fmt_brl(preco)}/{und_sinapi})")
                 elif preco:
-                    if und and und_sinapi and und != und_sinapi:
+                    if und and und_sinapi and not _mesma_unidade(und, und_sinapi):
                         linhas.append(
                             f"   Referência SINAPI: R$ {_fmt_brl(preco)}/{und_sinapi} "
                             f"(unidade diferente da comercial — conversão não calculada)"

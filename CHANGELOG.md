@@ -37,6 +37,30 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Camada 2 — Corrige falso "unidade diferente" (m2 vs M2)] — 2026-07-04 (mesmo dia)
+
+### Motivação
+
+Dennis reportou dois itens reais (Forro PVC em `m2`, Revestimento Cerâmico em `m2`) marcados
+como "unidade diferente da comercial — conversão não calculada" contra candidatos SINAPI em
+`M2` — a mesma unidade (metro quadrado), só com caixa diferente.
+
+### Corrigido
+
+- `_mesma_unidade(a, b)`: nova função de comparação de unidade, ignora maiúsculas/minúsculas e
+  espaço nas pontas
+- `_texto_itens_interpretados()`: troca a comparação direta `und != und_sinapi` (sensível a
+  caixa) por `not _mesma_unidade(und, und_sinapi)`
+
+### Diagnóstico
+
+O Claude já retornava `preco_equivalente_unidade_comercial: null` corretamente pros dois itens
+(nenhuma conversão é necessária quando a unidade já é a mesma) — o bug estava só na camada de
+exibição, que interpretava esse `null` como "não consegui calcular" em vez de "não precisa
+calcular". Nenhuma mudança necessária em `PROMPT_ESCOLHER_SINAPI`.
+
+---
+
 ## [Camada 3 — Referência de último preço pago (própria Laura)] — 2026-07-04 (mesmo dia)
 
 ### Motivação
