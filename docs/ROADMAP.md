@@ -192,12 +192,35 @@ da quantidade pedida, e que unidades iguais não geram equivalência nenhuma (`n
 **Visão de longo prazo registrada, não implementada:** ver seção própria mais abaixo —
 "Compreensão de Produto antes da Correspondência SINAPI".
 
-**Camadas 3 a 6 — pendentes** *(não iniciadas)*
+**Camada 3 — Referência de último preço pago (própria Laura)** ✓ *(2026-07-04, mesmo dia)*
 
-1. Referência de último preço pago (própria Laura)
-2. Tela de conferência editável (obra, endereço, itens com SINAPI/referência visíveis)
-3. Edição item a item (escolher item → escolher campo → digitar novo valor)
-4. Gravação final confirmada — só aqui os dois snapshots são congelados de verdade
+Reaproveita `procurar_item()` (`financeiro/consultas.py`), sem chamada de IA — busca
+determinística, já existia antes desta fiada, só nunca tinha sido conectada ao fluxo de
+Compras. `_referencia_laura_item()` tenta a descrição inteira primeiro (mais precisa, mas rara
+de bater por fraseado diferente entre compras — "Cimento CP II 50 kg" vs "Cimento CP-II
+50kg" já cadastrado); cai pra busca por palavra significativa isolada se não achar nada.
+Grau de confiança (Princípio 8 da Política de Compras) muda conforme a estratégia que
+funcionou: `confirmada` na descrição inteira, `aproximada` na palavra isolada — nunca
+apresenta um achado aproximado como se fosse exato. `_adicionar_referencia_laura()` roda
+depois da Camada 2, juntando as duas referências (SINAPI + histórico próprio) na mesma tela,
+cada uma com origem e confiança declaradas.
+
+Exibição: "Última compra (Aproximada): R$ 19,90/UND — Materiais Teste LTDA" (data omitida
+quando desconhecida, em vez de mostrar um traço vazio). Quando não há nenhum item parecido no
+histórico, mostra "sem referência própria encontrada" — ausência de informação é informação,
+nunca fica em silêncio (Princípio 5: "Quando não existir qualquer referência disponível, a
+Laura deve informar isso explicitamente").
+
+Unidade da compra histórica é mostrada como veio gravada, sem conversão pra unidade comercial
+do item atual — mesmo princípio de honestidade da Camada 2 (não inventar uma equivalência sem
+certeza), só que aqui nem se tenta calcular ainda; fica registrado como possível evolução
+futura, não como pendência desta fiada.
+
+**Camadas 4 a 6 — pendentes** *(não iniciadas)*
+
+1. Tela de conferência editável (obra, endereço, itens com SINAPI/referência visíveis)
+2. Edição item a item (escolher item → escolher campo → digitar novo valor)
+3. Gravação final confirmada — só aqui os dois snapshots são congelados de verdade
 
 ---
 

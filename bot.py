@@ -19,9 +19,11 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 
 from financeiro.lancamento import (init_db_financeiro, sugerir_categoria, CategoriaLancamento,
                                    vincular_nfe, buscar_candidatos_nfe)
+from financeiro.consultas import procurar_item
 from nfe import parse_nfe, mostrar_nfe, teclado_candidatos_nfe
 from compras import (init_db_compras, criar_ou_buscar_lista_aberta, buscar_lista,
-                      sugerir_itens, adicionar_item, remover_item, listar_itens)
+                      sugerir_itens, adicionar_item, remover_item, listar_itens,
+                      GrauConfianca, OrigemReferencia)
 
 load_dotenv()
 TOKEN       = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -2746,7 +2748,8 @@ async def _interpretar_lista_texto(texto):
         }]
     )
     itens = _itens_lista_materiais(resposta.content[0].text)
-    return await _adicionar_correspondencia_sinapi(itens)
+    itens = await _adicionar_correspondencia_sinapi(itens)
+    return _adicionar_referencia_laura(itens)
 
 async def _interpretar_lista_arquivo(conteudo_bytes, mime_inf):
     tipo_conteudo = "document" if mime_inf == "application/pdf" else "image"
@@ -2763,7 +2766,8 @@ async def _interpretar_lista_arquivo(conteudo_bytes, mime_inf):
         }]
     )
     itens = _itens_lista_materiais(resposta.content[0].text)
-    return await _adicionar_correspondencia_sinapi(itens)
+    itens = await _adicionar_correspondencia_sinapi(itens)
+    return _adicionar_referencia_laura(itens)
 
 # ── Camada 2 — Candidatos SINAPI (busca FTS5 + Claude decide) ──────────────
 # Convergência deliberada: a correspondência acontece dentro das duas funções de
@@ -2927,6 +2931,55 @@ async def _adicionar_correspondencia_sinapi(itens):
         item["sinapi_preco_equivalente"] = escolha.get("preco_equivalente_unidade_comercial")
     return itens
 
+def _referencia_laura_item(descricao):
+    """Camada 3: procura no histórico real de compras da própria Laura (itens_pedido) se algo
+    parecido já foi comprado, e retorna o último preço pago como referência adicional à
+    SINAPI (Princípio 5 da Política de Compras: "último preço pago" é referência de primeira
+    classe). Reaproveita procurar_item() (financeiro/consultas.py) tal como já existia — sem
+    chamada de IA, busca determinística.
+
+    Tenta a descrição inteira primeiro (mais precisa, mas rara de bater por causa de fraseado
+    diferente entre compras — ex: "Cimento CP II 50 kg" vs "Cimento CP-II 50kg" já registrado);
+    cai pra busca por palavra significativa isolada se não achar nada. O grau de confiança
+    (Princípio 8: toda referência declara origem e confiança) muda conforme a estratégia que
+    funcionou — nunca apresenta um achado aproximado como se fosse exato."""
+    resultado = procurar_item(DB_PATH, descricao)
+    grau = GrauConfianca.CONFIRMADA
+    if not resultado:
+        palavras = [p for p in _SINAPI_PALAVRA_RE.findall(descricao.lower()) if len(p) >= 3]
+        for palavra in palavras:
+            resultado = procurar_item(DB_PATH, palavra)
+            if resultado:
+                grau = GrauConfianca.APROXIMADA
+                break
+    if not resultado:
+        return None
+    mais_recente = resultado[0]  # procurar_item já ordena por data_pagamento DESC
+    return {
+        "laura_preco_referencia": mais_recente["valor_unitario"],
+        "laura_unidade_referencia": mais_recente["unidade"],
+        "laura_data_referencia": mais_recente["data_pagamento"],
+        "laura_fornecedor_referencia": mais_recente["fornecedor"],
+        "laura_origem_referencia": OrigemReferencia.ULTIMO_PRECO_PAGO.value,
+        "laura_grau_confianca_referencia": grau.value,
+    }
+
+def _adicionar_referencia_laura(itens):
+    """Anota cada item com a referência de último preço pago pela própria Laura, quando
+    existir — roda depois da Camada 2 (SINAPI), juntando as duas referências na mesma tela,
+    cada uma com sua origem e confiança declaradas (nunca escondendo qual é qual)."""
+    for item in itens:
+        if not isinstance(item, dict):
+            continue
+        referencia = _referencia_laura_item(item["descricao"]) or {}
+        item["laura_preco_referencia"] = referencia.get("laura_preco_referencia")
+        item["laura_unidade_referencia"] = referencia.get("laura_unidade_referencia")
+        item["laura_data_referencia"] = referencia.get("laura_data_referencia")
+        item["laura_fornecedor_referencia"] = referencia.get("laura_fornecedor_referencia")
+        item["laura_origem_referencia"] = referencia.get("laura_origem_referencia")
+        item["laura_grau_confianca_referencia"] = referencia.get("laura_grau_confianca_referencia")
+    return itens
+
 def _fmt_qtde_segura(qtde):
     try:
         return _fmt_qtde(float(qtde))
@@ -2987,6 +3040,22 @@ def _texto_itens_interpretados(itens, ggv):
                         linhas.append(f"   Referência SINAPI: R$ {_fmt_brl(preco)}/{und_sinapi}")
             else:
                 linhas.append("   SINAPI: sem correspondência confiável")
+
+            preco_laura = item.get("laura_preco_referencia")
+            if preco_laura is not None:
+                _GRAU_LABEL = {"confirmada": "Confirmada", "aproximada": "Aproximada"}
+                grau = _GRAU_LABEL.get(item.get("laura_grau_confianca_referencia"), "")
+                grau_fmt = f" ({grau})" if grau else ""
+                und_laura = item.get("laura_unidade_referencia") or "?"
+                data_laura = item.get("laura_data_referencia")
+                data_fmt = f" em {_fmt_data_flexivel(data_laura)}" if data_laura else ""
+                fornecedor = item.get("laura_fornecedor_referencia") or "fornecedor não identificado"
+                linhas.append(
+                    f"   Última compra{grau_fmt}: R$ {_fmt_brl(preco_laura)}/{und_laura}"
+                    f"{data_fmt} — {fornecedor}"
+                )
+            else:
+                linhas.append("   Última compra: sem referência própria encontrada")
 
             if item.get("observacoes"):
                 linhas.append(f"   Obs: {item['observacoes']}")

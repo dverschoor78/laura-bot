@@ -20,4 +20,6 @@ from .lista import (
     listar_itens,
     StatusLista,
     StatusItem,
+    GrauConfianca,
+    OrigemReferencia,
 )

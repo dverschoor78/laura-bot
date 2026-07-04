@@ -242,6 +242,18 @@ unidade igual (sem falsa conversão), unidade diferente sem tamanho de embalagem
 (honesto, `null`, mostra preço bruto) e unidade diferente com conversão calculável (bate
 exato com o exemplo do Dennis: 250 SC de cimento 50kg, SINAPI R$0,80/KG → R$40,00/SC).
 
+**Mesmo dia, Camada 3 — referência de último preço pago (própria Laura):**
+`_referencia_laura_item()` reaproveita `procurar_item()` (`financeiro/consultas.py`, já
+existia, sem chamada de IA) — tenta a descrição inteira primeiro, cai pra palavra
+significativa isolada se não achar nada. Grau de confiança muda conforme a estratégia:
+`confirmada` na descrição inteira, `aproximada` na palavra isolada (vocabulário do Princípio 8
+da Política de Compras). `_adicionar_referencia_laura()` roda depois da Camada 2, juntando as
+duas referências (SINAPI + histórico próprio) na mesma tela. Exibição: "Última compra
+(Aproximada): R$ 19,90/UND — Materiais Teste LTDA"; quando não há histórico, mostra "sem
+referência própria encontrada" em vez de ficar em silêncio (Princípio 5). Testado com o
+Cimento CP II 50kg: achou o item já cadastrado no histórico ("Cimento CP-II 50kg", fraseado
+diferente) via busca por palavra, confiança aproximada, preço e fornecedor corretos.
+
 **Bug real encontrado e corrigido (Lição #12 de `LICOES_EXTRACAO.md`):** Dennis reportou
 "unidade não é quartzolit, é sc" — marca/fabricante sendo confundida com unidade de medida
 quando aparece perto da quantidade no texto/foto original. Mesma classe de bug da Lição #1
@@ -265,9 +277,9 @@ coração da Laura". Registrado como dívida técnica e nova visão de longo pra
 Interpretação e Classificação de Documentos") em `docs/ROADMAP.md`, com o princípio geral que
 emergiu da conversa e uma fiada de investigação própria a fazer antes de qualquer código.
 
-**Não concluído:** Camadas 3-6 do módulo de Compras (referência de último preço, tela de
-conferência editável, edição item a item, gravação final confirmada) — ver ROADMAP.md.
-Validação completa ao vivo no Telegram com a foto real que motivou o redesenho.
+**Não concluído:** Camadas 4-6 do módulo de Compras (tela de conferência editável, edição item
+a item, gravação final confirmada) — ver ROADMAP.md. Validação completa ao vivo no Telegram
+com a foto real que motivou o redesenho.
 
 ---
 

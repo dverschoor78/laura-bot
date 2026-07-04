@@ -15,8 +15,8 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > sozinhas com o uso do dia a dia não entram aqui (ex: fechar um pedido parcelado esperando
 > pagamento). Ver Dívida Técnica em `docs/ROADMAP.md`.
 
-1. Camadas 3-6 do módulo de Compras — referência de último preço, tela de conferência
-   editável, edição item a item, gravação final confirmada
+1. Camadas 4-6 do módulo de Compras — tela de conferência editável, edição item a item,
+   gravação final confirmada
 2. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
 3. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
 4. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
@@ -34,6 +34,40 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > resolvido (herda da obra, não vira atributo novo); Fiadas 1/2 de 2026-07-03 substituídas pelo
 > redesenho em camadas de 2026-07-04 (Camada 1 concluída, depois reescrita pra saída JSON
 > estruturada no mesmo dia) — ver `docs/ROADMAP.md`.
+
+---
+
+## [Camada 3 — Referência de último preço pago (própria Laura)] — 2026-07-04 (mesmo dia)
+
+### Motivação
+
+Próxima camada natural depois da SINAPI: além da referência de mercado (SINAPI), a Laura já
+tem o histórico real de compras da própria empresa — Princípio 5 da Política de Compras cita
+"último preço pago" como referência de primeira classe. `procurar_item()`
+(`financeiro/consultas.py`) já existia pra isso, só nunca tinha sido conectado ao fluxo de
+Compras.
+
+### Adicionado
+
+- `_referencia_laura_item()`: tenta `procurar_item()` com a descrição inteira primeiro; se não
+  achar nada, cai pra busca por palavra significativa isolada (mesmo extrator de palavras já
+  usado na Camada 2). Retorna o item mais recente encontrado (já ordenado por
+  `data_pagamento DESC`), sem chamada de IA — busca determinística
+- `_adicionar_referencia_laura()`: roda depois da Camada 2, anota cada item com preço/unidade/
+  data/fornecedor da última compra própria e a origem/confiança da referência
+- Grau de confiança (`confirmada` na descrição inteira, `aproximada` na palavra isolada) —
+  mesmo vocabulário do Princípio 8, nunca apresenta um achado aproximado como exato
+- Exibição: "Última compra (Aproximada): R$ 19,90/UND — Materiais Teste LTDA"; quando não há
+  histórico, "sem referência própria encontrada" em vez de silêncio (Princípio 5: ausência de
+  informação também é informação)
+- `compras/__init__.py` passou a exportar `GrauConfianca` e `OrigemReferencia`
+
+### Testado
+
+Cimento CP II 50 kg: achou o item já cadastrado no histórico com fraseado diferente ("Cimento
+CP-II 50kg") via busca por palavra, confiança aproximada, preço (R$19,90) e fornecedor
+corretos. Item sem histórico (ex: Prego 18x30) mostrou corretamente "sem referência própria
+encontrada". Regressão do fluxo orçamento → pedido confirmada.
 
 ---
 
