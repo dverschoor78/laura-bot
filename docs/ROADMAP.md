@@ -109,6 +109,36 @@ Escopo confirmado do redesenho:
 - Ainda não grava nada em `listas_compra`/`lista_compra_itens` — é leitura/interpretação,
   pré-confirmação
 
+**Camada 1 — Reescrita pra saída estruturada (JSON)** ✓ *(2026-07-04, mesmo dia)*
+
+Teste com tabela real (planilha de 8 itens: cimento, argamassa, forro PVC, cal, porcelanato,
+revestimento, rejunte, acabamento) expôs que o formato de saída original — uma linha de texto
+por item, casada por regex — forçava a IA a "achatar" uma tabela em texto corrido antes de
+responder. Sintomas: quantidade virando "1" quando a coluna real dizia outro valor, unidade
+errada, fabricante nunca separado, código de referência alterado (`72707/72745` virou
+`27707/72745`).
+
+- `PROMPT_INTERPRETAR_LISTA` reescrito em duas partes: **procedimento** (detectar tabela →
+  identificar linhas → separar colunas de descrição/unidade/quantidade → só então interpretar
+  semanticamente) e **regras** (quantidade/unidade nunca inventadas — `null` em vez de
+  chute; código de referência é identificador, copiado literalmente, nunca "corrigido";
+  prioridade explícita: coluna da tabela > texto lido > interpretação da IA)
+- Saída agora é array JSON (`numero`, `descricao`, `fabricante`, `codigo`, `unidade`,
+  `quantidade`, `observacoes`) em vez de uma linha de texto por item
+- `_itens_lista_materiais()` reescrita: `json.loads()` no lugar do regex antigo
+  (`_ITEM_LISTA_MATERIAIS_RE`, removido), com fallback defensivo — JSON malformado vira
+  itens em string, nunca perde item silenciosamente
+- `_texto_itens_interpretados()` mostra fabricante e código quando existirem, e diz
+  explicitamente "quantidade não identificada"/"unidade não identificada" em vez de omitir
+- **Validado contra a tabela real como gabarito**: com o texto colado (garbled), 8/8 itens
+  corretos — quantidade, unidade e código batendo, incluindo o código do porcelanato. Com a
+  foto real, 5/8 perfeitos; os 3 restantes têm imperfeição de campo (unidade "m" em vez de
+  "m2" num item, fabricante vazio em outro, um item com quantidade/unidade genuinamente
+  ilegível na foto) — mas **nenhum inventou valor errado**: o pior caso retornou `null` e
+  disse isso claramente, em vez de "1 SC" como acontecia antes. Mudança de natureza do erro:
+  de "confiante e errado" para "incerto e visível". Aceito por Dennis nesse nível — refino
+  adicional do prompt fica pra depois, se necessário
+
 **Camadas 2 a 6 — pendentes** *(não iniciadas)*
 
 1. Candidatos SINAPI (busca FTS5 + Claude decide) — infra de banco já pronta

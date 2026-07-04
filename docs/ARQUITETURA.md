@@ -329,10 +329,15 @@ Dennis dispara por dois caminhos, que convergem pra mesma função:
 
   → texto: _interpretar_lista_texto() | foto/PDF: _interpretar_lista_arquivo()
     (mesmo PROMPT_INTERPRETAR_LISTA nos dois casos — nunca passa pelo PROMPT de
-    classificação compartilhado; nunca inventa preço; distingue marca/fabricante de
-    unidade de medida, Lição #12 de LICOES_EXTRACAO.md)
+    classificação compartilhado; nunca inventa preço nem quantidade; distingue marca/
+    fabricante de unidade de medida; código de referência copiado literalmente, nunca
+    "corrigido" — Lições #12 e #13 de LICOES_EXTRACAO.md)
+  → Claude responde array JSON (numero, descricao, fabricante, codigo, unidade,
+    quantidade, observacoes) — _itens_lista_materiais() faz json.loads() com fallback
+    defensivo pra texto malformado (nunca regex de linha única, ver Lição #13)
   → bot exibe os itens interpretados (_texto_itens_interpretados) — leitura simples,
-    ainda sem edição nem gravação em listas_compra/lista_compra_itens
+    diz "não identificado" quando quantidade/unidade/código ficam null; ainda sem edição
+    nem gravação em listas_compra/lista_compra_itens
 ```
 
 Camadas seguintes (ainda não implementadas): correspondência SINAPI, referência de último

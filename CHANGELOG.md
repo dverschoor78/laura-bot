@@ -33,7 +33,47 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 > Concluído desde a última revisão: endereço da Lista de Compras resolvido (herda da obra, não
 > vira atributo novo — ver `docs/ROADMAP.md`); Fiadas 1/2 de 2026-07-03 substituídas pelo
-> redesenho em camadas de 2026-07-04 (Camada 1 concluída) — ver entrada abaixo.
+> redesenho em camadas de 2026-07-04 (Camada 1 concluída, depois reescrita pra saída JSON
+> estruturada no mesmo dia) — ver entradas abaixo.
+
+---
+
+## [Camada 1 — Saída estruturada em JSON] — 2026-07-04 (mesmo dia)
+
+### Motivação
+
+Teste com uma tabela real (planilha de 8 itens de material de acabamento) expôs que o formato
+de saída original — uma linha de texto por item, casada por regex — forçava a IA a achatar uma
+tabela em texto corrido antes de responder. Sintomas: quantidade virando "1" quando a coluna
+real dizia outro valor (250, 60, 200, 6...), unidade errada, fabricante nunca separado, código
+de referência alterado (`72707/72745` virou `27707/72745`). Dennis: "isso é frágil por natureza."
+
+### Alterado
+
+- `PROMPT_INTERPRETAR_LISTA` reescrito em procedimento (detectar tabela → linhas → colunas
+  separadas → só então interpretar semanticamente) + regras (quantidade/unidade nunca
+  inventadas, `null` em vez de chute; código de referência copiado literalmente, nunca
+  "corrigido"; prioridade explícita: coluna da tabela > texto lido > interpretação da IA)
+- Saída agora é array JSON (`numero`, `descricao`, `fabricante`, `codigo`, `unidade`,
+  `quantidade`, `observacoes`) em vez de uma linha de texto por item
+- `_itens_lista_materiais()` reescrita: `json.loads()` no lugar do regex
+  (`_ITEM_LISTA_MATERIAIS_RE`, removido), com fallback defensivo — JSON malformado vira itens
+  em string, nunca perde item silenciosamente
+- `_texto_itens_interpretados()` mostra fabricante e código quando existirem; diz
+  explicitamente "quantidade não identificada"/"unidade não identificada" em vez de omitir
+
+### Documentado
+
+- Lição #13 de `LICOES_EXTRACAO.md`: dado tabular forçado em texto plano perde estrutura —
+  nova "Família C" de bug (formato de saída não tem a forma do dado de origem), distinta da
+  Família A (vocabulário implícito) e B (não reaproveita o que já sabe)
+
+### Testado
+
+Validado contra a tabela real como gabarito conhecido: 8/8 itens corretos (quantidade, unidade
+e código) com o texto colado; 5/8 perfeitos com a foto real — os 3 restantes com imperfeição
+de campo, mas nenhum inventando valor (o caso mais difícil retornou `null` e disse isso, em
+vez de "1 SC"). Regressão do fluxo orçamento → pedido confirmada.
 
 ---
 

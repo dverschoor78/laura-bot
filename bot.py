@@ -2691,19 +2691,46 @@ async def nova_obra(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 PROMPT_INTERPRETAR_LISTA = """
 Você recebeu uma lista de materiais ou peças que o usuário está montando para comprar —
-pode ser texto corrido, anotação à mão, lista impressa ou foto. Não tem preço nem fornecedor
-— não classifique nem tente identificar isso como orçamento.
+pode ser texto corrido, anotação à mão, lista impressa, foto de uma tabela ou PDF. Não tem
+preço nem fornecedor — não classifique nem tente identificar isso como orçamento.
 
-Extraia os dados EXATAMENTE neste formato:
+PROCEDIMENTO — siga esta ordem antes de responder:
+1. Verifique se o conteúdo tem estrutura de tabela (colunas separadas de descrição, unidade,
+   quantidade, código). Documentos de obra costumam ter essa estrutura mesmo quando a foto ou
+   o texto colado parece bagunçado.
+2. Se houver tabela, identifique cada linha (item) individualmente antes de interpretar
+   qualquer conteúdo.
+3. Para cada linha, identifique a coluna de descrição, a coluna de unidade e a coluna de
+   quantidade SEPARADAMENTE — nunca misture uma com a outra.
+4. Só depois de separar as colunas, interprete semanticamente o texto de cada campo (ex:
+   normalizar "sc" como unidade, identificar o fabricante dentro da descrição).
 
-Itens (formato: N. Descrição do item (QTDE UND); liste todos os itens da lista — NUNCA
-invente ou escreva preço, mesmo que consiga estimar um valor de mercado; se a quantidade ou
-unidade não estiver clara, não invente — deixe a melhor interpretação possível do texto):
-- UND é sempre uma unidade de medida real (kg, sc/saco, un/unidade, m, m2, m3, L, cx/caixa,
-  rolo, barra, pç/peça, etc.). NUNCA é o nome de uma marca ou fabricante (ex: Quartzolit,
-  Tigre, Votorantim, Vedacit). Se uma marca aparecer perto da quantidade, mantenha-a dentro
-  da descrição do item — nunca no lugar da unidade.
-Observações: (texto livre, só se houver algo relevante — ex: "lista escrita à mão")
+REGRAS — nunca violar, mesmo sob a tentação de "completar" um campo:
+- Quantidade e unidade vêm da coluna correspondente da tabela. Se não for possível ler com
+  confiança, use `null` — NUNCA invente ou assuma "1" como padrão.
+- Fabricante é a marca/fabricante do produto (ex: Cauê, Belka, Lef, Quartzolit, Tigre,
+  Votorantim) — sempre um campo separado da descrição e da unidade, nunca dentro de um ou
+  de outro.
+- Código de referência do fabricante (ex: "72707/72745", "RX32000A") é um identificador —
+  copie exatamente os caracteres/dígitos como aparecem. NUNCA reordene, corrija ou "arrume"
+  um código, mesmo que pareça estranho. Se a leitura não for 100% clara, use `null` e registre
+  em observações que a leitura é incerta (ex: "código de difícil leitura, conferir").
+- Prioridade quando houver qualquer dúvida: (1) o valor escrito na coluna da tabela, (2) o
+  texto exatamente como foi lido, (3) sua interpretação. Nunca "melhore" ou complete um valor
+  objetivo com base no que pareceria mais provável.
+- Nunca invente ou escreva preço, mesmo que consiga estimar um valor de mercado — preço não
+  existe nesse tipo de documento.
+
+Responda APENAS com um array JSON, sem markdown, sem texto antes ou depois, neste formato:
+[
+  {"numero": 1, "descricao": "Cimento CP II 50 kg", "fabricante": "Cauê", "codigo": null,
+   "unidade": "SC", "quantidade": 250.0, "observacoes": null}
+]
+
+Campos: "numero" (inteiro — número do item na lista original, ou null se não houver
+numeração), "descricao" (string, obrigatório), "fabricante" (string ou null), "codigo"
+(string ou null), "unidade" (string ou null), "quantidade" (número ou null), "observacoes"
+(string ou null).
 """
 
 async def _interpretar_lista_texto(texto):
@@ -2736,6 +2763,12 @@ async def _interpretar_lista_arquivo(conteudo_bytes, mime_inf):
     )
     return _itens_lista_materiais(resposta.content[0].text)
 
+def _fmt_qtde_segura(qtde):
+    try:
+        return _fmt_qtde(float(qtde))
+    except (TypeError, ValueError):
+        return str(qtde)
+
 def _texto_itens_interpretados(itens, ggv):
     label_ggv = f"Obra {ggv}" if ggv else "Obra ainda não definida"
     linhas = [f"📝 <b>Lista interpretada — {label_ggv}</b>", ""]
@@ -2744,41 +2777,62 @@ def _texto_itens_interpretados(itens, ggv):
         return "\n".join(linhas)
     for i, item in enumerate(itens, 1):
         if isinstance(item, dict):
-            linhas.append(f"{i}. {item['desc']} ({item['qtde']} {item['und']})")
+            partes = [item["descricao"]]
+            if item.get("fabricante"):
+                partes.append(f"— {item['fabricante']}")
+            if item.get("codigo"):
+                partes.append(f"(cód. {item['codigo']})")
+            linha = " ".join(partes)
+
+            qtde, und = item.get("quantidade"), item.get("unidade")
+            if qtde is not None and und:
+                linha += f" — {_fmt_qtde_segura(qtde)} {und}"
+            elif qtde is not None:
+                linha += f" — {_fmt_qtde_segura(qtde)} (unidade não identificada)"
+            elif und:
+                linha += f" — quantidade não identificada ({und})"
+            else:
+                linha += " — quantidade e unidade não identificadas"
+
+            linhas.append(f"{i}. {linha}")
+            if item.get("observacoes"):
+                linhas.append(f"   Obs: {item['observacoes']}")
         else:
             linhas.append(f"{i}. {item}")
     return "\n".join(linhas)
 
-_ITEM_LISTA_MATERIAIS_RE = re.compile(
-    r"^\d+\.\s+(.+?)\s+\(([0-9,.]+)\s+([A-Za-zÀ-ÿ]{1,15}[²³0-9]{0,2})\)\s*$",
-    re.IGNORECASE,
-)
-
 def _itens_lista_materiais(dados):
-    """Mesma filosofia de _itens() (item já existente pro fluxo de orçamento), adaptada
-    pra lista de materiais sem preço: 'N. Descrição (QTDE UND)'. Item que não bate no
-    formato é salvo como string — nunca descartado."""
-    resultado, capturando = [], False
-    for linha in dados.splitlines():
-        stripped = linha.strip().lstrip("- *")
-        if re.match(r"^itens", stripped, re.IGNORECASE) and ":" in stripped:
-            capturando = True
-            inline = stripped.split(":", 1)[1].strip().strip("*").strip()
-            if not inline:
+    """Parseia o array JSON retornado pela IA (PROMPT_INTERPRETAR_LISTA) em itens
+    estruturados: numero, descricao, fabricante, codigo, unidade, quantidade, observacoes.
+
+    Claude às vezes envolve o JSON em cercas de markdown mesmo quando instruído a não
+    fazer — removidas defensivamente antes do parse. Se o JSON vier malformado, cada linha
+    não vazia do texto bruto vira um item em string (fallback) — nunca perde item
+    silenciosamente, mesmo espírito do fallback que já existia no parser antigo."""
+    texto = dados.strip()
+    if texto.startswith("```"):
+        texto = re.sub(r"^```[a-zA-Z]*\n?", "", texto)
+        texto = re.sub(r"\n?```$", "", texto).strip()
+    try:
+        itens_json = json.loads(texto)
+        if not isinstance(itens_json, list):
+            raise ValueError("Resposta não é uma lista JSON")
+        resultado = []
+        for item in itens_json:
+            if not isinstance(item, dict) or not item.get("descricao"):
                 continue
-            stripped = inline
-        if capturando:
-            if not stripped:
-                continue
-            if re.match(r"^observ", stripped, re.IGNORECASE):
-                break
-            m = _ITEM_LISTA_MATERIAIS_RE.match(stripped)
-            if m:
-                desc, qtde_str, und = m.groups()
-                resultado.append({"desc": desc.strip(), "und": und.upper(), "qtde": qtde_str})
-            elif stripped:
-                resultado.append(stripped)
-    return resultado
+            resultado.append({
+                "numero": item.get("numero"),
+                "descricao": str(item["descricao"]).strip(),
+                "fabricante": item.get("fabricante") or None,
+                "codigo": item.get("codigo") or None,
+                "unidade": item.get("unidade") or None,
+                "quantidade": item.get("quantidade"),
+                "observacoes": item.get("observacoes") or None,
+            })
+        return resultado
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return [linha.strip() for linha in dados.splitlines() if linha.strip()]
 
 async def lista_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != DONO_ID:

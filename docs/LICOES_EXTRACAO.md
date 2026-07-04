@@ -254,24 +254,72 @@ Claude vai preencher a posição sintaticamente certa com o token mais próximo 
 
 ---
 
+## 13. Dado tabular forçado em texto plano perde estrutura (quantidade, unidade, código)
+
+**Sintoma:** lista de materiais real (foto de uma tabela: descrição | unidade | quantidade)
+voltou com quantidade "1" pra quase todo item, mesmo a coluna real dizendo 250, 60, 200, 6…
+Unidade também saiu errada em alguns casos (Forro PVC virou "1 ROLO" em vez de "110,4 M2"). E
+um código de referência foi alterado: "72707/72745" virou "27707/72745" — dígitos trocados.
+
+**Causa raiz:** o formato de saída pedido (`PROMPT_INTERPRETAR_LISTA`) era uma linha de texto
+livre por item — `N. Descrição (QTDE UND)` — casada por um regex único (`_ITEM_LISTA_MATERIAIS_RE`).
+Isso obriga o Claude a serializar uma tabela (colunas separadas) numa frase só, sem nenhum
+passo intermediário de "ler coluna por coluna". Quando não consegue encaixar o valor real da
+coluna de quantidade no parêntese, ele preenche com algo plausível em vez de admitir que não
+leu — não existia instrução proibindo isso (só existia pra preço). Código de referência, por
+sua vez, foi tratado como texto comum sujeito a "correção", não como identificador a copiar
+literalmente.
+
+**Correção:** duas mudanças, não uma. (1) PROMPT reescrito em procedimento explícito — detectar
+tabela → identificar linhas → separar colunas de descrição/unidade/quantidade → só depois
+interpretar semanticamente — mais regra de prioridade (coluna da tabela > texto lido >
+interpretação da IA) e regra específica pra código (copiar literalmente, `null` se incerto,
+nunca reordenar dígitos). (2) Formato de saída trocado de linha de texto pra array JSON
+estruturado (`numero`, `descricao`, `fabricante`, `codigo`, `unidade`, `quantidade`,
+`observacoes`), com `_itens_lista_materiais()` reescrita pra `json.loads()` no lugar do regex.
+Validado contra a tabela real (8 itens, gabarito conhecido): 8/8 corretos com o texto colado;
+5/8 perfeitos com a foto real, os 3 restantes com imperfeição de campo mas **nenhum inventando
+valor** — o caso mais difícil retornou `null` e disse isso, em vez de "1 SC".
+
+**Lição geral:** quando a fonte de dado é uma tabela (colunas distintas de valor), pedir uma
+saída de **texto livre por item** é o problema, não só o conteúdo do prompt — o formato de
+saída importa tanto quanto as regras. Dado tabular pede formato de saída estruturado (JSON ou
+equivalente) que preserve uma posição própria por coluna; forçar de volta pra uma frase e
+tentar recuperar estrutura com regex depois é frágil por natureza (frase do Dennis: "isso é
+frágil por natureza"). Além disso: qualquer campo do tipo identificador/código deve ter regra
+própria de "copiar literalmente, nunca corrigir" — é uma classe de erro diferente de unidade/
+quantidade ambígua, porque não existe "melhor interpretação" possível pra um número de série.
+
+---
+
 ## Padrão geral por trás de tudo isso
 
-Duas famílias de bug, não uma só.
+Três famílias de bug, não uma só.
 
-**Família A (itens 1-6) — o código assume uma forma fixa de string vinda do Claude** (largura de
-caractere, formato numérico americano, unidade só-letra, gênero gramatical, campo com nome exato)
-— mas a extração por IA é inerentemente variável, principalmente em documentos que fogem do padrão
-esperado (boleto em vez de orçamento, dia sem zero à esquerda, unidade sem superíndice, "Não
-identificada" em vez de "Não identificado"). Regra prática: qualquer parser de valor/data/unidade
-extraído pelo Claude deve ser feito com regex tolerante (`{1,2}` em vez de índice fixo) ou checagem
-por prefixo (nunca comparação exata de string), nunca `string[a:b]` cru.
+**Família A (itens 1-6, 11, 12) — o código assume uma forma fixa de string vinda do Claude**
+(largura de caractere, formato numérico americano, unidade só-letra, gênero gramatical, campo
+com nome exato, vocabulário implícito de "o que é uma unidade válida") — mas a extração por IA
+é inerentemente variável, principalmente em documentos que fogem do padrão esperado (boleto em
+vez de orçamento, dia sem zero à esquerda, unidade sem superíndice, "Não identificada" em vez de
+"Não identificado", marca confundida com unidade). Regra prática: qualquer parser de valor/data/
+unidade extraído pelo Claude deve ser feito com regex tolerante (`{1,2}` em vez de índice fixo)
+ou checagem por prefixo (nunca comparação exata de string), nunca `string[a:b]` cru — e toda
+instrução de "extraia o campo X" precisa dizer explicitamente o que X pode e não pode ser.
 
 **Família B (itens 7, 9, 10) — o sistema não reaproveita o que já sabe.** Dado já cadastrado
 (PIX do fornecedor), domínio novo que muda o significado de "correspondência" (pagamento
 parcelado), ou variável já buscada do banco mas nunca usada na tela final — três formas do mesmo
 problema: escrever uma tela/função nova sem revisitar o que já existe ao redor dela.
 
-Regra prática comum às duas famílias: testar contra pelo menos um caso real de produção antes de
-considerar corrigido — não só contra dado fictício. Foi assim que todos os 10 bugs acima foram
+**Família C (item 13) — o formato de saída pedido não tem a mesma forma que o dado de origem.**
+Diferente da Família A (onde o problema é o *vocabulário* dentro de um formato certo), aqui o
+*formato* em si está errado: pedir uma frase de texto livre pra representar uma tabela (colunas
+distintas de valor) obriga a IA a achatar estrutura antes de responder, e qualquer tentativa de
+recuperar essa estrutura depois com regex é frágil por natureza. Regra prática: quando a fonte é
+tabular, o formato de saída também deve ser tabular/estruturado (JSON, um objeto por linha) —
+nunca uma frase por item.
+
+Regra prática comum às três famílias: testar contra pelo menos um caso real de produção antes de
+considerar corrigido — não só contra dado fictício. Foi assim que todos os 13 casos acima foram
 confirmados (lendo o PDF/imagem real ou consultando o banco de produção, não assumindo a partir do
 sintoma).

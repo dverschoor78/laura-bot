@@ -193,6 +193,20 @@ Lista de materiais" no menu de documento) — testado estruturalmente que são a
 não duas cópias. `/lista` muda de papel: não abre mais edição item a item, pede "Envie a
 lista — texto, foto ou PDF" e interpreta tudo de uma vez.
 
+**Mesmo dia, reescrita pra saída JSON estruturada:** teste com tabela real (8 itens de
+acabamento) expôs que pedir uma linha de texto por item forçava a IA a achatar a tabela antes
+de responder — quantidade virando "1" quando a coluna dizia outro valor, código de referência
+alterado ("72707/72745" → "27707/72745"). Corrigido: `PROMPT_INTERPRETAR_LISTA` reescrito em
+procedimento (detectar tabela → linhas → colunas separadas) + regras (nunca inventar
+quantidade/unidade, código copiado literalmente, prioridade coluna > texto lido >
+interpretação); saída virou array JSON; `_itens_lista_materiais()` usa `json.loads()` com
+fallback defensivo no lugar do regex antigo. Documentado como Lição #13 (nova "Família C" de
+bug: formato de saída não tem a forma do dado de origem). Validado contra a tabela real como
+gabarito: 8/8 com texto colado, 5/8 perfeitos com a foto real — os 3 restantes com
+imperfeição de campo, mas nenhum inventando valor (pior caso retornou `null`, não "1 SC").
+Dennis aceitou esse nível de qualidade pra seguir; refino adicional fica pra depois, se
+necessário.
+
 **Bug real encontrado e corrigido (Lição #12 de `LICOES_EXTRACAO.md`):** Dennis reportou
 "unidade não é quartzolit, é sc" — marca/fabricante sendo confundida com unidade de medida
 quando aparece perto da quantidade no texto/foto original. Mesma classe de bug da Lição #1
