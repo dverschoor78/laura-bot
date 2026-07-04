@@ -15,26 +15,73 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > sozinhas com o uso do dia a dia não entram aqui (ex: fechar um pedido parcelado esperando
 > pagamento). Ver Dívida Técnica em `docs/ROADMAP.md`.
 
-1. Camada 2 do módulo de Compras — candidatos SINAPI (busca FTS5 + Claude decide);
-   infra de banco já pronta (`insumos_sinapi_fts`) — ver `docs/ROADMAP.md`
-2. Camadas 3-6 — referência de último preço, tela de conferência editável, edição
-   item a item, gravação final confirmada
-3. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
-4. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
-5. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
-6. Acesso via Claude Code Remote do celular — ideia registrada, servidor Proxmox em casa (Eric)
-7. Persistir os 9 índices de `data/laura.db` em código (hoje só existem no banco vivo — um `init_db()`
+1. Camadas 3-6 do módulo de Compras — referência de último preço, tela de conferência
+   editável, edição item a item, gravação final confirmada
+2. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
+3. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
+4. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
+5. Acesso via Claude Code Remote do celular — ideia registrada, servidor Proxmox em casa (Eric)
+6. Persistir os 9 índices de `data/laura.db` em código (hoje só existem no banco vivo — um `init_db()`
    contra um banco novo não os recria; ver Dívida Técnica em `docs/ROADMAP.md`)
 
-> Fiada própria, não priorizada ainda: "Motor de Interpretação e Classificação de Documentos" —
-> convergência dos três caminhos divergentes de confirmação de documento (achado 2026-07-04,
-> ver Dívida Técnica e Visão de Longo Prazo em `docs/ROADMAP.md`). Precisa de investigação antes
-> de qualquer código — não é uma troca simples de chamada.
+> Fiadas próprias, não priorizadas ainda: "Motor de Interpretação e Classificação de Documentos"
+> (convergência dos três caminhos divergentes de confirmação de documento) e "Compreensão de
+> Produto antes da Correspondência SINAPI" (atributos técnicos completos antes de casar com
+> SINAPI — deliberadamente não persistido ainda, ver Visão de Longo Prazo em `docs/ROADMAP.md`).
 
-> Concluído desde a última revisão: endereço da Lista de Compras resolvido (herda da obra, não
-> vira atributo novo — ver `docs/ROADMAP.md`); Fiadas 1/2 de 2026-07-03 substituídas pelo
+> Concluído desde a última revisão: Camada 2 do módulo de Compras (candidatos SINAPI, grau de
+> confiança, equivalência de unidade) — ver entrada abaixo; endereço da Lista de Compras
+> resolvido (herda da obra, não vira atributo novo); Fiadas 1/2 de 2026-07-03 substituídas pelo
 > redesenho em camadas de 2026-07-04 (Camada 1 concluída, depois reescrita pra saída JSON
-> estruturada no mesmo dia) — ver entradas abaixo.
+> estruturada no mesmo dia) — ver `docs/ROADMAP.md`.
+
+---
+
+## [Camada 2 — Candidatos SINAPI, confiança e equivalência de unidade] — 2026-07-04 (mesmo dia)
+
+### Motivação
+
+Primeiro teste da Camada 2 casou "Revestimento Cerâmico HD 32x57,5" com um código SINAPI de
+**porcelanato** — categorias adjacentes mas tecnicamente diferentes, preços bem distintos.
+Dennis: "prefiro que ela diga correspondência de baixa confiança... do que assumir um item
+incorreto. Errar com confiança é pior do que admitir dúvida." Pediu também para a Laura
+"entender o produto antes de procurar a referência" em vez de só comparar descrição — mas
+sem criar uma entidade nova: "não quero criar uma estrutura permanente antes de comprovar
+seu valor."
+
+### Adicionado
+
+- `_candidatos_sinapi()`: busca por palavra-chave (FTS5) contra `insumos_sinapi_fts` — recall
+  alto, não precisão; é só o filtro inicial
+- `_adicionar_correspondencia_sinapi()`: uma única chamada ao Claude decide a correspondência
+  da lista inteira (não uma por item) — chamada de dentro de `_interpretar_lista_texto()`/
+  `_interpretar_lista_arquivo()`, nunca por um caminho separado (mesma convergência da Camada 1)
+- `PROMPT_ESCOLHER_SINAPI`: pede pro Claude considerar internamente categoria, aplicação,
+  material e especificação técnica antes de decidir — sem exigir esses atributos como campos
+  de saída (raciocínio de interpretação, não schema novo)
+- Grau de confiança por correspondência: alta/média/baixa/nenhuma — sempre exibido, nunca
+  escondido
+- Regra explícita contra categorias adjacentes (o caso real do porcelanato/revestimento)
+- Equivalência de unidade quando a comercial diverge da SINAPI (ex: 250 SC de cimento de
+  50 kg → 12.500 KG), calculada só quando há certeza a partir do contexto da própria descrição
+- Itens anotados com os 5 campos de snapshot já previstos no schema (`sinapi_codigo` +
+  descrição/unidade/preço/mês de referência) — prontos pra Camada 6 gravar sem tradução
+
+### Documentado
+
+- Nova "Visão de Longo Prazo — Compreensão de Produto antes da Correspondência SINAPI" em
+  `docs/ROADMAP.md`: a visão completa (atributos técnicos completos, catálogo próprio da
+  Laura) fica registrada, deliberadamente não implementada como entidade — só como raciocínio
+  dentro do prompt de decisão, por enquanto
+
+### Testado
+
+Contra a mesma tabela real como gabarito: o falso positivo do porcelanato desapareceu com o
+texto colado (casou certo, Alta confiança) e as 4 equivalências de unidade calculadas bateram
+exatas (12.500 KG, 1.200 KG, 4.000 KG, 30 KG). Com a foto real (onde a Camada 1 perde o
+fabricante desse item específico), o mesmo match errado ainda aconteceu, mas rotulado "Média
+confiança" em vez de "Alta" — mudança de natureza do erro, não eliminação total. Regressão do
+fluxo orçamento → pedido confirmada.
 
 ---
 

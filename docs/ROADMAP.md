@@ -139,14 +139,47 @@ errada, fabricante nunca separado, código de referência alterado (`72707/72745
   de "confiante e errado" para "incerto e visível". Aceito por Dennis nesse nível — refino
   adicional do prompt fica pra depois, se necessário
 
-**Camadas 2 a 6 — pendentes** *(não iniciadas)*
+**Camada 2 — Candidatos SINAPI (busca FTS5 + Claude decide)** ✓ *(2026-07-04, mesmo dia)*
 
-1. Candidatos SINAPI (busca FTS5 + Claude decide) — infra de banco já pronta
-   (`insumos_sinapi_fts`, ver Dívida Técnica/infra abaixo)
-2. Referência de último preço pago (própria Laura)
-3. Tela de conferência editável (obra, endereço, itens com SINAPI/referência visíveis)
-4. Edição item a item (escolher item → escolher campo → digitar novo valor)
-5. Gravação final confirmada — só aqui os dois snapshots são congelados de verdade
+Uma única chamada extra ao Claude decide a correspondência da lista inteira (não uma por
+item): `_candidatos_sinapi()` busca por palavra-chave via `insumos_sinapi_fts` (recall alto,
+não precisão — é só o filtro inicial), `_adicionar_correspondencia_sinapi()` manda os
+candidatos + a descrição de cada item pro Claude escolher o melhor ou declarar que nenhum
+serve. Anota os itens com os 5 campos de snapshot já previstos no schema (`sinapi_codigo`,
+`sinapi_descricao_referencia`, `sinapi_unidade_referencia`, `sinapi_preco_referencia`,
+`sinapi_mes_referencia`) — prontos pra Camada 6 gravar sem tradução.
+
+Depois do primeiro teste (que casou "Revestimento Cerâmico" com um código de porcelanato —
+falso positivo de categoria adjacente), Dennis pediu evolução: em vez de comparar só
+descrição, a Laura deve **entender o produto antes de procurar a referência**. Implementado
+como raciocínio dentro da própria etapa de decisão (`PROMPT_ESCOLHER_SINAPI`), não como
+atributos persistidos — decisão explícita do Dennis: "não quero criar uma estrutura
+permanente antes de comprovar seu valor."
+
+- Grau de confiança por correspondência (alta/média/baixa/nenhuma) — "errar com confiança é
+  pior que admitir dúvida"; toda correspondência mostra o nível, nunca esconde incerteza
+- Regra explícita contra categorias adjacentes mas tecnicamente diferentes (o caso real:
+  porcelanato ≠ revestimento cerâmico comum, mesmo aparecendo juntos na busca por palavra-chave)
+- Equivalência de unidade quando a unidade comercial diverge da unidade SINAPI (ex: 250 SC de
+  cimento de 50 kg → 12.500 KG) — calculada pelo Claude a partir do próprio contexto da
+  descrição, só quando há certeza; `null` caso contrário
+- **Validado contra a mesma tabela real:** com o texto colado, o falso positivo do
+  porcelanato desapareceu — casou certo com "REVESTIMENTO EM CERÂMICA ESMALTADA", Alta
+  confiança, e as 4 equivalências de unidade calculadas bateram exatas (12.500 KG, 1.200 KG,
+  4.000 KG, 30 KG). Com a foto real (onde a Camada 1 perde o fabricante desse item), o mesmo
+  match errado de porcelanato ainda aconteceu, mas agora rotulado **"Média confiança"** em
+  vez de "Alta" — mudança de natureza do erro, mesmo padrão da Camada 1: de confiante-e-errado
+  pra sinalizado-como-incerto
+
+**Visão de longo prazo registrada, não implementada:** ver seção própria mais abaixo —
+"Compreensão de Produto antes da Correspondência SINAPI".
+
+**Camadas 3 a 6 — pendentes** *(não iniciadas)*
+
+1. Referência de último preço pago (própria Laura)
+2. Tela de conferência editável (obra, endereço, itens com SINAPI/referência visíveis)
+3. Edição item a item (escolher item → escolher campo → digitar novo valor)
+4. Gravação final confirmada — só aqui os dois snapshots são congelados de verdade
 
 ---
 
@@ -673,6 +706,44 @@ A Laura não precisa acertar tudo sozinha desde o começo — precisa de uma arq
 melhorar continuamente. Sair de "o usuário informa o tipo" para "a Laura sugere o tipo com base no
 conteúdo e pede confirmação humana" é o horizonte; a convergência dos caminhos hoje divergentes é
 o primeiro passo necessário antes disso ser sequer possível.
+
+---
+
+## Visão de Longo Prazo — Compreensão de Produto antes da Correspondência SINAPI
+
+*Registrado em 2026-07-04, a partir da Camada 2 do módulo de Compras. Tratado por enquanto como
+raciocínio de interpretação, não como entidade nova — ver restrição do Dennis abaixo.*
+
+### O que já muda hoje
+
+A Camada 2 já deixou de comparar só "descrição parecida" — o `PROMPT_ESCOLHER_SINAPI` pede pro
+Claude considerar internamente categoria, aplicação, material e especificação técnica antes de
+decidir uma correspondência, e declarar um grau de confiança (alta/média/baixa/nenhuma) em vez
+de um sim/não binário.
+
+### A visão maior — ainda não implementada
+
+Dennis: "Hoje fazemos Descrição → SINAPI. Quero caminhar para Descrição → Compreensão do
+produto → SINAPI." A ideia é que a Laura extraia atributos técnicos completos de cada item antes
+de procurar a referência — não só pra casar melhor com o SINAPI, mas como base pra um catálogo
+técnico-comercial próprio, do qual o SINAPI seria uma referência entre outras, não a única fonte.
+
+Atributos que a visão completa cobre: categoria, é material ou ferramenta, aplicação (piso,
+parede, teto, estrutura...), material predominante, dimensões, acabamento, fabricante, código
+comercial, embalagem, unidade comercial, características técnicas da descrição.
+
+### Restrição explícita do Dennis — por que isso não virou schema novo agora
+
+> "Não quero criar um 'Produto Laura' como uma nova entidade do sistema agora... Esses atributos
+> não precisam necessariamente ser persistidos agora. Eles podem existir apenas durante o
+> processo de interpretação... Por enquanto, quero evitar criar uma estrutura permanente antes
+> de comprovar seu valor."
+
+Isso é aplicação direta de "Aprender antes de otimizar" (CONSTITUICAO.md). Enquanto essa visão
+não vira entidade, os atributos considerados durante o raciocínio da Camada 2 não aparecem como
+campos de saída — só influenciam a decisão final (código escolhido + confiança + equivalência de
+unidade, quando aplicável). Se algum desses atributos comprovar valor próprio pra consultas,
+estatísticas ou comparação entre marcas, aí sim vira candidato a persistência — não antes.
 
 ---
 

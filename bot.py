@@ -2745,7 +2745,8 @@ async def _interpretar_lista_texto(texto):
             ]
         }]
     )
-    return _itens_lista_materiais(resposta.content[0].text)
+    itens = _itens_lista_materiais(resposta.content[0].text)
+    return await _adicionar_correspondencia_sinapi(itens)
 
 async def _interpretar_lista_arquivo(conteudo_bytes, mime_inf):
     tipo_conteudo = "document" if mime_inf == "application/pdf" else "image"
@@ -2761,7 +2762,151 @@ async def _interpretar_lista_arquivo(conteudo_bytes, mime_inf):
             ]
         }]
     )
-    return _itens_lista_materiais(resposta.content[0].text)
+    itens = _itens_lista_materiais(resposta.content[0].text)
+    return await _adicionar_correspondencia_sinapi(itens)
+
+# ── Camada 2 — Candidatos SINAPI (busca FTS5 + Claude decide) ──────────────
+# Convergência deliberada: a correspondência acontece dentro das duas funções de
+# interpretação acima, não numa etapa separada que cada chamador precisaria lembrar de
+# invocar — mesmo princípio "entradas diferentes, processo único" da Camada 1.
+
+_SINAPI_PALAVRA_RE = re.compile(r"[A-Za-zÀ-ÿ0-9]+")
+
+def _candidatos_sinapi(descricao, limite=6):
+    """Busca candidatos SINAPI por palavra-chave (FTS5) para a descrição de um item.
+    Recall alto, não precisão — a decisão final é do Claude na segunda etapa. Nunca
+    levanta exceção: lista vazia em qualquer caso de falha (defensivo, mesmo espírito do
+    resto do pipeline de interpretação)."""
+    palavras = [p for p in _SINAPI_PALAVRA_RE.findall(descricao.lower()) if len(p) >= 3][:8]
+    if not palavras:
+        return []
+    query_fts = " OR ".join(palavras)
+    try:
+        with sqlite3.connect(DB_PATH) as con:
+            con.row_factory = sqlite3.Row
+            rows = con.execute("""
+                SELECT s.codigo, s.descricao, s.unidade, s.preco_pr, s.mes_referencia
+                FROM insumos_sinapi_fts f
+                JOIN insumos_sinapi s ON s.codigo = f.rowid
+                WHERE insumos_sinapi_fts MATCH ?
+                ORDER BY rank
+                LIMIT ?
+            """, (query_fts, limite)).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        return []
+
+PROMPT_ESCOLHER_SINAPI = """
+Para cada item da lista abaixo, você recebeu candidatos de insumos SINAPI (base de preços
+oficial da construção civil) encontrados por busca de palavra-chave — a busca é só um filtro
+inicial, pode trazer candidato errado ou nenhum candidato certo.
+
+Antes de decidir, entenda o produto de verdade — não compare só a descrição como texto.
+Considere internamente: o que é este produto, qual sua categoria, é material ou ferramenta,
+qual a aplicação (piso, parede, teto, estrutura...), qual o material predominante, quais as
+dimensões, qual a embalagem/tamanho unitário de venda, quais características técnicas aparecem
+na descrição. Você não precisa escrever essas respostas — use-as só pra decidir melhor. SINAPI
+é referência genérica de material, sem marca — ignore a marca do item ao comparar.
+
+Escolha, para cada item, o candidato que representa exatamente o MESMO produto (mesma
+categoria, aplicação e especificação técnica relevante). Preste atenção especial a categorias
+adjacentes mas tecnicamente diferentes (ex: porcelanato não é a mesma coisa que revestimento
+cerâmico comum, mesmo aparecendo juntos numa busca por palavra-chave) — trate isso como
+discordância de categoria, não como "descrição parecida o suficiente".
+
+Classifique seu grau de confiança em cada correspondência:
+- "alta": categoria, aplicação e especificação técnica claramente compatíveis
+- "media": mesma categoria, mas alguma característica não confirmada com certeza
+- "baixa": categoria plausível mas com dúvida real — errar com confiança é pior que admitir
+  dúvida; prefira "baixa" a forçar "alta"/"media" quando não tiver certeza
+- "nenhuma": nenhum candidato representa o mesmo produto (nesse caso, sinapi_codigo é `null`)
+
+Se a unidade comercial do item for diferente da unidade do candidato escolhido (ex: item
+vendido em SC/saco, SINAPI referencia por KG) e você conseguir determinar com segurança o
+peso/volume de uma unidade de venda a partir da própria descrição do item, calcule a
+quantidade equivalente na unidade do SINAPI. Só calcule quando tiver certeza — senão `null`.
+
+Responda APENAS com um array JSON, sem markdown, sem texto antes ou depois, neste formato:
+[
+  {"numero": 1, "sinapi_codigo": 12345, "confianca": "alta",
+   "quantidade_equivalente": 12500.0, "unidade_equivalente": "KG"},
+  {"numero": 2, "sinapi_codigo": null, "confianca": "nenhuma",
+   "quantidade_equivalente": null, "unidade_equivalente": null}
+]
+"""
+
+async def _adicionar_correspondencia_sinapi(itens):
+    """Segunda etapa da Camada 2: para cada item já interpretado, busca candidatos SINAPI
+    e faz uma única chamada ao Claude decidindo a correspondência de toda a lista de uma
+    vez (não uma chamada por item). Anota os itens no lugar com os 5 campos de snapshot
+    SINAPI (sinapi_codigo/descricao_referencia/unidade_referencia/preco_referencia/
+    mes_referencia) — mesmos nomes das colunas de lista_compra_itens, prontos pra Camada 6
+    gravar sem tradução."""
+    candidatos_por_numero = {}
+    itens_para_claude = []
+    for item in itens:
+        if not isinstance(item, dict):
+            continue
+        candidatos = _candidatos_sinapi(item["descricao"])
+        candidatos_por_numero[item.get("numero")] = candidatos
+        if candidatos:
+            itens_para_claude.append({
+                "numero": item.get("numero"),
+                "descricao": item["descricao"],
+                "unidade_comercial": item.get("unidade"),
+                "quantidade_comercial": item.get("quantidade"),
+                "candidatos_sinapi": [
+                    {"codigo": c["codigo"], "descricao": c["descricao"], "unidade": c["unidade"]}
+                    for c in candidatos
+                ],
+            })
+
+    escolhas = {}
+    if itens_para_claude:
+        try:
+            resposta = claude.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=2048,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": json.dumps({"itens": itens_para_claude}, ensure_ascii=False)},
+                        {"type": "text", "text": PROMPT_ESCOLHER_SINAPI},
+                    ]
+                }]
+            )
+            texto_resposta = resposta.content[0].text.strip()
+            if texto_resposta.startswith("```"):
+                texto_resposta = re.sub(r"^```[a-zA-Z]*\n?", "", texto_resposta)
+                texto_resposta = re.sub(r"\n?```$", "", texto_resposta).strip()
+            for escolha in json.loads(texto_resposta):
+                escolhas[escolha.get("numero")] = escolha
+        except (json.JSONDecodeError, ValueError, TypeError, anthropic.APIError):
+            pass  # sem escolhas — todos os itens ficam sem correspondência SINAPI
+
+    for item in itens:
+        if not isinstance(item, dict):
+            continue
+        escolha = escolhas.get(item.get("numero")) or {}
+        codigo_escolhido = escolha.get("sinapi_codigo")
+        candidato = None
+        if codigo_escolhido is not None:
+            candidato = next(
+                (c for c in candidatos_por_numero.get(item.get("numero"), []) if c["codigo"] == codigo_escolhido),
+                None
+            )
+        item["sinapi_codigo"] = candidato["codigo"] if candidato else None
+        item["sinapi_descricao_referencia"] = candidato["descricao"] if candidato else None
+        item["sinapi_unidade_referencia"] = candidato["unidade"] if candidato else None
+        item["sinapi_preco_referencia"] = candidato["preco_pr"] if candidato else None
+        item["sinapi_mes_referencia"] = candidato["mes_referencia"] if candidato else None
+        # Confiança e equivalência de unidade: raciocínio da própria etapa de interpretação
+        # (Camada 2), não um atributo persistido — Dennis, 2026-07-04: "não quero criar uma
+        # estrutura permanente antes de comprovar seu valor".
+        item["sinapi_confianca"] = escolha.get("confianca") if candidato else ("nenhuma" if escolha else None)
+        item["sinapi_quantidade_equivalente"] = escolha.get("quantidade_equivalente")
+        item["sinapi_unidade_equivalente"] = escolha.get("unidade_equivalente")
+    return itens
 
 def _fmt_qtde_segura(qtde):
     try:
@@ -2795,6 +2940,23 @@ def _texto_itens_interpretados(itens, ggv):
                 linha += " — quantidade e unidade não identificadas"
 
             linhas.append(f"{i}. {linha}")
+
+            _CONFIANCA_LABEL = {"alta": "Alta confiança", "media": "Média confiança",
+                                 "baixa": "Baixa confiança", "nenhuma": "Sem correspondência"}
+            if item.get("sinapi_codigo"):
+                preco = item.get("sinapi_preco_referencia")
+                preco_fmt = f", R$ {_fmt_brl(preco)}/{item['sinapi_unidade_referencia']}" if preco else ""
+                confianca = _CONFIANCA_LABEL.get(item.get("sinapi_confianca"), "confiança não informada")
+                linhas.append(
+                    f"   SINAPI ({confianca}): {item['sinapi_descricao_referencia']} "
+                    f"(cód. {item['sinapi_codigo']}{preco_fmt}, ref. {item.get('sinapi_mes_referencia') or '?'})"
+                )
+                qtde_equiv, und_equiv = item.get("sinapi_quantidade_equivalente"), item.get("sinapi_unidade_equivalente")
+                if qtde_equiv is not None and und_equiv:
+                    linhas.append(f"   Equivalência: {_fmt_qtde_segura(qtde_equiv)} {und_equiv}")
+            else:
+                linhas.append("   SINAPI: sem correspondência confiável")
+
             if item.get("observacoes"):
                 linhas.append(f"   Obs: {item['observacoes']}")
         else:

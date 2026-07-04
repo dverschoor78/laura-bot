@@ -207,6 +207,21 @@ imperfeição de campo, mas nenhum inventando valor (pior caso retornou `null`, 
 Dennis aceitou esse nível de qualidade pra seguir; refino adicional fica pra depois, se
 necessário.
 
+**Mesmo dia, Camada 2 — candidatos SINAPI:** `_candidatos_sinapi()` (busca FTS5) +
+`_adicionar_correspondencia_sinapi()` (uma chamada ao Claude decide a lista inteira), chamadas
+de dentro das próprias funções de interpretação — mesma convergência da Camada 1. Primeiro
+teste achou um falso positivo real: "Revestimento Cerâmico" casado com código de porcelanato
+(categoria adjacente, preço bem diferente). Dennis pediu grau de confiança (nunca esconder
+incerteza) e "entender o produto antes de procurar a referência" — mas como raciocínio dentro
+do prompt de decisão, não como atributos persistidos: "não quero criar uma estrutura
+permanente antes de comprovar seu valor." Implementado: confiança alta/média/baixa/nenhuma,
+regra contra categoria adjacente, equivalência de unidade (250 SC de cimento 50kg → 12.500 KG)
+calculada só com certeza. Testado contra o mesmo gabarito: falso positivo desapareceu com o
+texto colado; com a foto real o mesmo erro ainda aconteceu, mas rotulado "Média confiança" em
+vez de "Alta" — de confiante-e-errado pra sinalizado-como-incerto, mesmo padrão da Camada 1.
+Visão de longo prazo (atributos técnicos completos, catálogo próprio da Laura) registrada em
+`docs/ROADMAP.md`, deliberadamente não implementada como entidade.
+
 **Bug real encontrado e corrigido (Lição #12 de `LICOES_EXTRACAO.md`):** Dennis reportou
 "unidade não é quartzolit, é sc" — marca/fabricante sendo confundida com unidade de medida
 quando aparece perto da quantidade no texto/foto original. Mesma classe de bug da Lição #1
