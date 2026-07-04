@@ -1,10 +1,11 @@
 # Arquitetura do Projeto Laura
 
-> Versão: 2026-07-03 — reflete o estado real do sistema (pós ADR-004: dispatch table + módulo
+> Versão: 2026-07-04 — reflete o estado real do sistema (pós ADR-004: dispatch table + módulo
 > `nfe/`; DOCX removido; segurança de `responder_botao()`/`atualizar()`/`atualizar_obra()`
 > corrigida; `itens_pedido`/`parcelas_pagamento`/`insumos_sinapi` documentadas; `financeiro/consultas.py`
-> e `financeiro/relatorios.py` adicionados; **módulo `compras/` nasce — Lista de Compras,
-> tipo de documento `lista_materiais`, comando `/lista`**)
+> e `financeiro/relatorios.py` adicionados; **módulo `compras/` — Lista de Compras com pipeline
+> completo de interpretação (Camadas 1-3: JSON estruturado, SINAPI, referência própria), tela
+> de conferência em 3 níveis e gravação real em `listas_compra`/`lista_compra_itens`**)
 
 ---
 
@@ -56,11 +57,16 @@ Telegram ──────► bot.py ──────► Claude API (haiku-4-
   chamado manualmente
 - **`compras/`** (2026-07-03) — domínio de Compras, nasce modular desde o primeiro dia (ADR-002).
   `compras/lista.py`: Lista de Compras e Item da Lista (Modelo de Domínio: `docs/MODELO_DOMINIO_COMPRAS.md`),
-  todas as funções recebendo `db_path`. Dois pontos de entrada em `bot.py` — comando `/lista` e
-  tipo de documento `lista_materiais` — convergem pra mesma função de interpretação (`_interpretar_lista_texto`/
-  `_interpretar_lista_arquivo`), nunca implementações separadas (ver Fluxo C). Camada 1 apenas:
-  interpretação por IA, ainda sem correspondência SINAPI, sem referência de preço, sem edição e
-  sem gravação em `listas_compra`/`lista_compra_itens` — ver ROADMAP.md
+  todas as funções recebendo `db_path`. Três pontos de entrada em `bot.py` — comando `/lista`
+  por texto, `/lista` por foto/PDF, e o tipo de documento `lista_materiais` — convergem pra
+  mesma função de interpretação (`_interpretar_lista_texto`/`_interpretar_lista_arquivo`),
+  nunca implementações separadas (ver Fluxo C). Pipeline completo (2026-07-04): Camada 1
+  (interpretação JSON estruturada, com contexto da lista inteira) → Camada 2 (candidatos
+  SINAPI via FTS5 + Claude decide, com termo técnico de busca e conversão de preço pra
+  unidade comercial) → Camada 3 (última compra própria, filtro obrigatório de unidade igual)
+  → tela de conferência em 3 níveis (ver Fluxo C) → gravação real em `listas_compra`/
+  `lista_compra_itens` ao confirmar. Ainda sem geração de Pedido de Compra a partir da Lista
+  nem vínculo com orçamento; edição é do item inteiro, não campo a campo — ver ROADMAP.md
 - **`data/laura.db`** — banco SQLite com dez tabelas (ver seção 3); 9 índices estratégicos
   criados em 2026-07-03, mas só no banco vivo — não persistidos em nenhum `CREATE INDEX` versionado
 - **`data/uploads/`** — todo arquivo recebido pelo Telegram cai aqui primeiro (pasta única,
@@ -273,6 +279,7 @@ reaproveitam a mesma lista em vez de criar outra.
 | `id` | Chave primária |
 | `lista_id` | Lista à qual o item pertence — sem FK explícita |
 | `descricao`, `unidade`, `quantidade` | Dados do item — quantidade pode ser `NULL` |
+| `fabricante`, `codigo` | Identidade comercial do item (marca e código de referência do fabricante) — adicionadas 2026-07-04 junto com a primeira gravação real; mesma categoria de descricao/unidade/quantidade, não são "snapshot" de referência externa |
 | `sinapi_codigo` | Vínculo/rastreabilidade com `insumos_sinapi` — não usar pra exibição histórica |
 | `sinapi_descricao_referencia`, `sinapi_unidade_referencia`, `sinapi_preco_referencia`, `sinapi_mes_referencia` | **Snapshot** SINAPI congelado no momento da confirmação — `insumos_sinapi` muda todo mês, a leitura de uma lista antiga não pode mudar de valor sozinha (CONSTITUICAO.md, "Dados são sagrados") |
 | `laura_preco_referencia`, `laura_data_referencia`, `laura_fornecedor_referencia`, `laura_origem_referencia`, `laura_grau_confianca_referencia` | **Snapshot** da referência interna da Laura (último preço pago/média/item semelhante/sem referência), mesmo motivo — nunca recalculado depois. Vocabulário de confiança do Princípio 8 da Política de Compras |
@@ -280,11 +287,12 @@ reaproveitam a mesma lista em vez de criar outra.
 | `status` | `pendente` / `comprado` / `removido` — hoje só `pendente`/`removido` são alcançáveis (vínculo com Pedido de Compra é fiada futura) |
 | `criado_em` | Timestamp de inserção |
 
-2026-07-04: `adicionar_item()` (`compras/lista.py`) aceita e grava todos os campos de snapshot,
-todos opcionais — mas **nada no código ainda os preenche**. Camada 1 (interpretação, implementada)
-não grava nada nesta tabela ainda; Camadas 2-3 (SINAPI, referência de preço) são o que vai calcular
-esses valores; Camada 6 (gravação final) é quem efetivamente chama `adicionar_item()` com os
-snapshots prontos. Ver ROADMAP.md, Fase — Módulo de Compras.
+2026-07-04: `_cb_lc_gerar()` (bot.py, botão "✅ Gerar Lista de Compras" da tela de conferência)
+chama `criar_ou_buscar_lista_aberta()` + `adicionar_item()` com todos os campos, incluindo os
+snapshots SINAPI/Laura já calculados pelas Camadas 2 e 3 — a Lista de Compras passa a existir
+de verdade no banco a partir da confirmação do usuário. Bloqueia se a obra não estiver
+definida (`ggv NOT NULL`). Ainda não gera Pedido de Compra nem cria vínculo com orçamento —
+ver ROADMAP.md, Fase — Módulo de Compras.
 
 ---
 
@@ -320,29 +328,45 @@ Dennis digita o código (ex: GGV03-009)
   → bot exibe tela do pedido com botões de ação
 ```
 
-**Fluxo C — Interpretação de lista de materiais (Camada 1, ainda sem gravação)** *(2026-07-04)*
+**Fluxo C — Lista de Compras: interpretação, conferência e gravação** *(2026-07-04)*
 
 ```
-Dennis dispara por dois caminhos, que convergem pra mesma função:
-  (a) /lista [GGV opcional] → bot pede "Envie a lista — texto, foto ou PDF"
-  (b) envia foto/PDF → escolhe "📝 Lista de materiais" no menu de tipo de documento
+Dennis dispara por três caminhos, que convergem pras mesmas funções:
+  (a) /lista [GGV opcional] envia texto → bot pede "Envie a lista — texto, foto ou PDF"
+  (b) /lista envia foto/PDF
+  (c) envia foto/PDF → escolhe "📝 Lista de materiais" no menu de tipo de documento
 
   → texto: _interpretar_lista_texto() | foto/PDF: _interpretar_lista_arquivo()
-    (mesmo PROMPT_INTERPRETAR_LISTA nos dois casos — nunca passa pelo PROMPT de
-    classificação compartilhado; nunca inventa preço nem quantidade; distingue marca/
-    fabricante de unidade de medida; código de referência copiado literalmente, nunca
-    "corrigido" — Lições #12 e #13 de LICOES_EXTRACAO.md)
-  → Claude responde array JSON (numero, descricao, fabricante, codigo, unidade,
-    quantidade, observacoes) — _itens_lista_materiais() faz json.loads() com fallback
-    defensivo pra texto malformado (nunca regex de linha única, ver Lição #13)
-  → bot exibe os itens interpretados (_texto_itens_interpretados) — leitura simples,
-    diz "não identificado" quando quantidade/unidade/código ficam null; ainda sem edição
-    nem gravação em listas_compra/lista_compra_itens
+    Camada 1 — PROMPT_INTERPRETAR_LISTA (nunca passa pelo PROMPT de classificação
+    compartilhado; nunca inventa preço/quantidade; considera a lista inteira como
+    conjunto pra reduzir ambiguidade — ex: "argamassa" numa lista de revestimentos é
+    colante, não reboco; separa embalagem (tamanho de uma unidade de venda) de
+    quantidade/unidade da compra; código copiado literalmente — Lições #12/#13)
+    → _itens_lista_materiais() faz json.loads() com fallback defensivo (Lição #13)
+  → Camada 2 — _adicionar_correspondencia_sinapi(): busca candidatos por termo técnico
+    inferido (não pelo nome comercial) via FTS5, uma chamada ao Claude decide a lista
+    inteira; grau de confiança sempre declarado; preço do SINAPI convertido pra unidade
+    comercial do item (nunca o contrário — "A Laura nunca converte o item comercial para
+    a unidade do SINAPI")
+  → Camada 3 — _adicionar_referencia_laura(): última compra própria via procurar_item(),
+    só aceita candidato com unidade igual à comercial (sem conversão, ao contrário da
+    Camada 2) — filtro que existe pra evitar casar produtos diferentes por palavra isolada
+  → tela de conferência em 3 níveis (ctx.user_data["lista_itens"]/["lista_ggv"] guardam o
+    estado de trabalho entre telas):
+      Nível 1 (_texto_lista_conferencia): tela principal — item/quantidade/referência em
+        3 linhas, indicador 🟢🟡🔴, alertas agrupados, resumo. "A Laura apresenta primeiro
+        a informação necessária para a decisão."
+      Nível 2 (_texto_item_detalhe): todos os campos de um item, só ao escolher editá-lo;
+        edição reinterpreta o item inteiro como texto livre (não campo a campo)
+      Nível 3 (_texto_analise_tecnica): tela técnica completa (confiança, SINAPI bruto,
+        histórico) — opcional, acessada por botão
+  → botão "✅ Gerar Lista de Compras" (_cb_lc_gerar): grava de verdade via
+    criar_ou_buscar_lista_aberta() + adicionar_item() — bloqueia se a obra não estiver
+    definida
 ```
 
-Camadas seguintes (ainda não implementadas): correspondência SINAPI, referência de último
-preço pago, tela de conferência editável, gravação final confirmada — ver ROADMAP.md,
-Fase — Módulo de Compras.
+Pendente: edição campo a campo; geração de Pedido de Compra a partir da Lista de Compras;
+vínculo com orçamento — ver ROADMAP.md, Fase — Módulo de Compras.
 
 ⚠️ **Divergência conhecida, fora do escopo desta fiada**: o pipeline de confirmação de
 `comprovante_pix`/`nota_fiscal` (Fluxo A) tem três pontos de entrada que não convergem
@@ -353,7 +377,7 @@ entre si — ver Dívida Técnica e "Motor de Interpretação e Classificação 
 
 ## 5. Estrutura do bot.py
 
-Referências para navegação no arquivo (4.365 linhas):
+Referências para navegação no arquivo (4.994 linhas):
 
 | Bloco | Referência | O que faz |
 |---|---|---|
@@ -364,7 +388,7 @@ Referências para navegação no arquivo (4.365 linhas):
 | Banco de dados | `init_db()`, `buscar_fornecedor()` | Criação de tabelas, CRUD |
 | Geração de PFM | `gerar_pfm()`, `_campo()`, `_itens()` | Helpers de parsing/formatação; define código, salva itens, registra lançamento (não gera documento — ver `_gerar_html_pc()`) |
 | Domínio — consulta | `buscar_pedido()`, `mostrar_pedido()` | Pipeline de visualização do pedido |
-| Domínio — Lista de Compras | `lista_cmd()`, `_resumo_lista_materiais()`, `_tela_lista_finalizada()` | Comando `/lista` + fluxo de foto (`lista_materiais`); chama `compras.*` para persistência |
+| Domínio — Lista de Compras | `lista_cmd()`, `_interpretar_lista_texto/arquivo()`, `_adicionar_correspondencia_sinapi()`, `_adicionar_referencia_laura()`, `_texto_lista_conferencia()`, `_cb_lc_*()` | Comando `/lista` + fluxo de foto (`lista_materiais`); Camadas 1-3 de interpretação, tela de conferência em 3 níveis, gravação via `compras.*` |
 | Teclados | `parse_resposta()`, `teclado_confirmacao()` | Parse da resposta Claude e botões inline |
 | Handlers Telegram | `receber_arquivo()`, `receber_texto()` | Handlers de mensagens |
 | Dispatch de callback | `responder_botao()`, `_CB_DISPATCH`, `_cb_*()` | Um único `CallbackQueryHandler`; roteia por dict `acao → função` (ADR-004, 2026-07-02) em vez de if/elif — 59 funções `_cb_*`, cada uma cobrindo os ramos que antes viviam soltos dentro de uma função de 929 linhas |
@@ -381,12 +405,14 @@ Referências para navegação no arquivo (4.365 linhas):
   2026-07-03; fiada de investigação própria antes de mexer — ver "Motor de Interpretação e
   Classificação de Documentos" em `docs/ROADMAP.md`.
 
-- **Monólito parcial** — `bot.py` com 4.068 linhas, acima do teto da ADR-001 (2.500–3.000).
+- **Monólito parcial** — `bot.py` com 4.994 linhas, acima do teto da ADR-001 (2.500–3.000).
   ADR-004 (2026-07-02) extraiu dispatch table + módulo `nfe/`; `fornecedor/`/`obra/`/`comprovante/`
   avaliados e adiados com gatilho próprio; `entrega/` continua adiada (ADR-003, motivo não mudou).
+  Crescimento recente concentrado no pipeline de Compras (Camadas 1-3 + tela de 3 níveis,
+  2026-07-04) — candidato natural a módulo próprio quando o teto for revisitado.
 
 - **`responder_botao()` é um único handler** — agora roteia por dispatch table (`_CB_DISPATCH`,
-  59 funções `_cb_*`) em vez de if/elif, mas continua sendo um único `CallbackQueryHandler` com um
+  66 funções `_cb_*`) em vez de if/elif, mas continua sendo um único `CallbackQueryHandler` com um
   único `try/except` — um erro em qualquer ramo ainda aparece como "Erro inesperado" genérico,
   sem isolamento por domínio. `sel_tipo_inicial` continua misturando 4 domínios (entrega, pix,
   nfe, pfm) internamente, não coberto pela divisão em `_cb_*`. Ver ADR-004.

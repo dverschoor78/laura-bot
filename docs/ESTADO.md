@@ -108,6 +108,10 @@ anteriores preservado nas entradas abaixo, sem repetir aqui.
 
 ## Versão Atual
 
+**v0.10.0** — Módulo de Compras: Lista de Compras com interpretação por IA (texto/foto/PDF),
+correspondência SINAPI, referência de última compra própria, tela de conferência em 3 níveis
+e gravação real no banco
+
 **v0.9.0** — DOCX removido (PC 2.0 é o único formato), ADR-004 (dispatch table + módulo `nfe/`),
 recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte artificial de lista
 
@@ -144,6 +148,11 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 - Orçamento, PFM, comprovante, NF-e e foto de entrega arquivados automaticamente na pasta OneDrive
   da obra (`04 Compras`, `01 Controle financeiro`, `05 Entrega`), com nome padronizado
 - Modo teste isolado via `LAURA_ENV=test`
+- Lista de Compras (`/lista` ou botão "📝 Lista de materiais"): interpretação por IA de texto,
+  foto ou PDF; correspondência com SINAPI (confiança declarada, preço convertido pra unidade
+  comercial); referência de última compra própria (filtro de unidade igual); tela de
+  conferência em 3 níveis (visão rápida → edição do item → análise técnica completa);
+  gravação real da lista no banco ao confirmar (ainda sem gerar Pedido de Compra)
 
 ---
 
@@ -1097,7 +1106,7 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 - **9 índices de `data/laura.db` não persistidos em código** (2026-07-03): criados diretamente no
   banco vivo, sem `CREATE INDEX` em `bot.py` ou script versionado — um banco recriado do zero não
   os recria, performance de consulta regride silenciosamente até rodar o comando manual de novo.
-- `bot.py` com 4.068 linhas — parcialmente modularizado (ADR-004, 2026-07-02): dispatch table +
+- `bot.py` com 4.994 linhas — parcialmente modularizado (ADR-004, 2026-07-02): dispatch table +
   módulo `nfe/` extraído. `fornecedor/`, `obra/`, `comprovante/` avaliados e adiados com gatilho
   próprio (ver ADR-004); extração do domínio `entrega/` continua adiada (ADR-003, motivo não mudou)
 - `gerar_pfm()` acumula responsabilidades: gravação no banco + criação de lançamento + arquivamento
@@ -1120,6 +1129,19 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Decisões Recentes
 
+- **"A Laura apresenta primeiro a informação necessária para a decisão. Os detalhes técnicos
+  aparecem apenas quando solicitados." (2026-07-04)** — princípio de UX que orienta a tela de
+  conferência da Lista de Compras (3 níveis: conferência → edição → análise técnica) e deve
+  orientar qualquer tela futura do módulo de Compras. "A Laura deve parecer um comprador
+  experiente, não um relatório técnico."
+- **"A Laura nunca converte o item comercial para a unidade do SINAPI. A Laura converte a
+  referência do SINAPI para a unidade comercial do item." (2026-07-04)** — regra de domínio
+  pra qualquer conversão de unidade envolvendo referência externa; a unidade comercial (como
+  se compra e negocia) nunca muda em lugar nenhum da interface.
+- **Unidade igual é filtro obrigatório pra referência de compra própria, sem conversão
+  (2026-07-04)** — diferente da regra acima (que permite converter a referência SINAPI),
+  aqui não existe conversão: "comparar as unidades da lista e do pedido, estas devem ser
+  iguais, isso não deveria mudar". Menos matches, mas nenhum por coincidência de palavra.
 - **"Entradas diferentes podem existir. Processos diferentes não." (2026-07-04)** — princípio
   que emergiu ao redesenhar a Lista de Compras: sempre que o resultado esperado for o mesmo,
   a implementação deve convergir pra um único fluxo interno. Motivou o redesenho completo das
@@ -1180,26 +1202,30 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 > gatilho arquitetural que ainda não ocorreu) não são fiada — ficam em Dívida Técnica/ADR, sem
 > duplicar aqui como se fossem tarefa da próxima sessão.
 
-1. **Camada 2 do módulo de Compras — candidatos SINAPI** — busca FTS5 filtra candidatos,
-   Claude escolhe o melhor ou declara "sem correspondência confiável"; infra de banco já
-   pronta (`insumos_sinapi_fts`) — ver ROADMAP.md, Fase — Módulo de Compras
-2. **Validar a Camada 1 (interpretação) ao vivo no Telegram** — reenviar a foto real de
-   material hidráulico que motivou o redesenho, agora com os dois caminhos (`/lista` e
-   "foto + botão") unificados, antes de seguir pras próximas camadas
-3. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-4. **Alimentar `docs/LICOES_EXTRACAO.md`** sempre que aparecer um novo bug de parsing/extração —
+1. **Validar o pipeline completo da Lista de Compras ao vivo no Telegram** — Camadas 1-3 +
+   tela de conferência em 3 níveis + gravação real foram testadas com objetos simulados e
+   fotos reais fora do Telegram; falta o teste ponta a ponta clicando nos botões de verdade
+   (Nível 1 → editar item → Nível 2 → corrigir → Nível 3 → gerar) antes de empilhar mais fiada
+2. **Edição campo a campo da Lista de Compras** — hoje a edição reinterpreta o item inteiro
+   como texto livre, por decisão explícita de simplicidade; granularidade por campo
+   (escolher item → escolher campo → digitar valor) fica pra quando fizer falta de verdade
+3. **Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento** — a Lista
+   de Compras já grava de verdade no banco, mas ainda é uma ilha; falta o próximo elo da
+   cadeia até virar negociação/pedido real
+4. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+5. **Alimentar `docs/LICOES_EXTRACAO.md`** sempre que aparecer um novo bug de parsing/extração —
    não só corrigir e seguir (ver [[feedback_documentar_padroes_bugs]] na memória)
-5. **Limpeza opcional no OneDrive** — 2 arquivos órfãos do pedido excluído Base Forte/GGV03-006
+6. **Limpeza opcional no OneDrive** — 2 arquivos órfãos do pedido excluído Base Forte/GGV03-006
    antigo (`.docx`, `.pdf` em `04 Compras`); a `- Copy.jpeg` foi feita pelo próprio Dennis
    (backup pessoal) — perguntar se ele quer manter essa antes de apagar
-6. **Acesso via Claude Code Remote (celular)** — sem ambiente configurado ainda; ideia de hospedar
+7. **Acesso via Claude Code Remote (celular)** — sem ambiente configurado ainda; ideia de hospedar
    Laura + banco num servidor Proxmox em casa (Eric administra) registrada, não iniciada
-7. **Persistir os 9 índices de `data/laura.db` em código** — hoje só existem no banco vivo
-8. **Integrar `financeiro/relatorios.py` a `bot.py`** — hoje só roda chamado manualmente, sem
+8. **Persistir os 9 índices de `data/laura.db` em código** — hoje só existem no banco vivo
+9. **Integrar `financeiro/relatorios.py` a `bot.py`** — hoje só roda chamado manualmente, sem
    botão/comando no Telegram
-9. **Popular `itens_pedido.insumo_sinapi_codigo`** — coluna existe no schema, nada grava nela
-   ainda; é o vínculo real que falta entre item comprado e `insumos_sinapi`
-10. **Fiada de investigação — Motor de Interpretação e Classificação de Documentos** — não
+10. **Popular `itens_pedido.insumo_sinapi_codigo`** — coluna existe no schema, nada grava nela
+    ainda; é o vínculo real que falta entre item comprado e `insumos_sinapi`
+11. **Fiada de investigação — Motor de Interpretação e Classificação de Documentos** — não
     priorizada ainda, mas registrada; entender por que os 3 caminhos de confirmação de
     documento divergiram antes de qualquer código (ver ROADMAP.md)
 

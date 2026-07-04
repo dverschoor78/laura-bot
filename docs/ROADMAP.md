@@ -767,18 +767,26 @@ que `bot.py` parecia "bagunçado".
 > gatilho arquitetural que ainda não ocorreu) não são fiadas — ficam registradas em Dívida Técnica
 > ou no ADR correspondente, sem duplicar aqui como se fossem tarefa da próxima sessão.
 
-1. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-2. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração encontrado
-3. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
+1. **Validar o pipeline completo da Lista de Compras ao vivo no Telegram** — Camadas 1-3 + tela
+   de conferência em 3 níveis + gravação real testadas com objetos simulados e fotos reais fora
+   do Telegram; falta o teste ponta a ponta clicando nos botões de verdade antes de empilhar
+   mais fiada
+2. **Edição campo a campo da Lista de Compras** — hoje reinterpreta o item inteiro como texto
+   livre, por decisão explícita de simplicidade; granularidade por campo fica pra quando fizer falta
+3. **Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento** — a Lista já
+   grava de verdade no banco, mas ainda é uma ilha
+4. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+5. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração encontrado
+6. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
    — perguntar sobre a `- Copy.jpeg` antes, é backup pessoal do Dennis
-4. Acesso via Claude Code Remote do celular — sem ambiente configurado; ideia de hospedar Laura +
+7. Acesso via Claude Code Remote do celular — sem ambiente configurado; ideia de hospedar Laura +
    banco num servidor Proxmox em casa (Eric administra) registrada, não iniciada
-5. Persistir os 9 índices de `data/laura.db` em código — hoje só existem no banco vivo (nenhum
+8. Persistir os 9 índices de `data/laura.db` em código — hoje só existem no banco vivo (nenhum
    `CREATE INDEX` em `bot.py`/scripts); um `init_db()` contra um banco novo não os recria
-6. Integrar `financeiro/relatorios.py` a `bot.py` — hoje as funções só rodam chamadas manualmente,
+9. Integrar `financeiro/relatorios.py` a `bot.py` — hoje as funções só rodam chamadas manualmente,
    sem botão ou comando no Telegram
-7. Popular `itens_pedido.insumo_sinapi_codigo` — coluna já existe no schema, mas nada grava nela
-   ainda; é o vínculo real entre item comprado e `insumos_sinapi` que falta pra fase "lista de compras"
+10. Popular `itens_pedido.insumo_sinapi_codigo` — coluna já existe no schema, mas nada grava nela
+    ainda; é o vínculo real entre item comprado e `insumos_sinapi` que falta pra fase "lista de compras"
 
 ---
 
@@ -946,6 +954,17 @@ não vira entidade, os atributos considerados durante o raciocínio da Camada 2 
 campos de saída — só influenciam a decisão final (código escolhido + confiança + equivalência de
 unidade, quando aplicável). Se algum desses atributos comprovar valor próprio pra consultas,
 estatísticas ou comparação entre marcas, aí sim vira candidato a persistência — não antes.
+
+**Atualização (2026-07-04, mesmo dia):** dois atributos comprovaram valor imediato e viraram
+campos de saída de verdade (não mais só raciocínio interno) — exatamente o gatilho que este
+registro previa. `embalagem` (tamanho de uma unidade de venda) resolveu o falso negativo do
+Rejunte ("quantidade e unidade não identificadas" escondia uma informação real). `termo_busca_
+sinapi` (categoria/função sem marca) resolveu o falso negativo da Argamassa Hipermassa (nome
+comercial não batia com nenhum candidato SINAPI). Nenhum dos dois virou "Produto Laura" —
+continuam campos soltos de interpretação, não uma entidade nova, e `termo_busca_sinapi` nem é
+exibido em tela nenhuma. `fabricante`/`codigo` também passaram a ser persistidos em
+`lista_compra_itens` (gravação real da Lista de Compras), mas esses já existiam como campos
+desde a Camada 1 original — não são parte desta visão de "compreensão de produto".
 
 ---
 
