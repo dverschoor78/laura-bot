@@ -15,8 +15,7 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > sozinhas com o uso do dia a dia não entram aqui (ex: fechar um pedido parcelado esperando
 > pagamento). Ver Dívida Técnica em `docs/ROADMAP.md`.
 
-1. Camadas 4-6 do módulo de Compras — tela de conferência editável, edição item a item,
-   gravação final confirmada
+1. Camadas 5-6 do módulo de Compras — edição item a item, gravação final confirmada
 2. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
 3. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
 4. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
@@ -34,6 +33,41 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > resolvido (herda da obra, não vira atributo novo); Fiadas 1/2 de 2026-07-03 substituídas pelo
 > redesenho em camadas de 2026-07-04 (Camada 1 concluída, depois reescrita pra saída JSON
 > estruturada no mesmo dia) — ver `docs/ROADMAP.md`.
+
+---
+
+## [Camada 4 — Tela de conferência editável] — 2026-07-04 (mesmo dia)
+
+### Motivação
+
+Depois de interpretada, a lista parava em texto puro — sem teclado, sem nenhuma ação
+possível. Investigado o padrão já existente pra telas de revisão (`_resumo_gerar`/
+`teclado_orcamento` do orçamento) antes de desenhar, pra reaproveitar em vez de inventar um
+novo estilo. Perguntado ao Dennis como tratar edição nesta camada, já que "edição item a
+item" é explicitamente a Camada 5 (ainda não implementada) — ele escolheu reaproveitar o
+mecanismo que já existe no orçamento (reescrever a lista inteira como texto livre).
+
+### Adicionado
+
+- `_teclado_lista_interpretada(ggv)`: teclado inline com "✏️ Editar itens" e "✖ Fechar",
+  mesmo estilo visual do resto do bot
+- `_cb_lc_editar`/`_cb_lc_fechar`: novos handlers no `_CB_DISPATCH`. Editar pede a lista
+  corrigida completa em texto livre (`aguardando = "lista_editar_itens"`), reinterpretada do
+  zero pelas Camadas 1+2+3 — mesmo tratamento do estado `lista_conteudo` original, unificado
+  no mesmo branch de `receber_texto()`
+- `_texto_itens_interpretados()`: cabeçalho ganhou o endereço da obra (via `buscar_obra()`),
+  quando cadastrado
+
+### Alterado
+
+- Os três pontos de entrada da Lista de Compras (`/lista` texto, `/lista` foto/PDF, botão
+  "📝 Lista de materiais") agora emitem a tela com teclado, em vez de só texto
+
+### Testado
+
+Callbacks simulados (`_cb_lc_editar`/`_cb_lc_fechar`) com query/ctx falsos confirmam estado e
+texto corretos; tela renderizada com endereço real de obra (GGV03); regressão do fluxo
+orçamento → pedido confirmada.
 
 ---
 

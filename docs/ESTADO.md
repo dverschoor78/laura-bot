@@ -271,6 +271,26 @@ e observação própria; efeito colateral positivo — porcelanato/revestimento 
 mesma lista casaram certo nos dois (Alta confiança), o falso positivo de categoria adjacente
 visto na Camada 2 original não se repetiu.
 
+**Mesmo dia, achado registrado (não corrigido) — Camada 3 pode casar produto errado:**
+Dennis encontrou "Revestimento Cerâmico" casando com um item histórico de bloco/tijolo
+cerâmico (mesma classe de bug já resolvida na Camada 2, ainda não levada pra Camada 3) e
+pediu explicitamente pra **planejar antes de mexer**, já que `procurar_item()`/`itens_pedido`
+são dados de produção compartilhados com o fluxo de pedido/financeiro. Registrado em
+`docs/ROADMAP.md` (Dívida Técnica), nenhum código alterado.
+
+**Mesmo dia, Camada 4 — tela de conferência editável:** antes desta camada, a interpretação
+parava em texto puro, sem nenhuma ação possível depois de ler a lista. Investigado o padrão
+já existente (`_resumo_gerar`/`teclado_orcamento` do orçamento) antes de desenhar — mesmo
+padrão reaproveitado, sem inventar estilo novo de interação. Perguntado ao Dennis como tratar
+edição nesta camada (já que a edição granular é a Camada 5, ainda não implementada); ele
+escolheu reaproveitar o mecanismo que já existe no orçamento (`edit_itens` — reescrever a
+lista inteira como texto livre, reinterpretada do zero). Implementado:
+`_teclado_lista_interpretada()` (botões "✏️ Editar itens"/"✖ Fechar"), endereço da obra
+adicionado ao cabeçalho de `_texto_itens_interpretados()` (via `buscar_obra()`),
+`_cb_lc_editar`/`_cb_lc_fechar` no `_CB_DISPATCH`. Os três pontos de entrada da Lista de
+Compras agora emitem a mesma tela com teclado. Testado com callbacks simulados e regressão
+do fluxo orçamento → pedido.
+
 **Mesmo dia, investigação — "sc" e "6,0" legíveis, Laura não lia:** Dennis reportou a linha do
 Rejunte (unidade "sc", quantidade "6,0") bem legível na imagem retornando errada. Causa raiz:
 a foto real tem só 631×161 pixels — Telegram compacta agressivamente uploads tipo "foto" (o
@@ -316,9 +336,9 @@ coração da Laura". Registrado como dívida técnica e nova visão de longo pra
 Interpretação e Classificação de Documentos") em `docs/ROADMAP.md`, com o princípio geral que
 emergiu da conversa e uma fiada de investigação própria a fazer antes de qualquer código.
 
-**Não concluído:** Camadas 4-6 do módulo de Compras (tela de conferência editável, edição item
-a item, gravação final confirmada) — ver ROADMAP.md. Validação completa ao vivo no Telegram
-com a foto real que motivou o redesenho.
+**Não concluído:** Camadas 5-6 do módulo de Compras (edição item a item, gravação final
+confirmada) — ver ROADMAP.md. Validação completa ao vivo no Telegram com a foto real que
+motivou o redesenho.
 
 ---
 

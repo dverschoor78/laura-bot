@@ -3064,7 +3064,12 @@ def _fmt_qtde_segura(qtde):
 
 def _texto_itens_interpretados(itens, ggv):
     label_ggv = f"Obra {ggv}" if ggv else "Obra ainda não definida"
-    linhas = [f"📝 <b>Lista interpretada — {label_ggv}</b>", ""]
+    linhas = [f"📝 <b>Lista interpretada — {label_ggv}</b>"]
+    if ggv:
+        obra = buscar_obra(ggv)
+        if obra and obra.get("endereco_entrega"):
+            linhas.append(f"Endereço: {obra['endereco_entrega']}")
+    linhas.append("")
     if not itens:
         linhas.append("Não consegui reconhecer nenhum item nesta lista.")
         return "\n".join(linhas)
@@ -3143,6 +3148,26 @@ def _texto_itens_interpretados(itens, ggv):
         else:
             linhas.append(f"{i}. {item}")
     return "\n".join(linhas)
+
+def _teclado_lista_interpretada(ggv):
+    """Camada 4: tela de conferência da Lista de Compras. Edição reaproveita o mesmo padrão
+    já usado no orçamento (edit_itens) — reescrever a lista inteira como texto livre,
+    reinterpretada do zero pelas Camadas 1+2+3. Edição item a item fica pra Camada 5."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✏️ Editar itens", callback_data=f"lc_editar:{ggv or 'nao_identificado'}")],
+        [InlineKeyboardButton("✖ Fechar",       callback_data="lc_fechar")],
+    ])
+
+async def _cb_lc_editar(query, ctx, partes):
+    _, ggv_token = partes
+    ctx.user_data["aguardando"] = "lista_editar_itens"
+    ctx.user_data["lista_ggv_preselecionada"] = None if ggv_token == "nao_identificado" else ggv_token
+    await query.edit_message_text("Envie a lista corrigida completa (texto):")
+
+async def _cb_lc_fechar(query, ctx, partes):
+    ctx.user_data["aguardando"] = None
+    ctx.user_data.pop("lista_ggv_preselecionada", None)
+    await query.edit_message_text("Fechado.")
 
 def _itens_lista_materiais(dados):
     """Parseia o array JSON retornado pela IA (PROMPT_INTERPRETAR_LISTA) em itens
@@ -3233,7 +3258,8 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Interpretando...")
         itens = await _interpretar_lista_arquivo(bytes(conteudo), mime)
         await update.message.reply_text(
-            _texto_itens_interpretados(itens, ggv), parse_mode="HTML"
+            _texto_itens_interpretados(itens, ggv), parse_mode="HTML",
+            reply_markup=_teclado_lista_interpretada(ggv)
         )
         return
 
@@ -3529,14 +3555,15 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ctx.user_data["aguardando"] = None
             await update.message.reply_text("Contexto perdido. Envie o código da obra novamente.")
 
-    elif aguardando == "lista_conteudo":
+    elif aguardando in ("lista_conteudo", "lista_editar_itens"):
         ggv = ctx.user_data.get("lista_ggv_preselecionada")
         ctx.user_data["aguardando"] = None
         ctx.user_data.pop("lista_ggv_preselecionada", None)
         await update.message.reply_text("Interpretando...")
         itens = await _interpretar_lista_texto(texto)
         await update.message.reply_text(
-            _texto_itens_interpretados(itens, ggv), parse_mode="HTML"
+            _texto_itens_interpretados(itens, ggv), parse_mode="HTML",
+            reply_markup=_teclado_lista_interpretada(ggv)
         )
 
 async def _cb_ok(query, ctx, partes):
@@ -3631,7 +3658,10 @@ async def _cb_sel_tipo_inicial(query, ctx, partes):
         conteudo_lista = Path(caminho_doc).read_bytes()
         await query.edit_message_text("Interpretando...")
         itens = await _interpretar_lista_arquivo(conteudo_lista, mime_inf_lista)
-        await query.edit_message_text(_texto_itens_interpretados(itens, None), parse_mode="HTML")
+        await query.edit_message_text(
+            _texto_itens_interpretados(itens, None), parse_mode="HTML",
+            reply_markup=_teclado_lista_interpretada(None)
+        )
         return
 
     mime_inf = "application/pdf" if caminho_doc.lower().endswith(".pdf") else "image/jpeg"
@@ -4586,6 +4616,8 @@ _CB_DISPATCH = {
     "menu_obras": _cb_menu_obras,
     "menu_ajuda": _cb_menu_ajuda,
     "menu_nova_obra": _cb_menu_nova_obra,
+    "lc_editar": _cb_lc_editar,
+    "lc_fechar": _cb_lc_fechar,
 }
 
 async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):

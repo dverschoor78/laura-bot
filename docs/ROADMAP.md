@@ -284,11 +284,34 @@ do item atual — mesmo princípio de honestidade da Camada 2 (não inventar uma
 certeza), só que aqui nem se tenta calcular ainda; fica registrado como possível evolução
 futura, não como pendência desta fiada.
 
-**Camadas 4 a 6 — pendentes** *(não iniciadas)*
+**Camada 4 — Tela de conferência editável** ✓ *(2026-07-04, mesmo dia)*
 
-1. Tela de conferência editável (obra, endereço, itens com SINAPI/referência visíveis)
-2. Edição item a item (escolher item → escolher campo → digitar novo valor)
-3. Gravação final confirmada — só aqui os dois snapshots são congelados de verdade
+Antes desta camada, a interpretação parava em texto puro — sem teclado, sem nenhuma ação
+possível depois de ler a lista. Investigado o padrão já existente pra telas de revisão
+(`_resumo_gerar`/`teclado_orcamento` do orçamento) antes de desenhar: texto + teclado inline,
+estado em `ctx.user_data`, reemissão da tela a cada edição — mesmo padrão reaproveitado aqui,
+sem inventar um novo estilo de interação.
+
+Decisão de escopo (perguntada ao Dennis antes de implementar, já que "edição item a item" é
+explicitamente a Camada 5, ainda não implementada): a "edição" desta camada reaproveita o
+mesmo mecanismo que já existe no orçamento (`edit_itens`) — reescrever a lista inteira como
+texto livre, reinterpretada do zero pelas Camadas 1+2+3. Dennis escolheu essa opção em vez de
+esperar a edição granular: "reaproveitar padrão do orçamento".
+
+Implementado: `_teclado_lista_interpretada(ggv)` (botões "✏️ Editar itens" e "✖ Fechar",
+mesmo estilo visual do resto do bot); `_texto_itens_interpretados()` ganhou o endereço da obra
+(via `buscar_obra()`, mesmo dado já usado no cockpit de obra) no cabeçalho, quando a obra tem
+`endereco_entrega` cadastrado; `_cb_lc_editar`/`_cb_lc_fechar` registrados em `_CB_DISPATCH`.
+Os três pontos de entrada da Lista de Compras (`/lista` por texto, `/lista` por foto/PDF, e o
+botão "📝 Lista de materiais") agora emitem a mesma tela com teclado, em vez de só texto — sem
+duplicar lógica entre eles (mesmo princípio de convergência da Camada 1). Estado da edição
+fica só em `ctx.user_data` (obra selecionada) — a lista de itens em si não precisa persistir
+entre telas, porque editar sempre reconstrói do zero a partir do texto novo enviado.
+
+**Camadas 5 e 6 — pendentes** *(não iniciadas)*
+
+1. Edição item a item (escolher item → escolher campo → digitar novo valor)
+2. Gravação final confirmada — só aqui os dois snapshots são congelados de verdade
 
 ---
 
@@ -720,6 +743,16 @@ gatilho original (consultar preço de item já comprado sem ler o texto inteiro 
 - **Média — `gerar_pfm()` acumula responsabilidades**
   Grava no banco, cria lançamento e arquiva em disco (a geração do documento em si — Word — foi
   removida em 2026-07-02). Justificativa: dificulta testes e futuras extensões.
+
+- **Média — Camada 3 (referência de última compra) pode casar produto errado por palavra
+  isolada** — achado real 2026-07-04: "Revestimento Cerâmico HD 32x57,5" casou com um item
+  histórico de **bloco/tijolo cerâmico** (R$0,87/BLOCOS), porque a busca caiu no fallback de
+  palavra isolada ("cerâmica"/"cerâmico") sem nenhuma verificação de que é o mesmo tipo de
+  produto — mesma classe de problema já resolvida na Camada 2 (SINAPI), mas ainda não levada
+  pra Camada 3. Diferença importante: `procurar_item()`/`itens_pedido` são dados de produção
+  compartilhados com o fluxo de pedido/financeiro já em uso, não isolados da Lista de Compras
+  — Dennis pediu explicitamente pra **planejar antes de mexer**, não corrigir on-the-fly.
+  Não implementar nada aqui sem esse planejamento.
 
 - **Baixa — GGV02 sem `pasta_onedrive` configurada**
   Estrutura real da pasta (sem "00 Orçamentos", com "51 Obra - Materiais e serviços") não
