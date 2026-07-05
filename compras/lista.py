@@ -52,6 +52,8 @@ _COLUNAS_SNAPSHOT = (
     "sinapi_unidade_referencia TEXT",
     "sinapi_preco_referencia REAL",
     "sinapi_mes_referencia TEXT",
+    "sinapi_confianca TEXT",
+    "sinapi_preco_equivalente REAL",
     "observacoes TEXT",
     "laura_preco_referencia REAL",
     "laura_data_referencia TEXT",
@@ -203,6 +205,7 @@ def adicionar_item(
     fabricante=None, codigo=None,
     sinapi_codigo=None, sinapi_descricao_referencia=None, sinapi_unidade_referencia=None,
     sinapi_preco_referencia=None, sinapi_mes_referencia=None,
+    sinapi_confianca=None, sinapi_preco_equivalente=None,
     observacoes=None,
     laura_preco_referencia=None, laura_data_referencia=None, laura_fornecedor_referencia=None,
     laura_origem_referencia=None, laura_grau_confianca_referencia=None,
@@ -212,21 +215,28 @@ def adicionar_item(
     itens_pedido/lancamentos crescem a cada compra; a leitura de uma lista antiga não pode
     mudar de valor sozinha com o tempo (CONSTITUICAO.md — "Dados são sagrados"). Todos os
     parâmetros de snapshot são opcionais — item sem nenhuma correspondência ainda é um
-    item válido (Princípio 8: ausência de referência também é informação)."""
+    item válido (Princípio 8: ausência de referência também é informação).
+
+    `sinapi_confianca`/`sinapi_preco_equivalente` adicionados 2026-07-05 — já eram
+    calculados pela Camada 2 desde o início, mas nunca chegavam a ser persistidos; sem eles,
+    reler a lista do banco (ex: pra gerar PDF) perdia o grau de confiança declarado e o
+    preço já convertido pra unidade comercial, caindo pro preço bruto do SINAPI."""
     with sqlite3.connect(db_path) as con:
         cur = con.execute(
             """INSERT INTO lista_compra_itens (
                 lista_id, descricao, unidade, quantidade, fabricante, codigo, status,
                 sinapi_codigo, sinapi_descricao_referencia, sinapi_unidade_referencia,
-                sinapi_preco_referencia, sinapi_mes_referencia, observacoes,
+                sinapi_preco_referencia, sinapi_mes_referencia, sinapi_confianca,
+                sinapi_preco_equivalente, observacoes,
                 laura_preco_referencia, laura_data_referencia, laura_fornecedor_referencia,
                 laura_origem_referencia, laura_grau_confianca_referencia
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 lista_id, descricao.strip(), (unidade or "").strip(), quantidade, fabricante, codigo,
                 StatusItem.PENDENTE.value,
                 sinapi_codigo, sinapi_descricao_referencia, sinapi_unidade_referencia,
-                sinapi_preco_referencia, sinapi_mes_referencia, observacoes,
+                sinapi_preco_referencia, sinapi_mes_referencia, sinapi_confianca,
+                sinapi_preco_equivalente, observacoes,
                 laura_preco_referencia, laura_data_referencia, laura_fornecedor_referencia,
                 laura_origem_referencia, laura_grau_confianca_referencia,
             )

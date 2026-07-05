@@ -1526,6 +1526,121 @@ def _gerar_html_recibo(parcela_id: int) -> str:
 </body>
 </html>"""
 
+def _gerar_html_lista(lista_id: int, com_precos: bool) -> str:
+    """Lista de Compras em PDF — mesmo estilo visual do PC 2.0 (_PC_CSS reaproveitado sem
+    CSS extra), sem bloco de fornecedor: a Lista é anterior à negociação (Política de
+    Compras, Princípio 2), não tem fornecedor definido ainda.
+
+    Duas variantes do mesmo documento, não duas funções paralelas (Dennis, 2026-07-05):
+    `com_precos=True` — versão interna, com a referência de preço (SINAPI/própria) já
+    calculada, pra o Dennis comparar contra as propostas recebidas.
+    `com_precos=False` — versão pra encaminhar a fornecedores via WhatsApp pedindo
+    orçamento; os campos de preço ficam em branco (o fornecedor preenche), pra nunca revelar
+    a própria referência de preço numa negociação ainda não começou."""
+    lista = buscar_lista(DB_PATH, lista_id)
+    if not lista:
+        raise ValueError(f"Lista de Compras {lista_id} não encontrada.")
+    ggv = lista["ggv"]
+    obra = buscar_obra(ggv) or {}
+    endereco    = lista.get("endereco_entrega") or obra.get("endereco_entrega") or "—"
+    observacoes = lista.get("observacoes") or "—"
+    itens = listar_itens(DB_PATH, lista_id)
+
+    now          = datetime.now()
+    data_emissao = f"{now.day} de {MESES[now.month-1]} de {now.year}"
+
+    items_html = ""
+    for i, item in enumerate(itens, 1):
+        qtde, und = item.get("quantidade"), item.get("unidade")
+        if qtde is not None and und:
+            detalhe = f"{_fmt_qtde_segura(qtde)} {und}"
+        elif und:
+            detalhe = und
+        elif qtde is not None:
+            detalhe = _fmt_qtde_segura(qtde)
+        else:
+            detalhe = ""
+        extras = []
+        if item.get("fabricante"):
+            extras.append(_esc_html(item["fabricante"]))
+        if item.get("codigo"):
+            extras.append(f"cód. {_esc_html(item['codigo'])}")
+
+        preco_ref = _melhor_referencia_preco(item) if com_precos else None
+        if preco_ref is not None and und:
+            extras.append(f"R$ {_fmt_brl(preco_ref)}/{und}")
+        extra_str = " &middot; ".join(extras)
+        if extra_str:
+            detalhe = f"{detalhe} &middot; {extra_str}" if detalhe else extra_str
+        qty_line = f'<div class="item-qty">{detalhe}</div>' if detalhe else ""
+
+        if com_precos:
+            total_item = preco_ref * qtde if (preco_ref is not None and qtde is not None) else None
+            valor_html = f'<div class="item-value">R$ {_fmt_brl(total_item)}</div>' if total_item is not None else '<div class="item-value">—</div>'
+        else:
+            valor_html = '<div class="item-value" style="border-bottom:1px solid #D1D5DB;min-width:70px;">&nbsp;</div>'
+
+        items_html += (
+            f'<div class="item"><div class="item-left">'
+            f'<span class="item-num">{i:02d}</span>'
+            f'<div><div class="item-desc">{_esc_html(item["descricao"])}</div>{qty_line}</div>'
+            f'</div>{valor_html}</div>'
+        )
+    if not items_html:
+        items_html = '<div class="item-qty">Nenhum item nesta lista.</div>'
+
+    if com_precos:
+        total_referencia, total_parcial = _calcular_referencia_total(itens)
+        total_str = f"R$ {_fmt_brl(total_referencia)}"
+        if total_parcial:
+            total_str += " (parcial)"
+        financeiro_html = f"""
+  <div class="financial-outer">
+    <div class="financial-inner">
+      <div class="fin-total-row"><span class="fin-total-l">Referência estimada</span><span class="fin-total-v">{total_str}</span></div>
+    </div>
+  </div>"""
+        section_label = "Itens"
+    else:
+        financeiro_html = ""
+        section_label = "Itens — solicitamos cotação de preço e prazo"
+
+    return f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Lista de Compras — Obra {_esc_html(ggv)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>{_PC_CSS}</style>
+</head>
+<body>
+<div class="page">
+  <div class="header">
+    <div>
+      <div class="company-brand">Verschoor Investimentos Imobiliários</div>
+      <div class="company-meta">CNPJ {DELTAD['cnpj']} &nbsp;&middot;&nbsp; I.E. {DELTAD['ie']}<br>{_esc_html(DELTAD['end'])}</div>
+    </div>
+    <div class="doc-meta">
+      <div class="doc-tipo">Lista de Compras</div>
+      <div class="doc-number" style="font-size:20px;">Obra {_esc_html(ggv)}</div>
+      <div class="doc-date">{data_emissao}</div>
+    </div>
+  </div>
+  <hr class="rule rule-gap">
+  <div class="context-block">
+    <div><div class="ctx-label">Endereço de entrega</div><div class="ctx-value">{_esc_html(endereco)}</div></div>
+    <div><div class="ctx-label">Observações</div><div class="ctx-value">{_esc_html(observacoes)}</div></div>
+  </div>
+  <hr class="rule" style="margin-top:32px;margin-bottom:28px;">
+  <div class="section-label">{section_label}</div>
+  {items_html}{financeiro_html}
+  <div class="footer-tagline">Laura não é uma ferramenta que você usa. É uma memória que você carrega.</div>
+</div>
+</body>
+</html>"""
+
 def gerar_pfm(doc_id, categoria=None, pfm_codigo_override=None):
     with sqlite3.connect(DB_PATH) as con:
         row = con.execute(
@@ -2795,11 +2910,22 @@ externa", não "argamassa ext 10 em 1"). Use o contexto da lista inteira (passo 
 isso com mais segurança. Se a própria descrição já for genérica o suficiente (ex: "Areia média
 lavada"), repita algo equivalente sem marca.
 
+Preencha também "descricao_generica" (true/false): marque true quando a descrição, do jeito
+que o usuário escreveu, não tem informação técnica suficiente pra pedir uma cotação séria —
+tipicamente uma ou duas palavras, sem marca, sem dimensão, sem tipo/variante, sem aplicação,
+sem embalagem (ex: "Areia", "Brita", "Tijolos", "Cimento", "Cal" são genéricas; "Areia média
+lavada", "Cimento CP II 50kg Cauê", "Tijolo cerâmico 6 furos 9x19x19" não são). Use julgamento
+técnico, não uma regra mecânica de contagem de palavras — o teste é "um comprador conseguiria
+pedir orçamento com isso, ou precisaria perguntar mais alguma coisa?". A Laura vai tentar
+enriquecer essas descrições depois com histórico próprio ou SINAPI, mas isso só deve acontecer
+quando a descrição original genuinamente carece de especificação.
+
 Responda APENAS com um array JSON, sem markdown, sem texto antes ou depois, neste formato:
 [
   {"numero": 1, "descricao": "Cimento CP II 50 kg", "fabricante": "Cauê", "codigo": null,
    "unidade": "SC", "quantidade": 250.0, "embalagem": "50 KG",
-   "termo_busca_sinapi": "cimento portland composto", "observacoes": null}
+   "termo_busca_sinapi": "cimento portland composto", "descricao_generica": false,
+   "observacoes": null}
 ]
 
 Campos: "numero" (inteiro — número do item na lista original, ou null se não houver
@@ -2807,7 +2933,8 @@ numeração), "descricao" (string, obrigatório), "fabricante" (string ou null),
 (string ou null), "unidade" (string ou null), "quantidade" (número ou null), "embalagem"
 (string ou null — tamanho de UMA unidade de venda, quando identificável na descrição),
 "termo_busca_sinapi" (string ou null — descrição técnica genérica pra busca SINAPI),
-"observacoes" (string ou null).
+"descricao_generica" (true/false — a descrição do jeito que veio é pobre demais pra
+cotação?), "observacoes" (string ou null).
 """
 
 async def _interpretar_lista_texto(texto):
@@ -2824,7 +2951,8 @@ async def _interpretar_lista_texto(texto):
     )
     itens = _itens_lista_materiais(resposta.content[0].text)
     itens = await _adicionar_correspondencia_sinapi(itens)
-    return _adicionar_referencia_laura(itens)
+    itens = _adicionar_referencia_laura(itens)
+    return _adicionar_sugestao_descricao(itens)
 
 async def _interpretar_lista_arquivo(conteudo_bytes, mime_inf):
     tipo_conteudo = "document" if mime_inf == "application/pdf" else "image"
@@ -2842,7 +2970,8 @@ async def _interpretar_lista_arquivo(conteudo_bytes, mime_inf):
     )
     itens = _itens_lista_materiais(resposta.content[0].text)
     itens = await _adicionar_correspondencia_sinapi(itens)
-    return _adicionar_referencia_laura(itens)
+    itens = _adicionar_referencia_laura(itens)
+    return _adicionar_sugestao_descricao(itens)
 
 # ── Camada 2 — Candidatos SINAPI (busca FTS5 + Claude decide) ──────────────
 # Convergência deliberada: a correspondência acontece dentro das duas funções de
@@ -3082,6 +3211,10 @@ def _referencia_laura_item(descricao, unidade):
         "laura_fornecedor_referencia": mais_recente["fornecedor"],
         "laura_origem_referencia": OrigemReferencia.ULTIMO_PRECO_PAGO.value,
         "laura_grau_confianca_referencia": grau.value,
+        # Descrição do item histórico encontrado — não é snapshot de preço, é matéria-prima
+        # pra Camada de enriquecimento de descrição (2026-07-05, ver _adicionar_sugestao_descricao).
+        # Transiente: só importa até o usuário aceitar ou ignorar a sugestão nesta sessão.
+        "laura_descricao_referencia": mais_recente["descricao"],
     }
 
 def _adicionar_referencia_laura(itens):
@@ -3098,6 +3231,58 @@ def _adicionar_referencia_laura(itens):
         item["laura_fornecedor_referencia"] = referencia.get("laura_fornecedor_referencia")
         item["laura_origem_referencia"] = referencia.get("laura_origem_referencia")
         item["laura_grau_confianca_referencia"] = referencia.get("laura_grau_confianca_referencia")
+        item["laura_descricao_referencia"] = referencia.get("laura_descricao_referencia")
+    return itens
+
+_PALAVRA_DIGITO_RE = re.compile(r"\d")
+
+def _descricao_parece_generica(descricao):
+    """Heurística leve (sem IA) pra decidir se uma descrição está pobre pra cotação — usada
+    como rede de segurança quando o item não passa de novo pela Camada 1 (ex: depois de
+    corrigir um campo manualmente, sem reinterpretar). Ponto de partida sugerido pelo
+    Dennis, 2026-07-05: uma ou duas palavras, sem marca/dimensão/tipo/aplicação/embalagem —
+    aproximado aqui por "poucas palavras e nenhum dígito" (dígito costuma indicar dimensão,
+    embalagem ou código, sinal de que já não é genérico demais)."""
+    palavras = descricao.strip().split()
+    if len(palavras) > 2:
+        return False
+    return not _PALAVRA_DIGITO_RE.search(descricao)
+
+def _adicionar_sugestao_descricao(itens):
+    """Camada de enriquecimento de descrição (Dennis, 2026-07-05): "a Laura não deve apenas
+    interpretar a lista do jeito que eu escrevi... deve me ajudar a melhorar a qualidade
+    técnica da Lista de Compras." Roda depois das Camadas 2 e 3 — não faz busca nova,
+    reaproveita os candidatos que elas já encontraram (histórico próprio e SINAPI).
+
+    Prioridade como orientação, não regra cega: histórico real da empresa primeiro
+    (conhecimento próprio, mais confiável pro vocabulário real da obra); SINAPI só como
+    apoio quando o histórico não resolve, e só com confiança alta/média (nunca sugere a
+    partir de um candidato que a própria Camada 2 já marcou como incerto). Sugestão nunca
+    aparece se for igual à descrição atual — isso também é o que impede a sugestão de
+    voltar em loop depois que o usuário já aceitou uma vez.
+
+    Nunca decide sozinha: só anota `descricao_sugerida`/`descricao_sugerida_origem` pra
+    tela apresentar; aplicar é sempre ação explícita do usuário ("Usar sugestão")."""
+    for item in itens:
+        if not isinstance(item, dict):
+            continue
+        atual = item["descricao"].strip().lower()
+        generica = item.get("descricao_generica")
+        if generica is None:
+            generica = _descricao_parece_generica(item["descricao"])
+
+        sugestao, origem = None, None
+        if generica:
+            cand_hist = item.get("laura_descricao_referencia")
+            cand_sinapi = item.get("sinapi_descricao_referencia")
+            sinapi_confiavel = item.get("sinapi_confianca") in ("alta", "media")
+            if cand_hist and cand_hist.strip().lower() != atual:
+                sugestao, origem = cand_hist, "histórico"
+            elif cand_sinapi and sinapi_confiavel and cand_sinapi.strip().lower() != atual:
+                sugestao, origem = cand_sinapi, "SINAPI"
+
+        item["descricao_sugerida"] = sugestao
+        item["descricao_sugerida_origem"] = origem
     return itens
 
 def _fmt_qtde_segura(qtde):
@@ -3183,6 +3368,18 @@ def _linhas_analise_item(item):
 
     if item.get("observacoes"):
         linhas.append(f"   Obs: {item['observacoes']}")
+
+    if item.get("descricao_sugerida"):
+        linhas.append(
+            f"   💡 Sugestão de descrição ({item['descricao_sugerida_origem']}): "
+            f"{item['descricao_sugerida']}"
+        )
+        # Histórico tem prioridade sobre SINAPI (Dennis, 2026-07-05) — quando o histórico
+        # venceu, o candidato do SINAPI ainda pode valer a pena mostrar como alternativa.
+        if item["descricao_sugerida_origem"] == "histórico" and item.get("sinapi_descricao_referencia"):
+            alt = item["sinapi_descricao_referencia"]
+            if alt.strip().lower() != item["descricao_sugerida"].strip().lower():
+                linhas.append(f"   Outra possibilidade (SINAPI): {alt}")
     return linhas
 
 def _texto_analise_tecnica(itens, ggv):
@@ -3264,11 +3461,31 @@ def _avaliar_item(item):
         alertas_revisar.append("Observação da IA — conferir")
     if _melhor_referencia_preco(item) is None:
         alertas_revisar.append("Sem referência de preço conhecida")
+    if item.get("descricao_sugerida"):
+        alertas_revisar.append("Descrição genérica — sugestão disponível")
     if alertas_revisar:
         return "revisar", alertas_revisar
     return "ok", []
 
 _EMOJI_STATUS = {"ok": "🟢", "revisar": "🟡", "atencao": "🔴"}
+
+def _calcular_referencia_total(itens):
+    """Referência total estimada de uma lista — mesmo cálculo usado na Tela de Conferência
+    (texto) e no PDF (2026-07-05), pra nunca existirem dois números diferentes pro mesmo
+    conceito ("Convergência antes de paralelismo", docs/CONSTITUICAO.md)."""
+    total = 0.0
+    parcial = False
+    for item in itens:
+        if not isinstance(item, dict):
+            parcial = True
+            continue
+        preco_ref = _melhor_referencia_preco(item)
+        qtde, und = item.get("quantidade"), item.get("unidade")
+        if preco_ref is not None and und and qtde is not None:
+            total += preco_ref * qtde
+        else:
+            parcial = True
+    return total, parcial
 
 def _texto_lista_conferencia(itens, ggv, endereco_override=None, observacoes=None):
     """Nível 1 (Tela de Conferência) — a tela principal depois de interpretar. Objetivo não é
@@ -3295,8 +3512,6 @@ def _texto_lista_conferencia(itens, ggv, endereco_override=None, observacoes=Non
 
     alertas_agrupados = {}
     n_itens_com_alerta = 0
-    total_referencia = 0.0
-    total_parcial = False
 
     for i, item in enumerate(itens, 1):
         status, alertas = _avaliar_item(item)
@@ -3330,14 +3545,11 @@ def _texto_lista_conferencia(itens, ggv, endereco_override=None, observacoes=Non
         preco_ref = _melhor_referencia_preco(item)
         if preco_ref is not None and und:
             linhas.append(f"     Referência: ~R$ {_fmt_brl(preco_ref)}/{und}")
-            if qtde is not None:
-                total_referencia += preco_ref * qtde
-            else:
-                total_parcial = True
         else:
             linhas.append("     Referência: ainda não conhecida")
-            total_parcial = True
         linhas.append("")
+
+    total_referencia, total_parcial = _calcular_referencia_total(itens)
 
     if alertas_agrupados:
         linhas.append("⚠️ <b>Revisar:</b>")
@@ -3440,6 +3652,12 @@ def _texto_tela_item(indice, item, pendente):
         partes.append(fabricante)
     linhas.append(" • ".join(partes))
     linhas.append("")
+    if not pendente and item.get("descricao_sugerida"):
+        linhas.append(
+            f"💡 Descrição genérica. Sugestão: {item['descricao_sugerida']} "
+            f"({item['descricao_sugerida_origem']})"
+        )
+        linhas.append("")
     if pendente:
         linhas.append("⚠️ Alterações pendentes")
         linhas.append("A referência será recalculada ao concluir a edição.")
@@ -3479,6 +3697,8 @@ def _teclado_item_tela(indice, item, pendente):
          InlineKeyboardButton("🗒 Observações",        callback_data=f"lc_campo:{indice}:observacoes")],
         [InlineKeyboardButton("🔍 Ver análise técnica", callback_data=f"lc_tecnicoitem:{indice}")],
     ]
+    if not pendente and item.get("descricao_sugerida"):
+        botoes.append([InlineKeyboardButton("✅ Usar sugestão", callback_data=f"lc_usarsugestao:{indice}")])
     if pendente:
         botoes.append([InlineKeyboardButton("💾 Concluir edição", callback_data=f"lc_concluir:{indice}")])
     else:
@@ -3549,6 +3769,30 @@ async def _cb_lc_campo(query, ctx, partes):
         reply_markup=_teclado_voltar_item(indice)
     )
 
+async def _cb_lc_usarsugestao(query, ctx, partes):
+    """Aceita a descrição sugerida (histórico próprio ou SINAPI) — Dennis, 2026-07-05: "a
+    Laura deve me ajudar a melhorar a qualidade técnica da Lista de Compras". Aplica no
+    rascunho, igual a corrigir o campo Produto manualmente — "Concluir edição" recalcula
+    SINAPI/referência com a descrição nova, sem chamada de IA extra aqui."""
+    indice = int(partes[1])
+    itens = ctx.user_data.get("lista_itens") or []
+    if not (1 <= indice <= len(itens)) or not isinstance(itens[indice - 1], dict):
+        await query.edit_message_text("Item não encontrado.")
+        return
+    item = itens[indice - 1]
+    sugestao = item.get("descricao_sugerida")
+    if not sugestao:
+        await query.edit_message_text("Sugestão não encontrada.", reply_markup=_teclado_voltar_item(indice))
+        return
+    rascunho = dict(item)
+    rascunho["descricao"] = sugestao
+    ctx.user_data["lista_item_rascunho"] = rascunho
+    ctx.user_data["lista_item_indice"] = indice
+    await query.edit_message_text(
+        _texto_tela_item(indice, rascunho, True), parse_mode="HTML",
+        reply_markup=_teclado_item_tela(indice, rascunho, True)
+    )
+
 async def _cb_lc_concluir(query, ctx, partes):
     indice = int(partes[1])
     rascunho = ctx.user_data.get("lista_item_rascunho")
@@ -3557,12 +3801,15 @@ async def _cb_lc_concluir(query, ctx, partes):
         await query.edit_message_text("Contexto perdido. Envie /lista novamente.")
         return
     await query.edit_message_text("Recalculando...")
-    # termo_busca_sinapi é uma paráfrase técnica da descrição antiga, inferida pela IA na
-    # Camada 1 — se a descrição mudou, essa pista fica obsoleta e atrapalharia a busca SINAPI.
-    # Descartada aqui pra sempre cair no fallback já existente (busca pela descrição atual).
+    # termo_busca_sinapi/descricao_generica são julgamentos da IA presos à descrição antiga
+    # (Camada 1) — se a descrição mudou, ficam obsoletos. Descartados aqui: termo_busca_sinapi
+    # cai no fallback já existente (busca pela descrição atual); descricao_generica cai na
+    # heurística leve de _adicionar_sugestao_descricao (sem IA, já que não há reinterpretação).
     rascunho.pop("termo_busca_sinapi", None)
+    rascunho.pop("descricao_generica", None)
     novos = await _adicionar_correspondencia_sinapi([rascunho])
-    novo_item = _adicionar_referencia_laura(novos)[0]
+    novos = _adicionar_referencia_laura(novos)
+    novo_item = _adicionar_sugestao_descricao(novos)[0]
     itens[indice - 1] = novo_item
     ctx.user_data["lista_itens"] = itens
     ctx.user_data.pop("lista_item_rascunho", None)
@@ -3671,6 +3918,13 @@ async def _cb_lc_gerar(query, ctx, partes):
         campos_lista["observacoes"] = ctx.user_data["lista_observacoes"]
     if campos_lista:
         atualizar_lista(DB_PATH, lista_id, **campos_lista)
+    # Cada confirmação reflete a lista inteira vista agora, não um incremento — reabrir e
+    # confirmar de novo a mesma lista aberta (ex: pra testar uma correção) duplicava os
+    # itens, porque adicionar_item() só insere. Mesmo padrão de _salvar_itens_pedido()
+    # (Pedido de Compra): a versão mais recente substitui a anterior. Soft-delete (não
+    # apaga de verdade) pra manter o padrão de remover_item() já usado no resto do módulo.
+    for item_existente in listar_itens(DB_PATH, lista_id):
+        remover_item(DB_PATH, item_existente["id"])
     for item in itens_validos:
         adicionar_item(
             DB_PATH, lista_id,
@@ -3684,6 +3938,8 @@ async def _cb_lc_gerar(query, ctx, partes):
             sinapi_unidade_referencia=item.get("sinapi_unidade_referencia"),
             sinapi_preco_referencia=item.get("sinapi_preco_referencia"),
             sinapi_mes_referencia=item.get("sinapi_mes_referencia"),
+            sinapi_confianca=item.get("sinapi_confianca"),
+            sinapi_preco_equivalente=item.get("sinapi_preco_equivalente"),
             observacoes=item.get("observacoes"),
             laura_preco_referencia=item.get("laura_preco_referencia"),
             laura_data_referencia=item.get("laura_data_referencia"),
@@ -3691,13 +3947,31 @@ async def _cb_lc_gerar(query, ctx, partes):
             laura_origem_referencia=item.get("laura_origem_referencia"),
             laura_grau_confianca_referencia=item.get("laura_grau_confianca_referencia"),
         )
+    n = len(itens_validos)
+    await query.edit_message_text(f"✅ Lista de Compras da Obra {ggv} salva — {n} ite{'m' if n == 1 else 'ns'}. Gerando PDF...")
+
+    data_str = datetime.now().strftime('%Y-%m-%d')
+    pasta = _pasta_orcamentos(ggv)
+    for com_precos, sufixo, caption in (
+        (True,  "Referência",  f"Lista de Compras — Obra {ggv} (com referência de preço, uso interno)"),
+        (False, "Orçamento",   f"Lista de Compras — Obra {ggv} (para solicitar orçamento ao fornecedor)"),
+    ):
+        html      = _gerar_html_lista(lista_id, com_precos=com_precos)
+        pdf_bytes = await _html_para_pdf(html)
+        nome_arquivo = f"Lista de Compras - {ggv} - {data_str} - {sufixo}.pdf"
+        (pasta / nome_arquivo).write_bytes(pdf_bytes)
+        await ctx.bot.send_document(
+            chat_id=query.message.chat_id,
+            document=pdf_bytes,
+            filename=nome_arquivo,
+            caption=caption
+        )
+
     ctx.user_data["aguardando"] = None
     ctx.user_data.pop("lista_itens", None)
     ctx.user_data.pop("lista_ggv", None)
     ctx.user_data.pop("lista_endereco", None)
     ctx.user_data.pop("lista_observacoes", None)
-    n = len(itens_validos)
-    await query.edit_message_text(f"✅ Lista de Compras da Obra {ggv} salva — {n} ite{'m' if n == 1 else 'ns'}.")
 
 async def _cb_lc_fechar(query, ctx, partes):
     ctx.user_data["aguardando"] = None
@@ -3739,6 +4013,7 @@ def _itens_lista_materiais(dados):
                 "quantidade": item.get("quantidade"),
                 "embalagem": item.get("embalagem") or None,
                 "termo_busca_sinapi": item.get("termo_busca_sinapi") or None,
+                "descricao_generica": bool(item.get("descricao_generica")),
                 "observacoes": item.get("observacoes") or None,
             })
         return resultado
@@ -5262,6 +5537,7 @@ _CB_DISPATCH = {
     "lc_item": _cb_lc_item,
     "lc_campo": _cb_lc_campo,
     "lc_campolista": _cb_lc_campolista,
+    "lc_usarsugestao": _cb_lc_usarsugestao,
     "lc_concluir": _cb_lc_concluir,
     "lc_tecnicoitem": _cb_lc_tecnicoitem,
     "lc_reinterpretar": _cb_lc_reinterpretar,
