@@ -15,25 +15,93 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > sozinhas com o uso do dia a dia não entram aqui (ex: fechar um pedido parcelado esperando
 > pagamento). Ver Dívida Técnica em `docs/ROADMAP.md`.
 
-1. Edição campo a campo da Lista de Compras (escolher item → escolher campo → digitar valor) —
-   hoje a edição é do item inteiro, por decisão explícita de simplicidade
-2. Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento
+1. Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento
+2. Testar edição de endereço/observações reabrindo uma lista já existente (só validado com
+   objetos simulados)
 3. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
 4. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
 5. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
 6. Acesso via Claude Code Remote do celular — ideia registrada, servidor Proxmox em casa (Eric)
 7. Persistir os 9 índices de `data/laura.db` em código (hoje só existem no banco vivo — um `init_db()`
    contra um banco novo não os recria; ver Dívida Técnica em `docs/ROADMAP.md`)
+8. Aplicar "← Voltar" nos ~25 prompts de texto do resto do bot (Obra, entrega, recibo,
+   `/nova_obra`...) — feito só na Lista de Compras em 2026-07-05
 
 > Fiadas próprias, não priorizadas ainda: "Motor de Interpretação e Classificação de Documentos"
 > (convergência dos três caminhos divergentes de confirmação de documento) e "Compreensão de
 > Produto antes da Correspondência SINAPI" (atributos técnicos completos antes de casar com
 > SINAPI — deliberadamente não persistido ainda, ver Visão de Longo Prazo em `docs/ROADMAP.md`).
 
-> Concluído desde a última revisão: redesenho de experiência em 3 níveis + gravação real da
-> Lista de Compras (2026-07-04) — ver entrada abaixo; Camada 3 com filtro obrigatório de
-> unidade igual; Camada 4 (tela de conferência) substituída pelo redesenho de 3 níveis no
-> mesmo dia.
+> Concluído desde a última revisão: Camada 4b (correção campo a campo + Tela do Item unificada
+> + cabeçalho editável + convergência do endereço de entrega com o Pedido de Compra, 2026-07-05,
+> validado ao vivo no Telegram) e redesenho de experiência em 3 níveis + gravação real da Lista
+> de Compras (2026-07-04) — ver entradas abaixo; Camada 3 com filtro obrigatório de unidade
+> igual; Camada 4 (tela de conferência) substituída pelo redesenho de 3 níveis no mesmo dia.
+
+---
+
+## [Camada 4b — Correção campo a campo + convergência do endereço de entrega] — 2026-07-05
+
+### Motivação
+
+Item #1 do "Objetivo da Próxima Sessão" anterior (validar o pipeline completo da Lista de
+Compras ao vivo) e item #2 (edição campo a campo) resolvidos na mesma sessão. Desenho
+negociado em várias rodadas de mockup em texto validado antes do código: proposta inicial
+(tela "Corrigir campos" separada) → "recalcular somente ao salvar" (rascunho, uma chamada de
+IA só ao concluir) → "a Tela do Item mistura visualização, análise técnica e edição... deve
+virar um menu, não uma ficha técnica" (redesenho final).
+
+### Adicionado
+
+- **Tela do Item unificada** (`_texto_tela_item`/`_teclado_item_tela`): view + menu de
+  correção numa tela só — cada campo (Produto, Fabricante, Código, Quantidade, Unidade,
+  Observações) é um botão direto, sem tela intermediária
+- **Correção campo a campo com recálculo único** (`_cb_lc_campo`/`_cb_lc_concluir`): corrigir
+  vários campos em sequência não dispara IA a cada um; "💾 Concluir edição" recalcula Camada
+  2+3 uma única vez e volta pra lista. Enquanto há rascunho pendente, Referência/
+  Correspondência somem da tela (nunca mostradas como se ainda fossem válidas);
+  `_preparar_tela_item()` compara rascunho ao item real pra nunca marcar pendência falsa
+- **Análise técnica por item** (`_texto_item_tecnico`/`_cb_lc_tecnicoitem`), extraída de
+  `_texto_analise_tecnica` via `_linhas_analise_item()` compartilhada
+- **Botão "📍 Definir obra"** sempre visível quando a obra ainda não foi identificada
+  (`_cb_lc_defobra`/`_cb_lc_setobra`), usando `_listar_obras()` (mesma fonte do `/obras`)
+- **Cabeçalho da Lista de Compras editável**: Obra, Endereço de entrega (herdado da obra,
+  editável só pra esta lista) e Observações gerais (campo novo, opcional) —
+  `listas_compra` ganhou as colunas `endereco_entrega`/`observacoes` e `atualizar_lista()`
+  (`compras/lista.py`)
+- **"← Voltar" em todo prompt de texto livre da Lista de Compras**, incluindo mensagens de
+  retry de validação
+
+### Alterado
+
+- **Endereço de entrega unificado entre Pedido de Compra e Lista de Compras** — a primeira
+  versão da edição de endereço da Lista era um prompt de texto livre simples, diferente do
+  picker já maduro do Pedido (Obra/Casa/Escritório/Chácara/Outro). `teclado_endereco()`/
+  `_cb_end()` (Pedido) e a Lista convergem agora num único `teclado_escolha_endereco()` +
+  `_cb_endsel()`, bifurcando só no destino final da gravação (documento vs sessão da Lista)
+- **"🔄 Reinterpretar item" saiu da tela principal** — "Concluir edição" já recalcula tudo
+  sozinho; reinterpretar via texto livre continua existindo só pra itens em fallback (string,
+  não interpretado), onde é o único caminho possível
+
+### Novo princípio (docs/CONSTITUICAO.md)
+
+**"Convergência antes de paralelismo"**: antes de criar qualquer interação nova, verificar se
+o mesmo conceito já existe em outro módulo — e partir da solução existente, nunca criar um
+fluxo paralelo. Teste prático de verificação: "se eu adicionar uma opção nova amanhã, em
+quantos lugares preciso mexer?".
+
+### Testado
+
+Pipeline completo validado ao vivo no Telegram, ponta a ponta — confirmado pelo Dennis:
+"Lista de Compras da Obra GGV03 salva — 8 itens". Endereço/observações testados com escrita
+real no banco (script isolado); comportamento do Pedido de Compra confirmado inalterado após
+a unificação.
+
+### Pendente
+
+Testar edição de endereço/observações reabrindo uma lista já existente com o Telegram real
+(só testado com objetos simulados); geração de Pedido de Compra a partir da Lista de Compras;
+vínculo com orçamento.
 
 ---
 

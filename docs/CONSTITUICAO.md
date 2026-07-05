@@ -52,6 +52,15 @@ ela resolver um problema real. Uma linha a menos é sempre melhor que uma linha 
 
 ---
 
+## Convergência antes de paralelismo
+
+Antes de criar qualquer interação, tela ou mecanismo novo, verificamos se o mesmo conceito
+já existe em outro módulo do sistema. Quando existir, a evolução parte da solução
+existente — nunca criamos um fluxo paralelo só porque o contexto novo parece mais simples.
+Entradas diferentes podem existir. Processos diferentes, não.
+
+---
+
 ## Engenharia viva
 
 A documentação deve refletir o estado real do projeto. Não documentamos arquiteturas

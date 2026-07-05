@@ -1,11 +1,13 @@
 # Arquitetura do Projeto Laura
 
-> Versão: 2026-07-04 — reflete o estado real do sistema (pós ADR-004: dispatch table + módulo
+> Versão: 2026-07-05 — reflete o estado real do sistema (pós ADR-004: dispatch table + módulo
 > `nfe/`; DOCX removido; segurança de `responder_botao()`/`atualizar()`/`atualizar_obra()`
 > corrigida; `itens_pedido`/`parcelas_pagamento`/`insumos_sinapi` documentadas; `financeiro/consultas.py`
 > e `financeiro/relatorios.py` adicionados; **módulo `compras/` — Lista de Compras com pipeline
-> completo de interpretação (Camadas 1-3: JSON estruturado, SINAPI, referência própria), tela
-> de conferência em 3 níveis e gravação real em `listas_compra`/`lista_compra_itens`**)
+> completo de interpretação (Camadas 1-3), Tela do Item unificada (view + menu de correção
+> campo a campo, recálculo único ao concluir), cabeçalho editável (Obra/Endereço/Observações),
+> gravação real em `listas_compra`/`lista_compra_itens`; endereço de entrega convergido entre
+> Pedido de Compra e Lista de Compras via `teclado_escolha_endereco()`/`_cb_endsel()` único**)
 
 ---
 
@@ -60,13 +62,17 @@ Telegram ──────► bot.py ──────► Claude API (haiku-4-
   todas as funções recebendo `db_path`. Três pontos de entrada em `bot.py` — comando `/lista`
   por texto, `/lista` por foto/PDF, e o tipo de documento `lista_materiais` — convergem pra
   mesma função de interpretação (`_interpretar_lista_texto`/`_interpretar_lista_arquivo`),
-  nunca implementações separadas (ver Fluxo C). Pipeline completo (2026-07-04): Camada 1
-  (interpretação JSON estruturada, com contexto da lista inteira) → Camada 2 (candidatos
-  SINAPI via FTS5 + Claude decide, com termo técnico de busca e conversão de preço pra
-  unidade comercial) → Camada 3 (última compra própria, filtro obrigatório de unidade igual)
-  → tela de conferência em 3 níveis (ver Fluxo C) → gravação real em `listas_compra`/
-  `lista_compra_itens` ao confirmar. Ainda sem geração de Pedido de Compra a partir da Lista
-  nem vínculo com orçamento; edição é do item inteiro, não campo a campo — ver ROADMAP.md
+  nunca implementações separadas (ver Fluxo C). Pipeline completo: Camada 1 (interpretação
+  JSON estruturada, com contexto da lista inteira) → Camada 2 (candidatos SINAPI via FTS5 +
+  Claude decide, com termo técnico de busca e conversão de preço pra unidade comercial) →
+  Camada 3 (última compra própria, filtro obrigatório de unidade igual) → **Tela do Item
+  unificada** (view + menu de correção campo a campo, recálculo único ao "Concluir edição" —
+  ver Fluxo C) → **cabeçalho editável** (Obra/Endereço/Observações, 2026-07-05) → gravação
+  real em `listas_compra`/`lista_compra_itens` ao confirmar. Endereço de entrega reaproveita o
+  mesmo mecanismo de presets do Pedido de Compra (`teclado_escolha_endereco()`/`_cb_endsel()`
+  único, 2026-07-05 — princípio "Convergência antes de paralelismo", `docs/CONSTITUICAO.md`).
+  Ainda sem geração de Pedido de Compra a partir da Lista nem vínculo com orçamento — ver
+  ROADMAP.md
 - **`data/laura.db`** — banco SQLite com dez tabelas (ver seção 3); 9 índices estratégicos
   criados em 2026-07-03, mas só no banco vivo — não persistidos em nenhum `CREATE INDEX` versionado
 - **`data/uploads/`** — todo arquivo recebido pelo Telegram cai aqui primeiro (pasta única,
@@ -265,10 +271,15 @@ palavras muda (ex: "tubo pvc 25" não batia com "PVC, SOLDAVEL, DE 25 MM"); FTS5
 | `id` | Chave primária |
 | `ggv` | Obra à qual a lista pertence — sem FK explícita |
 | `status` | `aberta` / `encerrada` / `descartada` (Modelo de Domínio) — só `aberta` é usada hoje |
+| `endereco_entrega` | Override de endereço só desta lista (2026-07-05) — herdado de `obras.endereco_entrega` na tela, nunca sobrescreve o cadastro da obra; `NULL` até o usuário editar |
+| `observacoes` | Observações gerais da compra, opcional (2026-07-05) — instrução geral, não por item |
 | `criado_em` | Timestamp de criação |
 
 Uma obra tem no máximo uma lista `aberta` por vez (`buscar_lista_aberta()`); reaberturas
-reaproveitam a mesma lista em vez de criar outra.
+reaproveitam a mesma lista em vez de criar outra. `atualizar_lista(db_path, lista_id, **kwargs)`
+grava `endereco_entrega`/`observacoes` (allowlist `_COLUNAS_LISTA_EDITAVEIS`, mesmo padrão de
+segurança de `atualizar()`/`atualizar_obra()`) — `_cb_lc_gerar()` só chama quando o campo foi
+tocado na sessão corrente, pra nunca apagar um valor já salvo ao reabrir uma lista existente.
 
 ---
 
@@ -328,7 +339,7 @@ Dennis digita o código (ex: GGV03-009)
   → bot exibe tela do pedido com botões de ação
 ```
 
-**Fluxo C — Lista de Compras: interpretação, conferência e gravação** *(2026-07-04)*
+**Fluxo C — Lista de Compras: interpretação, conferência e gravação** *(2026-07-04/05)*
 
 ```
 Dennis dispara por três caminhos, que convergem pras mesmas funções:
@@ -351,22 +362,37 @@ Dennis dispara por três caminhos, que convergem pras mesmas funções:
   → Camada 3 — _adicionar_referencia_laura(): última compra própria via procurar_item(),
     só aceita candidato com unidade igual à comercial (sem conversão, ao contrário da
     Camada 2) — filtro que existe pra evitar casar produtos diferentes por palavra isolada
-  → tela de conferência em 3 níveis (ctx.user_data["lista_itens"]/["lista_ggv"] guardam o
-    estado de trabalho entre telas):
-      Nível 1 (_texto_lista_conferencia): tela principal — item/quantidade/referência em
-        3 linhas, indicador 🟢🟡🔴, alertas agrupados, resumo. "A Laura apresenta primeiro
-        a informação necessária para a decisão."
-      Nível 2 (_texto_item_detalhe): todos os campos de um item, só ao escolher editá-lo;
-        edição reinterpreta o item inteiro como texto livre (não campo a campo)
-      Nível 3 (_texto_analise_tecnica): tela técnica completa (confiança, SINAPI bruto,
-        histórico) — opcional, acessada por botão
+  → Nível 1 — Tela de Conferência (_texto_lista_conferencia/_teclado_lista_conferencia):
+    item/quantidade/referência em 3 linhas, indicador 🟢🟡🔴, alertas agrupados, resumo.
+    "A Laura apresenta primeiro a informação necessária para a decisão." Cabeçalho com 3
+    campos editáveis (2026-07-05): 🏗 Obra, 📍 Endereço (herdado da obra, override só desta
+    lista), 🗒 Observações gerais (opcional) — ctx.user_data["lista_ggv"/"lista_endereco"/
+    "lista_observacoes"] guardam o estado de trabalho
+  → Nível 2 — Tela do Item (_texto_tela_item/_teclado_item_tela, redesenhada 2026-07-05):
+    view + menu de correção numa tela só, não mais ficha técnica com edição misturada.
+    Cada campo (Produto/Fabricante/Código/Quantidade/Unidade/Observações) abre um prompt
+    isolado (_cb_lc_campo) que grava num rascunho (ctx.user_data["lista_item_rascunho"]),
+    nunca no item real; Referência/Correspondência somem da tela enquanto há rascunho
+    pendente. "💾 Concluir edição" (_cb_lc_concluir) roda Camada 2+3 uma única vez sobre o
+    rascunho e volta pra Nível 1 já atualizado — nunca uma chamada de IA por campo
+    corrigido. "🔄 Reinterpretar item" (Camada 1+2+3 completa via texto livre) só aparece
+    pra itens em fallback (string, não interpretado) — não compete mais com "Concluir
+    edição" na tela principal
+  → Análise Técnica (_texto_analise_tecnica para a lista inteira, _texto_item_tecnico por
+    item — mesma formatação via _linhas_analise_item compartilhada): confiança, SINAPI
+    bruto, histórico — opcional, acessada por botão, nunca a tela principal
   → botão "✅ Gerar Lista de Compras" (_cb_lc_gerar): grava de verdade via
-    criar_ou_buscar_lista_aberta() + adicionar_item() — bloqueia se a obra não estiver
-    definida
+    criar_ou_buscar_lista_aberta() + adicionar_item() (itens) + atualizar_lista() (endereço/
+    observações, só se tocados nesta sessão) — bloqueia se a obra não estiver definida
 ```
 
-Pendente: edição campo a campo; geração de Pedido de Compra a partir da Lista de Compras;
-vínculo com orçamento — ver ROADMAP.md, Fase — Módulo de Compras.
+Endereço de entrega (Nível 1 e Pedido de Compra) usa o **mesmo mecanismo** —
+`teclado_escolha_endereco(destino, param, ggv, voltar_callback)` + `_cb_endsel()` único,
+bifurcando só no destino final da gravação (`documentos` vs `ctx.user_data`). Ver seção 2 e
+princípio "Convergência antes de paralelismo" em `docs/CONSTITUICAO.md`.
+
+Pendente: geração de Pedido de Compra a partir da Lista de Compras; vínculo com orçamento —
+ver ROADMAP.md, Fase — Módulo de Compras.
 
 ⚠️ **Divergência conhecida, fora do escopo desta fiada**: o pipeline de confirmação de
 `comprovante_pix`/`nota_fiscal` (Fluxo A) tem três pontos de entrada que não convergem
@@ -388,7 +414,7 @@ Referências para navegação no arquivo (4.994 linhas):
 | Banco de dados | `init_db()`, `buscar_fornecedor()` | Criação de tabelas, CRUD |
 | Geração de PFM | `gerar_pfm()`, `_campo()`, `_itens()` | Helpers de parsing/formatação; define código, salva itens, registra lançamento (não gera documento — ver `_gerar_html_pc()`) |
 | Domínio — consulta | `buscar_pedido()`, `mostrar_pedido()` | Pipeline de visualização do pedido |
-| Domínio — Lista de Compras | `lista_cmd()`, `_interpretar_lista_texto/arquivo()`, `_adicionar_correspondencia_sinapi()`, `_adicionar_referencia_laura()`, `_texto_lista_conferencia()`, `_cb_lc_*()` | Comando `/lista` + fluxo de foto (`lista_materiais`); Camadas 1-3 de interpretação, tela de conferência em 3 níveis, gravação via `compras.*` |
+| Domínio — Lista de Compras | `lista_cmd()`, `_interpretar_lista_texto/arquivo()`, `_adicionar_correspondencia_sinapi()`, `_adicionar_referencia_laura()`, `_texto_lista_conferencia()`, `_texto_tela_item()`, `_cb_lc_*()` | Comando `/lista` + fluxo de foto (`lista_materiais`); Camadas 1-3 de interpretação, Tela do Item (view + correção campo a campo), cabeçalho editável, gravação via `compras.*` |
 | Teclados | `parse_resposta()`, `teclado_confirmacao()` | Parse da resposta Claude e botões inline |
 | Handlers Telegram | `receber_arquivo()`, `receber_texto()` | Handlers de mensagens |
 | Dispatch de callback | `responder_botao()`, `_CB_DISPATCH`, `_cb_*()` | Um único `CallbackQueryHandler`; roteia por dict `acao → função` (ADR-004, 2026-07-02) em vez de if/elif — 59 funções `_cb_*`, cada uma cobrindo os ramos que antes viviam soltos dentro de uma função de 929 linhas |

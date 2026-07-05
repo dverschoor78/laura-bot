@@ -1,15 +1,18 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-04 (**módulo de Compras redesenhado — Camada 1 interpretação
-> unificada, snapshot histórico SINAPI+Laura, FTS5 de busca, Lição #12 corrigida; achado
-> arquitetural registrado — Motor de Interpretação e Classificação de Documentos**); histórico
-> anterior: produção migrada e limpa; auto-cadastro via Receita; arquivos organizados por obra;
-> taxas/impostos/serviços públicos; recibo automático; pagamento parcelado; base de insumos
-> SINAPI; produção ativada + correções de cadastro ao vivo; enriquecimento de fornecedor via
-> Receita — e-mail, telefone, CNAE; incidente crítico de exclusão de documento + correção;
-> DOCX removido, ADR-004 (modularização), recibo narrativo, matching PIX/NF-e corrigido;
-> vulnerabilidade de segurança corrigida, itens de compra estruturados (`itens_pedido`),
-> módulo `financeiro/relatorios.py`, BD otimizado (9 índices) + CLI de consultas rápidas
+> Atualizado em: 2026-07-05 (**Lista de Compras — Camada 4b: correção campo a campo com
+> recálculo único, Tela do Item unificada (view+menu), cabeçalho editável (Obra/Endereço/
+> Observações), endereço de entrega convergido com o Pedido de Compra, novo princípio
+> "Convergência antes de paralelismo" na CONSTITUICAO.md — pipeline validado ao vivo no
+> Telegram**); histórico anterior: módulo de Compras redesenhado (Camada 1 interpretação
+> unificada, snapshot histórico SINAPI+Laura, FTS5 de busca); produção migrada e limpa;
+> auto-cadastro via Receita; arquivos organizados por obra; taxas/impostos/serviços públicos;
+> recibo automático; pagamento parcelado; base de insumos SINAPI; produção ativada +
+> correções de cadastro ao vivo; enriquecimento de fornecedor via Receita — e-mail, telefone,
+> CNAE; incidente crítico de exclusão de documento + correção; DOCX removido, ADR-004
+> (modularização), recibo narrativo, matching PIX/NF-e corrigido; vulnerabilidade de segurança
+> corrigida, itens de compra estruturados (`itens_pedido`), módulo `financeiro/relatorios.py`,
+> BD otimizado (9 índices) + CLI de consultas rápidas
 
 ---
 
@@ -382,6 +385,45 @@ simulados. Regressão do fluxo orçamento → pedido confirmada.
 **Pendente** (fica pra fiada futura, escopo definido por Dennis): edição campo a campo
 (escolher item → escolher campo → digitar valor); geração de Pedido de Compra a partir da
 Lista de Compras; vínculo com orçamento.
+
+---
+
+**Camada 4b — Correção campo a campo + Tela do Item unificada** ✓ *(2026-07-05)*
+
+Item #1 do "Objetivo da Próxima Sessão" anterior (validar o pipeline completo ao vivo) e item
+#2 (edição campo a campo) resolvidos juntos, em 3 rodadas de mockup validado antes do código:
+proposta inicial (tela "Corrigir campos" separada, salvamento imediato por campo) → "recalcular
+somente ao salvar" (rascunho por trás da tela, uma chamada de IA só ao concluir) → redesenho
+final da Tela do Item inteira ("ela mistura visualização, análise técnica e edição... deve
+virar um menu, não uma ficha técnica").
+
+- **Tela do Item = view + menu numa tela só** (`_texto_tela_item`/`_teclado_item_tela`): cada
+  campo (Produto, Fabricante, Código, Quantidade, Unidade, Observações) é um botão direto;
+  sem tela intermediária de "Corrigir campos"
+- **Recálculo único ao "Concluir edição"** (`_cb_lc_concluir`): corrigir vários campos em
+  sequência não dispara IA por campo; Referência/Correspondência somem da tela enquanto há
+  rascunho pendente (nunca mostradas como se ainda fossem válidas); `_preparar_tela_item()`
+  compara rascunho ao item real pra nunca marcar "pendente" à toa
+- **"Reinterpretar item" saiu da tela principal** — só continua existindo pra itens em
+  fallback (string, não interpretado), onde é o único caminho possível
+- **Análise técnica por item**, nova (`_texto_item_tecnico`), extraída de
+  `_texto_analise_tecnica` via `_linhas_analise_item()` compartilhada
+- **Botão "📍 Definir obra"** sempre visível quando obra não identificada — usa `_listar_obras()`
+  (mesma fonte do `/obras`), não a lista `GGVS` hardcoded antiga
+- **Cabeçalho editável**: Obra, Endereço de entrega (herdado da obra, editável só pra esta
+  lista) e Observações gerais (campo novo, opcional) — `listas_compra` ganhou duas colunas
+  (`endereco_entrega`, `observacoes`)
+- **Endereço de entrega convergido com o Pedido de Compra** — mesmo mecanismo de presets
+  (Obra/Casa/Escritório/Chácara/Outro) via `teclado_escolha_endereco()`/`_cb_endsel()` único,
+  usado pelos dois domínios (documento vs sessão da Lista de Compras); ver Decisões Recentes
+- **Todo prompt de texto livre ganhou "← Voltar"**, incluindo mensagens de retry de validação
+
+**Testado ao vivo no Telegram**: pipeline completo confirmado pelo Dennis — "Lista de Compras
+da Obra GGV03 salva — 8 itens".
+
+**Pendente**: testar edição de endereço/observações reabrindo uma lista já existente (só
+testado com objetos simulados); geração de Pedido de Compra a partir da Lista de Compras;
+vínculo com orçamento.
 
 ---
 
@@ -767,26 +809,27 @@ que `bot.py` parecia "bagunçado".
 > gatilho arquitetural que ainda não ocorreu) não são fiadas — ficam registradas em Dívida Técnica
 > ou no ADR correspondente, sem duplicar aqui como se fossem tarefa da próxima sessão.
 
-1. **Validar o pipeline completo da Lista de Compras ao vivo no Telegram** — Camadas 1-3 + tela
-   de conferência em 3 níveis + gravação real testadas com objetos simulados e fotos reais fora
-   do Telegram; falta o teste ponta a ponta clicando nos botões de verdade antes de empilhar
-   mais fiada
-2. **Edição campo a campo da Lista de Compras** — hoje reinterpreta o item inteiro como texto
-   livre, por decisão explícita de simplicidade; granularidade por campo fica pra quando fizer falta
-3. **Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento** — a Lista já
-   grava de verdade no banco, mas ainda é uma ilha
-4. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-5. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração encontrado
-6. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
+1. **Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento** — a Lista já
+   interpreta, corrige, tem cabeçalho completo e grava de verdade no banco (validada ao vivo),
+   mas ainda é uma ilha
+2. **Testar edição de endereço/observações reabrindo uma lista já existente** — a gravação
+   condicional (só grava se o campo foi tocado nesta sessão) só foi validada com objetos
+   simulados
+3. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+4. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração encontrado
+5. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
    — perguntar sobre a `- Copy.jpeg` antes, é backup pessoal do Dennis
-7. Acesso via Claude Code Remote do celular — sem ambiente configurado; ideia de hospedar Laura +
+6. Acesso via Claude Code Remote do celular — sem ambiente configurado; ideia de hospedar Laura +
    banco num servidor Proxmox em casa (Eric administra) registrada, não iniciada
-8. Persistir os 9 índices de `data/laura.db` em código — hoje só existem no banco vivo (nenhum
+7. Persistir os 9 índices de `data/laura.db` em código — hoje só existem no banco vivo (nenhum
    `CREATE INDEX` em `bot.py`/scripts); um `init_db()` contra um banco novo não os recria
-9. Integrar `financeiro/relatorios.py` a `bot.py` — hoje as funções só rodam chamadas manualmente,
+8. Integrar `financeiro/relatorios.py` a `bot.py` — hoje as funções só rodam chamadas manualmente,
    sem botão ou comando no Telegram
-10. Popular `itens_pedido.insumo_sinapi_codigo` — coluna já existe no schema, mas nada grava nela
-    ainda; é o vínculo real entre item comprado e `insumos_sinapi` que falta pra fase "lista de compras"
+9. Popular `itens_pedido.insumo_sinapi_codigo` — coluna já existe no schema, mas nada grava nela
+   ainda; é o vínculo real entre item comprado e `insumos_sinapi` que falta pra fase "lista de compras"
+10. Aplicar "← Voltar" nos ~25 prompts de texto do resto do bot (Obra, entrega, recibo,
+    `/nova_obra`...) — feito só na Lista de Compras em 2026-07-05, a pedido explícito do Dennis
+    de tratar o resto como fiada própria
 
 ---
 
