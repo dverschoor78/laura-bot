@@ -1,9 +1,11 @@
 # Estado do Projeto Laura
 
-> Atualizado em: 2026-07-05 (encerramento — Camada 4b da Lista de Compras: correção campo a
-> campo + cabeçalho editável + unificação do endereço de entrega com o Pedido de Compra)
-> Sessão: **Tela do Item unificada (view+menu), cabeçalho editável (Obra/Endereço/Observações),
-> convergência do mecanismo de endereço de entrega — validado ao vivo no Telegram**
+> Atualizado em: 2026-07-05 (encerramento — PDF da Lista de Compras, enriquecimento de
+> descrição genérica, correção de bug de duplicação; mudança de prioridade pro Próximo Fiada:
+> consultoria de recompra, não glossário de sinônimos SINAPI)
+> Sessão: **Continuação direta da Camada 4b — PDF em 2 variantes, Camada de enriquecimento de
+> descrição (histórico > SINAPI > original), bug real de duplicação corrigido; investigação ao
+> vivo (Cal/Brita/Tijolo) redirecionou a prioridade da próxima fiada**
 
 Sessão de continuação: retomar o pipeline da Lista de Compras (Camadas 1-3 + gravação real,
 concluídas ontem) e implementar a Camada 4b — correção campo a campo, item #1 do "Objetivo da
@@ -138,6 +140,10 @@ sem repetir aqui.
 
 ## Versão Atual
 
+**v0.12.0** — Lista de Compras: PDF em 2 variantes (referência interna / orçamento pra
+fornecedor), enriquecimento de descrição genérica (histórico > SINAPI > original), bug de
+duplicação ao confirmar corrigido
+
 **v0.11.0** — Lista de Compras: correção campo a campo com recálculo único (Tela do Item
 unificada), cabeçalho editável (Obra/Endereço/Observações), endereço de entrega convergido
 com o Pedido de Compra — pipeline validado ao vivo no Telegram
@@ -184,18 +190,128 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 - Modo teste isolado via `LAURA_ENV=test`
 - Lista de Compras (`/lista` ou botão "📝 Lista de materiais"): interpretação por IA de texto,
   foto ou PDF; correspondência com SINAPI (confiança declarada, preço convertido pra unidade
-  comercial); referência de última compra própria (filtro de unidade igual); Tela de
-  Conferência (visão rápida por item) → Tela do Item (view + menu de correção); correção
-  campo a campo (Produto, Fabricante, Código, Quantidade, Unidade, Observações) com recálculo
-  único ao "Concluir edição"; "Reinterpretar item" reservado a itens em fallback; análise
-  técnica disponível por item ou pra lista inteira; cabeçalho editável (Obra — presets
+  comercial); referência de última compra própria (filtro de unidade igual); enriquecimento
+  de descrição genérica (sugestão do histórico próprio ou SINAPI, com botão "Usar sugestão");
+  Tela de Conferência (visão rápida por item) → Tela do Item (view + menu de correção);
+  correção campo a campo (Produto, Fabricante, Código, Quantidade, Unidade, Observações) com
+  recálculo único ao "Concluir edição"; "Reinterpretar item" reservado a itens em fallback;
+  análise técnica disponível por item ou pra lista inteira; cabeçalho editável (Obra — presets
   Obra/Casa/Escritório/Chácara/Outro, mesmo mecanismo do Pedido de Compra; Endereço; e
-  Observações gerais, opcional); gravação real da lista no banco ao confirmar (ainda sem
-  gerar Pedido de Compra)
+  Observações gerais, opcional); gravação real da lista no banco ao confirmar, substituindo
+  (não duplicando) itens de confirmações anteriores; **PDF gerado automaticamente em 2
+  variantes** — referência interna com preço e versão em branco pra pedir orçamento a
+  fornecedores, ambas arquivadas em `04 Compras/00 Orçamentos/` (ainda sem gerar Pedido de
+  Compra a partir da Lista)
 
 ---
 
 ## Última Fiada Implementada
+
+**Módulo de Compras — PDF da Lista de Compras + enriquecimento de descrição + correção de
+duplicação** *(2026-07-05, mesmo dia da Camada 4b)*
+
+Continuação direta da Camada 4b, na mesma sessão. Dennis pediu a próxima etapa ("gerar a
+Lista de Compras em PDF") explicitamente sem definir a implementação — pediu exploração da
+infraestrutura já existente (Pedido de Compra) antes de qualquer código, seguindo o mesmo
+padrão de planejamento já estabelecido.
+
+**Geração de PDF, duas variantes do mesmo documento** (`_gerar_html_lista(lista_id,
+com_precos)`, reaproveita `_PC_CSS`/`_html_para_pdf` do Pedido de Compra sem CSS novo):
+- **"Referência"** (uso interno) — mostra preço unitário/total calculado a partir da
+  referência SINAPI/própria já existente
+- **"Orçamento"** (pra encaminhar a fornecedores via WhatsApp) — mesmos itens, campos de
+  preço em branco (linha pra o fornecedor preencher), pedido de Dennis: "a ideia é a partir
+  da lista pedir propostas de orçamento para os fornecedores" — nunca revela a própria
+  referência de preço numa negociação que ainda não começou (mesmo espírito do Princípio 4
+  da Política de Compras)
+- Ambos gerados automaticamente ao confirmar "Gerar Lista de Compras", arquivados em
+  `04 Compras/00 Orçamentos/` (mesma pasta do orçamento recebido do fornecedor, a pedido
+  explícito do Dennis)
+
+**Bug de dados corrigido no caminho**: `sinapi_confianca`/`sinapi_preco_equivalente` (Camada
+2) nunca eram persistidos em `lista_compra_itens` — sem eles, reler a lista do banco (pro
+PDF) perdia a conversão de preço pra unidade comercial em itens que precisaram dela. Mesma
+classe de bug já corrigida antes com fabricante/código.
+
+**Camada de enriquecimento de descrição genérica** — Dennis: "a Laura não deve apenas
+interpretar a lista do jeito que eu escrevi... deve me ajudar a melhorar a qualidade técnica
+da Lista de Compras." Exemplos reais que motivaram: "Areia", "Brita", "Tijolos", "Cimento",
+"Cal" chegam genéricos demais pra cotação séria.
+
+- Camada 1 ganhou o campo `descricao_generica` — julgamento da própria IA ("um comprador
+  conseguiria pedir orçamento com isso?"), não regra mecânica de contagem de palavras
+  (Dennis foi explícito: "não quero engessar demais")
+- Prioridade como orientação, não regra cega: histórico real da empresa primeiro (mais
+  confiável pro vocabulário real da obra); SINAPI só como apoio quando o histórico não
+  resolve, e só com confiança alta/média; descrição original se nada servir ou se a
+  sugestão for igual à atual (evita loop depois de aceitar uma vez)
+- Não reaproveita busca nova — usa os candidatos que Camada 2 (SINAPI) e Camada 3
+  (histórico) já encontram; só faltava capturar a descrição do item histórico encontrado
+  (antes só o preço era aproveitado)
+- Tela de Conferência: alerta 🟡 "Descrição genérica — sugestão disponível"
+- Tela do Item: "💡 Descrição genérica. Sugestão: Areia média lavada (histórico)" + botão
+  "✅ Usar sugestão" — aplica no rascunho, mesmo mecanismo de "Concluir edição" já existente,
+  nenhuma chamada de IA extra
+- Análise Técnica: quando histórico venceu, mostra a alternativa do SINAPI como "outra
+  possibilidade" — só aparece se realmente útil, não polui a tela principal
+- Testado com IA real: "Areia" → sugestão do histórico; "Brita 1" (sem histórico) → sugestão
+  do SINAPI; "Cimento CP II 50kg Caue"/"Tijolo cerâmico 6 furos 9x19x19" → reconhecidos como
+  já específicos, sem sugestão forçada
+
+**Bug real de duplicação encontrado ao vivo no Telegram**: confirmar "Gerar Lista de
+Compras" duas vezes na mesma lista aberta (ex: testar, corrigir, testar de novo) duplicava
+todos os itens — `adicionar_item()` só insere, nunca substitui. Confirmado direto no banco:
+lista GGV03 com 10 itens ativos, sendo 5 genéricos (09:37) e os mesmos 5 corrigidos/
+enriquecidos (11:17). Corrigido com o mesmo padrão de `_salvar_itens_pedido()` (Pedido de
+Compra): cada confirmação reflete a lista inteira vista agora, removendo (soft-delete, via
+`remover_item()` já existente) os itens ativos anteriores antes de gravar os novos —
+histórico preservado, nunca apagado de verdade. Dados de teste do Dennis corrigidos
+manualmente pra refletir o estado correto.
+
+**Investigação ao vivo — 3 casos reais testados por Dennis, diagnosticados mas SEM
+correção de código ainda** (mudança de prioridade aconteceu antes de implementar):
+
+1. **Cal Hidratada** — SINAPI achou o código certo (1106, Alta confiança), mas a Laura não
+   converteu KG→SC porque não sabia o peso do saco (embalagem não informada) — recusa
+   correta, mas a Tela do Item esconde a explicação (a `observacoes` do item, que já
+   continha o motivo, não aparece nesse nível; `_referencia_e_correspondencia` também
+   esconde "Correspondência: Alta confiança" quando o preço não pôde ser calculado, como se
+   nada tivesse sido encontrado). **Correção proposta, não implementada**: mostrar
+   observações na Tela do Item; separar "achou correspondência" de "calculou preço".
+2. **Brita** — bug real de busca: pra "Brita" sozinha, Camada 1 gerou
+   `termo_busca_sinapi: "brita"` (repetiu a palavra, não traduziu pro vocabulário técnico).
+   Buscar "brita" no FTS5 traz "concreto usinado com brita" (errado); só "pedra britada"
+   acha os 6 candidatos certos (Pedra Britada N.0 a N.3) que genuinamente existem no
+   SINAPI. **Correção proposta, não implementada**: reforçar o prompt da Camada 1 pra
+   traduzir termo coloquial → vocabulário técnico SINAPI.
+3. **Tijolo** — Claude escolheu um candidato entre 6 bem diferentes (maciço comum,
+   aparente, refratário, com furos, tamanhos diferentes) com "Alta confiança", mas a
+   própria `observacoes` do item já dizia "tipo e dimensões devem ser confirmados" —
+   confiança devia ter sido rebaixada, não "alta". Dennis: "poderia me dar mais opções, mas
+   tive que escolher esta."
+
+**Conversa importante — IA vs Programa, registrada porque muda a forma de priorizar daqui
+pra frente**: Dennis questionou se valia a pena continuar "brigando" caso a caso com
+problemas de vocabulário SINAPI. Esclarecido: bugs de **programa** (como os dois primeiros
+achados de Cal Hidratada) são "conserta uma vez, resolvido pra sempre"; julgamento de **IA**
+(Brita, Tijolo) nunca chega a "resolvido pra sempre" — melhora com prompt melhor, mas
+convive com margem de erro residual, por natureza. Ofereci um glossário determinístico de
+sinônimos SINAPI (programa, não IA) como mitigação — **Dennis rejeitou explicitamente**:
+"não é problema meu hoje... já existe uma biblioteca com sinônimos de materiais de
+construção... SINAPI é ref[erência, só uma entre várias]." Ver Decisões Recentes.
+
+**Mudança de prioridade pra próxima fiada** — Dennis: "o que eu preciso de mais ajuda é pra
+repetir a compra... se sinto que não vale mais a pena, principalmente por preço, ou indicar
+outro produto (fabricante e modelo, fornecedor ou tipo)." Não é sobre vocabulário SINAPI —
+é evoluir a Camada 3 (histórico próprio) de "achar um preço de referência" pra "consultora
+que ajuda a decidir repetir ou trocar". Ver Próximas Fiadas/ROADMAP — vira a prioridade #1,
+com escopo ainda a desenhar (mockup em texto antes de qualquer código, como sempre).
+
+**Não concluído**: os 3 fixes de exibição diagnosticados (Cal/Brita/Tijolo) ficam pendentes,
+sem prioridade definida ainda frente à consultoria de recompra; teste do fluxo de dedupe
+ao vivo no Telegram (só testado com objetos simulados nesta sessão).
+
+---
 
 **Módulo de Compras — Camada 4b: correção campo a campo + cabeçalho editável + convergência
 do endereço de entrega** *(2026-07-05)*
@@ -1248,6 +1364,24 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Decisões Recentes
 
+- **Programa vs. IA — critério pra decidir onde investir esforço (2026-07-05)** — bug de
+  **programa** (código determinístico: banco, cálculo, exibição) se corrige uma vez e fica
+  resolvido pra sempre; julgamento de **IA** (Camada 1/2: interpretar, classificar, decidir
+  confiança) nunca chega a "resolvido pra sempre" — melhora com prompt melhor, convive com
+  margem de erro residual por natureza. Guia a resposta certa quando um bug aparece: "isso é
+  código errado (conserta e nunca mais volta) ou é a IA não acertando sempre (melhora o
+  prompt, mede, aceita a margem)?"
+- **Glossário determinístico de sinônimos SINAPI — rejeitado por Dennis (2026-07-05)** —
+  proposto como mitigação pro problema de "termo coloquial não bate com vocabulário técnico
+  do SINAPI" (ex: Brita). Dennis: "não é problema meu hoje... já existe uma biblioteca com
+  sinônimos de materiais de construção... SINAPI é referência, o cadastro de milhares de
+  lojas tem modelos, tipos, fabricantes." Não construir isso sem gatilho novo.
+- **Prioridade da próxima fiada: consultoria de recompra, não vocabulário SINAPI
+  (2026-07-05)** — Dennis: "preciso de mais ajuda para repetir a compra... se sinto que não
+  vale mais a pena, principalmente por preço, ou indicar outro produto (fabricante e
+  modelo, fornecedor ou tipo)." Evoluir a Camada 3 de "achar um preço de referência" pra
+  "consultora que ajuda a decidir repetir ou trocar" — Princípios 6 e 9 da Política de
+  Compras. Ver Objetivo da Próxima Sessão.
 - **"A Laura apresenta primeiro a informação necessária para a decisão. Os detalhes técnicos
   aparecem apenas quando solicitados." (2026-07-04)** — princípio de UX que orienta a tela de
   conferência da Lista de Compras (3 níveis: conferência → edição → análise técnica) e deve
@@ -1321,33 +1455,53 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 > gatilho arquitetural que ainda não ocorreu) não são fiada — ficam em Dívida Técnica/ADR, sem
 > duplicar aqui como se fossem tarefa da próxima sessão.
 
-1. **Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento** — a Lista
-   de Compras já interpreta, corrige, tem cabeçalho completo e grava de verdade no banco,
-   validada ao vivo; mas ainda é uma ilha — falta o próximo elo da cadeia até virar
-   negociação/pedido real
-2. **Testar edição de endereço/observações reabrindo uma lista já existente** — a gravação
+1. **Consultoria de recompra — evolução da Camada 3** *(nova prioridade #1, 2026-07-05)*:
+   Dennis — "preciso de mais ajuda para repetir a compra... se sinto que não vale mais a
+   pena, principalmente por preço, ou indicar outro produto (fabricante e modelo, fornecedor
+   ou tipo)." Hoje a Camada 3 só acha UM preço de referência; a evolução é mostrar o que foi
+   comprado da última vez com destaque (fabricante/modelo/fornecedor, não só preço), ajudar a
+   decidir repetir vs. trocar (sinalizar quando não vale mais a pena, sobretudo por preço), e
+   sugerir alternativa quando fizer sentido. Escopo ainda a desenhar — mockup em texto antes
+   de qualquer código, como sempre. Ver Decisões Recentes.
+2. **3 correções de exibição diagnosticadas ao vivo, não implementadas** (achadas testando o
+   enriquecimento de descrição, ver Última Fiada Implementada):
+   - Tela do Item não mostra `observacoes` do item (esconde o motivo de uma referência não
+     calculada, ex: Cal Hidratada — SINAPI achou o código certo mas não sabia o peso do saco)
+   - `_referencia_e_correspondencia` esconde "Correspondência: Alta confiança" quando não há
+     preço computável — parece que não achou nada, mas achou
+   - Prompt da Camada 1 não traduz termo coloquial pro vocabulário técnico SINAPI (ex: "brita"
+     devia virar "pedra britada" na busca; hoje repete literal e erra a busca)
+3. **Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento** — a Lista
+   de Compras já interpreta, corrige, tem cabeçalho completo, gera PDF e grava de verdade no
+   banco; mas ainda é uma ilha — falta o próximo elo da cadeia até virar negociação/pedido real
+4. **Testar o fix de deduplicação (Gerar Lista de Compras 2x) ao vivo no Telegram** — só
+   testado com objetos simulados nesta sessão
+5. **Testar edição de endereço/observações reabrindo uma lista já existente** — a gravação
    condicional (só grava se o campo foi tocado nesta sessão) foi validada só com objetos
    simulados; falta confirmar ao vivo que reabrir uma lista aberta sem re-editar esses campos
    não apaga o que já foi salvo antes
-3. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-4. **Alimentar `docs/LICOES_EXTRACAO.md`** sempre que aparecer um novo bug de parsing/extração —
+6. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+7. **Alimentar `docs/LICOES_EXTRACAO.md`** sempre que aparecer um novo bug de parsing/extração —
    não só corrigir e seguir (ver [[feedback_documentar_padroes_bugs]] na memória)
-5. **Limpeza opcional no OneDrive** — 2 arquivos órfãos do pedido excluído Base Forte/GGV03-006
+8. **Limpeza opcional no OneDrive** — 2 arquivos órfãos do pedido excluído Base Forte/GGV03-006
    antigo (`.docx`, `.pdf` em `04 Compras`); a `- Copy.jpeg` foi feita pelo próprio Dennis
    (backup pessoal) — perguntar se ele quer manter essa antes de apagar
-6. **Acesso via Claude Code Remote (celular)** — sem ambiente configurado ainda; ideia de hospedar
+9. **Acesso via Claude Code Remote (celular)** — sem ambiente configurado ainda; ideia de hospedar
    Laura + banco num servidor Proxmox em casa (Eric administra) registrada, não iniciada
-7. **Persistir os 9 índices de `data/laura.db` em código** — hoje só existem no banco vivo
-8. **Integrar `financeiro/relatorios.py` a `bot.py`** — hoje só roda chamado manualmente, sem
-   botão/comando no Telegram
-9. **Popular `itens_pedido.insumo_sinapi_codigo`** — coluna existe no schema, nada grava nela
-   ainda; é o vínculo real que falta entre item comprado e `insumos_sinapi`
-10. **Fiada de investigação — Motor de Interpretação e Classificação de Documentos** — não
+10. **Persistir os 9 índices de `data/laura.db` em código** — hoje só existem no banco vivo
+11. **Integrar `financeiro/relatorios.py` a `bot.py`** — hoje só roda chamado manualmente, sem
+    botão/comando no Telegram
+12. **Popular `itens_pedido.insumo_sinapi_codigo`** — coluna existe no schema, nada grava nela
+    ainda; é o vínculo real que falta entre item comprado e `insumos_sinapi`
+13. **Fiada de investigação — Motor de Interpretação e Classificação de Documentos** — não
     priorizada ainda, mas registrada; entender por que os 3 caminhos de confirmação de
     documento divergiram antes de qualquer código (ver ROADMAP.md)
-11. **Aplicar "← Voltar" nos ~25 prompts de texto do resto do bot** — Obra, entrega, recibo,
+14. **Aplicar "← Voltar" nos ~25 prompts de texto do resto do bot** — Obra, entrega, recibo,
     `/nova_obra` etc. ainda não têm saída quando aguardam texto livre; feito só na Lista de
     Compras nesta sessão, a pedido explícito do Dennis de tratar o resto como fiada própria
+
+> **Explicitamente rejeitado, não entra na lista**: glossário determinístico de sinônimos
+> SINAPI (ex: "brita" → "pedra britada"). Ver Decisões Recentes.
 
 ---
 

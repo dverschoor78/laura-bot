@@ -4,10 +4,12 @@
 > `nfe/`; DOCX removido; segurança de `responder_botao()`/`atualizar()`/`atualizar_obra()`
 > corrigida; `itens_pedido`/`parcelas_pagamento`/`insumos_sinapi` documentadas; `financeiro/consultas.py`
 > e `financeiro/relatorios.py` adicionados; **módulo `compras/` — Lista de Compras com pipeline
-> completo de interpretação (Camadas 1-3), Tela do Item unificada (view + menu de correção
-> campo a campo, recálculo único ao concluir), cabeçalho editável (Obra/Endereço/Observações),
-> gravação real em `listas_compra`/`lista_compra_itens`; endereço de entrega convergido entre
-> Pedido de Compra e Lista de Compras via `teclado_escolha_endereco()`/`_cb_endsel()` único**)
+> completo de interpretação (Camadas 1-3), Camada de enriquecimento de descrição genérica,
+> Tela do Item unificada (view + menu de correção campo a campo, recálculo único ao concluir),
+> cabeçalho editável (Obra/Endereço/Observações), gravação real em `listas_compra`/
+> `lista_compra_itens` (substitui, não duplica, a cada confirmação), geração de PDF em 2
+> variantes (`_gerar_html_lista`); endereço de entrega convergido entre Pedido de Compra e
+> Lista de Compras via `teclado_escolha_endereco()`/`_cb_endsel()` único**)
 
 ---
 
@@ -65,20 +67,30 @@ Telegram ──────► bot.py ──────► Claude API (haiku-4-
   nunca implementações separadas (ver Fluxo C). Pipeline completo: Camada 1 (interpretação
   JSON estruturada, com contexto da lista inteira) → Camada 2 (candidatos SINAPI via FTS5 +
   Claude decide, com termo técnico de busca e conversão de preço pra unidade comercial) →
-  Camada 3 (última compra própria, filtro obrigatório de unidade igual) → **Tela do Item
+  Camada 3 (última compra própria, filtro obrigatório de unidade igual) → **Camada de
+  enriquecimento de descrição** (`_adicionar_sugestao_descricao`, 2026-07-05 — não faz busca
+  nova, reaproveita os candidatos que Camada 2/3 já encontraram; sugestão histórico > SINAPI
+  > original, como orientação, nunca aplicada sem ação explícita do usuário) → **Tela do Item
   unificada** (view + menu de correção campo a campo, recálculo único ao "Concluir edição" —
   ver Fluxo C) → **cabeçalho editável** (Obra/Endereço/Observações, 2026-07-05) → gravação
-  real em `listas_compra`/`lista_compra_itens` ao confirmar. Endereço de entrega reaproveita o
-  mesmo mecanismo de presets do Pedido de Compra (`teclado_escolha_endereco()`/`_cb_endsel()`
-  único, 2026-07-05 — princípio "Convergência antes de paralelismo", `docs/CONSTITUICAO.md`).
-  Ainda sem geração de Pedido de Compra a partir da Lista nem vínculo com orçamento — ver
-  ROADMAP.md
+  real em `listas_compra`/`lista_compra_itens` ao confirmar, **substituindo (soft-delete) os
+  itens ativos de confirmações anteriores** (2026-07-05 — confirmar 2x na mesma lista aberta
+  duplicava itens; mesmo padrão de `_salvar_itens_pedido()`) → **PDF em 2 variantes**
+  (`_gerar_html_lista(lista_id, com_precos)`, reaproveita `_PC_CSS`/`_html_para_pdf` do
+  Pedido de Compra) gerado e arquivado em `04 Compras/00 Orçamentos/` automaticamente.
+  Endereço de entrega reaproveita o mesmo mecanismo de presets do Pedido de Compra
+  (`teclado_escolha_endereco()`/`_cb_endsel()` único, 2026-07-05 — princípio "Convergência
+  antes de paralelismo", `docs/CONSTITUICAO.md`). Ainda sem geração de Pedido de Compra a
+  partir da Lista nem vínculo com orçamento — ver ROADMAP.md
 - **`data/laura.db`** — banco SQLite com dez tabelas (ver seção 3); 9 índices estratégicos
   criados em 2026-07-03, mas só no banco vivo — não persistidos em nenhum `CREATE INDEX` versionado
 - **`data/uploads/`** — todo arquivo recebido pelo Telegram cai aqui primeiro (pasta única,
   achatada); é a partir daqui que os documentos são copiados para a pasta certa da obra
 - **Claude API** — extração de dados dos documentos; modelo `claude-haiku-4-5-20251001`
-- **Playwright Chromium** — geração de PDF do Pedido de Compra 2.0 a partir de HTML; roda headless em memória
+- **Playwright Chromium** — geração de PDF a partir de HTML via `_html_para_pdf()`; roda
+  headless em memória. Usado pelo Pedido de Compra 2.0 (`_gerar_html_pc`), pelo Recibo
+  (`_gerar_html_recibo`, A5 paisagem) e pela Lista de Compras (`_gerar_html_lista`, 2 variantes,
+  2026-07-05) — mesma função, formato/orientação por parâmetro
 - **BrasilAPI** — consulta pública e gratuita de CNPJ na Receita Federal; usada por
   `_criar_fornecedor_auto()` e pelo job periódico `_sincronizar_receita_pendentes()`; falha
   silenciosamente (timeout 4s) sem travar o fluxo do bot
@@ -281,6 +293,13 @@ grava `endereco_entrega`/`observacoes` (allowlist `_COLUNAS_LISTA_EDITAVEIS`, me
 segurança de `atualizar()`/`atualizar_obra()`) — `_cb_lc_gerar()` só chama quando o campo foi
 tocado na sessão corrente, pra nunca apagar um valor já salvo ao reabrir uma lista existente.
 
+**Cada confirmação substitui os itens ativos, não acumula** (2026-07-05) — achado real:
+confirmar "Gerar Lista de Compras" 2x na mesma lista aberta (ex: testar, corrigir, testar de
+novo) duplicava todos os itens, porque `adicionar_item()` só insere. `_cb_lc_gerar()` agora
+marca (soft-delete, via `remover_item()`) todos os itens ativos daquela `lista_id` antes de
+gravar os novos — mesmo padrão de `_salvar_itens_pedido()` (Pedido de Compra): a versão mais
+recente sempre substitui a anterior, histórico preservado (não apagado de verdade).
+
 ---
 
 **`lista_compra_itens`** — itens de uma Lista de Compras, antes de qualquer fornecedor definido
@@ -293,6 +312,7 @@ tocado na sessão corrente, pra nunca apagar um valor já salvo ao reabrir uma l
 | `fabricante`, `codigo` | Identidade comercial do item (marca e código de referência do fabricante) — adicionadas 2026-07-04 junto com a primeira gravação real; mesma categoria de descricao/unidade/quantidade, não são "snapshot" de referência externa |
 | `sinapi_codigo` | Vínculo/rastreabilidade com `insumos_sinapi` — não usar pra exibição histórica |
 | `sinapi_descricao_referencia`, `sinapi_unidade_referencia`, `sinapi_preco_referencia`, `sinapi_mes_referencia` | **Snapshot** SINAPI congelado no momento da confirmação — `insumos_sinapi` muda todo mês, a leitura de uma lista antiga não pode mudar de valor sozinha (CONSTITUICAO.md, "Dados são sagrados") |
+| `sinapi_confianca`, `sinapi_preco_equivalente` | Adicionadas 2026-07-05 — já calculadas pela Camada 2 desde o início, mas não eram persistidas; sem elas, reler a lista do banco (ex: pro PDF) perdia o grau de confiança e o preço já convertido pra unidade comercial |
 | `laura_preco_referencia`, `laura_data_referencia`, `laura_fornecedor_referencia`, `laura_origem_referencia`, `laura_grau_confianca_referencia` | **Snapshot** da referência interna da Laura (último preço pago/média/item semelhante/sem referência), mesmo motivo — nunca recalculado depois. Vocabulário de confiança do Princípio 8 da Política de Compras |
 | `observacoes` | Texto livre por item |
 | `status` | `pendente` / `comprado` / `removido` — hoje só `pendente`/`removido` são alcançáveis (vínculo com Pedido de Compra é fiada futura) |
@@ -362,6 +382,12 @@ Dennis dispara por três caminhos, que convergem pras mesmas funções:
   → Camada 3 — _adicionar_referencia_laura(): última compra própria via procurar_item(),
     só aceita candidato com unidade igual à comercial (sem conversão, ao contrário da
     Camada 2) — filtro que existe pra evitar casar produtos diferentes por palavra isolada
+  → Enriquecimento de descrição — _adicionar_sugestao_descricao() (2026-07-05): não busca
+    nada novo, reaproveita os candidatos que Camada 2/3 já encontraram. Se a Camada 1 marcou
+    a descrição como genérica demais pra cotação (campo `descricao_generica`, julgamento da
+    IA), sugere a descrição do histórico próprio (prioridade) ou do SINAPI (apoio, só com
+    confiança alta/média) — nunca decide sozinha, só anota `descricao_sugerida` pra tela
+    apresentar
   → Nível 1 — Tela de Conferência (_texto_lista_conferencia/_teclado_lista_conferencia):
     item/quantidade/referência em 3 linhas, indicador 🟢🟡🔴, alertas agrupados, resumo.
     "A Laura apresenta primeiro a informação necessária para a decisão." Cabeçalho com 3
@@ -377,13 +403,18 @@ Dennis dispara por três caminhos, que convergem pras mesmas funções:
     rascunho e volta pra Nível 1 já atualizado — nunca uma chamada de IA por campo
     corrigido. "🔄 Reinterpretar item" (Camada 1+2+3 completa via texto livre) só aparece
     pra itens em fallback (string, não interpretado) — não compete mais com "Concluir
-    edição" na tela principal
+    edição" na tela principal. "✅ Usar sugestão" (_cb_lc_usarsugestao, 2026-07-05) aplica a
+    descrição sugerida no rascunho, mesmo mecanismo de "Concluir edição" — sem IA extra
   → Análise Técnica (_texto_analise_tecnica para a lista inteira, _texto_item_tecnico por
     item — mesma formatação via _linhas_analise_item compartilhada): confiança, SINAPI
-    bruto, histórico — opcional, acessada por botão, nunca a tela principal
-  → botão "✅ Gerar Lista de Compras" (_cb_lc_gerar): grava de verdade via
-    criar_ou_buscar_lista_aberta() + adicionar_item() (itens) + atualizar_lista() (endereço/
-    observações, só se tocados nesta sessão) — bloqueia se a obra não estiver definida
+    bruto, histórico, e a alternativa não escolhida quando histórico venceu SINAPI — opcional,
+    acessada por botão, nunca a tela principal
+  → botão "✅ Gerar Lista de Compras" (_cb_lc_gerar): remove (soft-delete) os itens ativos de
+    confirmações anteriores dessa lista (2026-07-05 — evita duplicação ao confirmar 2x), grava
+    de verdade via criar_ou_buscar_lista_aberta() + adicionar_item() (itens) + atualizar_lista()
+    (endereço/observações, só se tocados nesta sessão) — bloqueia se a obra não estiver
+    definida — e gera + envia 2 PDFs automaticamente (_gerar_html_lista, "Referência" com
+    preço e "Orçamento" em branco pra fornecedor), arquivados em `04 Compras/00 Orçamentos/`
 ```
 
 Endereço de entrega (Nível 1 e Pedido de Compra) usa o **mesmo mecanismo** —
@@ -414,7 +445,7 @@ Referências para navegação no arquivo (4.994 linhas):
 | Banco de dados | `init_db()`, `buscar_fornecedor()` | Criação de tabelas, CRUD |
 | Geração de PFM | `gerar_pfm()`, `_campo()`, `_itens()` | Helpers de parsing/formatação; define código, salva itens, registra lançamento (não gera documento — ver `_gerar_html_pc()`) |
 | Domínio — consulta | `buscar_pedido()`, `mostrar_pedido()` | Pipeline de visualização do pedido |
-| Domínio — Lista de Compras | `lista_cmd()`, `_interpretar_lista_texto/arquivo()`, `_adicionar_correspondencia_sinapi()`, `_adicionar_referencia_laura()`, `_texto_lista_conferencia()`, `_texto_tela_item()`, `_cb_lc_*()` | Comando `/lista` + fluxo de foto (`lista_materiais`); Camadas 1-3 de interpretação, Tela do Item (view + correção campo a campo), cabeçalho editável, gravação via `compras.*` |
+| Domínio — Lista de Compras | `lista_cmd()`, `_interpretar_lista_texto/arquivo()`, `_adicionar_correspondencia_sinapi()`, `_adicionar_referencia_laura()`, `_adicionar_sugestao_descricao()`, `_texto_lista_conferencia()`, `_texto_tela_item()`, `_gerar_html_lista()`, `_cb_lc_*()` | Comando `/lista` + fluxo de foto (`lista_materiais`); Camadas 1-3 de interpretação, enriquecimento de descrição, Tela do Item (view + correção campo a campo), cabeçalho editável, gravação (substitui, não duplica) via `compras.*`, PDF em 2 variantes |
 | Teclados | `parse_resposta()`, `teclado_confirmacao()` | Parse da resposta Claude e botões inline |
 | Handlers Telegram | `receber_arquivo()`, `receber_texto()` | Handlers de mensagens |
 | Dispatch de callback | `responder_botao()`, `_CB_DISPATCH`, `_cb_*()` | Um único `CallbackQueryHandler`; roteia por dict `acao → função` (ADR-004, 2026-07-02) em vez de if/elif — 59 funções `_cb_*`, cada uma cobrindo os ramos que antes viviam soltos dentro de uma função de 929 linhas |
@@ -423,6 +454,27 @@ Referências para navegação no arquivo (4.994 linhas):
 ---
 
 ## 6. Limitações Conhecidas
+
+- **Tela do Item esconde a razão de uma referência não calculada** — quando o SINAPI acha um
+  código com confiança alta mas não converte a unidade (ex: Cal Hidratada: KG→SC sem
+  embalagem conhecida), a Tela do Item mostra só "Referência: ainda não conhecida" — a
+  `observacoes` do item, que já explica o motivo, não aparece nesse nível (só na Análise
+  Técnica), e `_referencia_e_correspondencia()` esconde "Correspondência: Alta confiança"
+  junto com o preço ausente, como se nada tivesse sido encontrado. Achado 2026-07-05, ao
+  vivo; correção diagnosticada, não implementada — ver ROADMAP.md.
+
+- **`termo_busca_sinapi` não traduz termo coloquial pro vocabulário técnico SINAPI** — pra
+  descrições muito curtas (ex: "Brita" sozinha), a Camada 1 às vezes repete a palavra
+  literal em vez de inferir o termo técnico correto (deveria ser "pedra britada" — buscar
+  "brita" no FTS5 traz concreto usinado, não as referências de pedra britada que realmente
+  existem no SINAPI). Achado 2026-07-05, ao vivo; correção diagnosticada (reforçar o
+  prompt), não implementada.
+
+- **Grau de confiança do SINAPI nem sempre reflete ambiguidade real detectada pela própria
+  IA** — achado com "Tijolos": Claude escolheu 1 candidato entre 6 bem diferentes com "Alta
+  confiança", mas a própria `observacoes` gerada na mesma resposta já sinalizava que
+  tipo/dimensão precisavam ser confirmados — inconsistência interna que devia ter rebaixado
+  a confiança. Achado 2026-07-05, ao vivo; não corrigido.
 
 - **Confirmação de documento diverge por ponto de entrada** — `_cb_sel_tipo_inicial()` (fluxo
   automático), `_cb_set_tipo()` (correção manual — bug real: chama `_resumo_gerar()` sempre,

@@ -15,28 +15,85 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > sozinhas com o uso do dia a dia não entram aqui (ex: fechar um pedido parcelado esperando
 > pagamento). Ver Dívida Técnica em `docs/ROADMAP.md`.
 
-1. Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento
-2. Testar edição de endereço/observações reabrindo uma lista já existente (só validado com
-   objetos simulados)
-3. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
-4. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
-5. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
-6. Acesso via Claude Code Remote do celular — ideia registrada, servidor Proxmox em casa (Eric)
-7. Persistir os 9 índices de `data/laura.db` em código (hoje só existem no banco vivo — um `init_db()`
+1. **Consultoria de recompra — evolução da Camada 3** (nova prioridade #1, 2026-07-05): ajudar
+   a decidir repetir ou trocar um item já comprado (fabricante/modelo/fornecedor, não só
+   preço) — ver Visão de Longo Prazo em `docs/ROADMAP.md`
+2. 3 correções de exibição diagnosticadas ao vivo, não implementadas (observações não
+   aparecem na Tela do Item; correspondência escondida junto com preço ausente; prompt não
+   traduz termo coloquial pro vocabulário SINAPI)
+3. Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento
+4. Testar ao vivo no Telegram: fix de deduplicação (Gerar 2x) e edição de endereço/
+   observações reabrindo uma lista já existente (só validados com objetos simulados)
+5. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
+6. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
+7. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
+8. Acesso via Claude Code Remote do celular — ideia registrada, servidor Proxmox em casa (Eric)
+9. Persistir os 9 índices de `data/laura.db` em código (hoje só existem no banco vivo — um `init_db()`
    contra um banco novo não os recria; ver Dívida Técnica em `docs/ROADMAP.md`)
-8. Aplicar "← Voltar" nos ~25 prompts de texto do resto do bot (Obra, entrega, recibo,
-   `/nova_obra`...) — feito só na Lista de Compras em 2026-07-05
+10. Aplicar "← Voltar" nos ~25 prompts de texto do resto do bot (Obra, entrega, recibo,
+    `/nova_obra`...) — feito só na Lista de Compras em 2026-07-05
+
+> **Explicitamente rejeitado**: glossário determinístico de sinônimos SINAPI — Dennis: "não é
+> problema meu hoje... já existe uma biblioteca com sinônimos de materiais de construção."
 
 > Fiadas próprias, não priorizadas ainda: "Motor de Interpretação e Classificação de Documentos"
 > (convergência dos três caminhos divergentes de confirmação de documento) e "Compreensão de
 > Produto antes da Correspondência SINAPI" (atributos técnicos completos antes de casar com
 > SINAPI — deliberadamente não persistido ainda, ver Visão de Longo Prazo em `docs/ROADMAP.md`).
 
-> Concluído desde a última revisão: Camada 4b (correção campo a campo + Tela do Item unificada
-> + cabeçalho editável + convergência do endereço de entrega com o Pedido de Compra, 2026-07-05,
-> validado ao vivo no Telegram) e redesenho de experiência em 3 níveis + gravação real da Lista
-> de Compras (2026-07-04) — ver entradas abaixo; Camada 3 com filtro obrigatório de unidade
-> igual; Camada 4 (tela de conferência) substituída pelo redesenho de 3 níveis no mesmo dia.
+> Concluído desde a última revisão: PDF da Lista de Compras (2 variantes) + enriquecimento de
+> descrição genérica + correção de bug de duplicação (2026-07-05) e Camada 4b (correção campo
+> a campo + Tela do Item unificada + cabeçalho editável + convergência do endereço de entrega
+> com o Pedido de Compra, 2026-07-05, validado ao vivo no Telegram) — ver entradas abaixo.
+
+---
+
+## [PDF da Lista de Compras + enriquecimento de descrição + correção de duplicação] — 2026-07-05
+
+### Motivação
+
+Continuação direta da Camada 4b, mesma sessão. Dennis pediu a próxima etapa ("gerar a Lista
+de Compras em PDF") sem definir a implementação — pediu exploração da infraestrutura
+existente (Pedido de Compra) antes de qualquer código.
+
+### Adicionado
+
+- **PDF da Lista de Compras em 2 variantes** (`_gerar_html_lista(lista_id, com_precos)`,
+  reaproveita `_PC_CSS`/`_html_para_pdf` sem CSS novo): "Referência" (interna, com preço
+  unitário/total) e "Orçamento" (pra encaminhar a fornecedores via WhatsApp, preço em
+  branco pra preencher) — geradas automaticamente ao confirmar, arquivadas em
+  `04 Compras/00 Orçamentos/`
+- **Camada de enriquecimento de descrição genérica** (`_adicionar_sugestao_descricao`):
+  Camada 1 ganha o campo `descricao_generica` (julgamento da IA); sugestão prioriza
+  histórico próprio, depois SINAPI (confiança alta/média), depois mantém a original;
+  botão "✅ Usar sugestão" na Tela do Item aplica no rascunho e recalcula via "Concluir
+  edição" já existente
+- Análise Técnica por item mostra a alternativa (SINAPI) quando o histórico venceu a
+  sugestão de descrição
+
+### Corrigido
+
+- `sinapi_confianca`/`sinapi_preco_equivalente` (calculados desde sempre pela Camada 2)
+  nunca eram persistidos em `lista_compra_itens` — perdiam a conversão de preço ao reler a
+  lista do banco
+- **Bug real de duplicação**: confirmar "Gerar Lista de Compras" 2x na mesma lista aberta
+  duplicava todos os itens (`adicionar_item()` só insere). Corrigido com o mesmo padrão de
+  `_salvar_itens_pedido()` — cada confirmação substitui (soft-delete, histórico preservado)
+  os itens ativos anteriores
+
+### Investigado, não corrigido
+
+Três casos reais testados ao vivo (Cal Hidratada, Brita, Tijolo) expuseram: (1) a Tela do
+Item esconde a razão de uma referência não calculada; (2) `termo_busca_sinapi` não traduz
+termo coloquial pro vocabulário técnico SINAPI; (3) grau de confiança do SINAPI nem sempre
+reflete ambiguidade que a própria IA já detectou. Ver Limitações Conhecidas em
+`docs/ARQUITETURA.md`.
+
+### Decisão de produto
+
+Prioridade da próxima fiada redirecionada: não é sobre vocabulário SINAPI (um glossário
+determinístico foi proposto e rejeitado por Dennis), é sobre evoluir a Camada 3 pra uma
+consultoria de recompra — ver Visão de Longo Prazo em `docs/ROADMAP.md`.
 
 ---
 
