@@ -22,7 +22,7 @@ from financeiro.lancamento import (init_db_financeiro, sugerir_categoria, Catego
 from financeiro.consultas import procurar_item
 from nfe import parse_nfe, mostrar_nfe, teclado_candidatos_nfe
 from compras import (init_db_compras, criar_ou_buscar_lista_aberta, buscar_lista,
-                      sugerir_itens, adicionar_item, remover_item, listar_itens,
+                      atualizar_lista, sugerir_itens, adicionar_item, remover_item, listar_itens,
                       GrauConfianca, OrigemReferencia)
 
 load_dotenv()
@@ -97,6 +97,32 @@ ENDERECOS = {
     "escritorio":  "Avenida dos Pioneiros, 1380 - Carambeí-PR CEP 84.145-000",
     "chacara":     "Avenida dos Pioneiros, 5125 - Carambeí-PR CEP 84.145-000",
 }
+
+def _opcoes_endereco(ggv):
+    """Opções de endereço de entrega — mesmo conjunto usado no Pedido de Compra e na Lista
+    de Compras (Dennis, 2026-07-05: "endereço de entrega é o mesmo conceito nos dois... a
+    Lista deve reaproveitar essa mesma experiência, não criar um fluxo paralelo mais
+    simples", aplicação de "Entradas diferentes podem existir. Processos diferentes não.").
+    Cada opção é (rótulo, chave); resolução da chave em endereço real é _resolver_endereco().
+    Botão "Obra" só aparece com ggv definido — a Lista de Compras pode chegar aqui sem obra."""
+    opcoes = []
+    if ggv:
+        opcoes.append((f"🏗 Obra ({ggv})", f"obra_{ggv}"))
+    opcoes += [
+        ("🏠 Casa", "casa"),
+        ("🏢 Escritório", "escritorio"),
+        ("🌳 Chácara", "chacara"),
+        ("✏️ Outro (digitar)", "outro"),
+    ]
+    return opcoes
+
+def _resolver_endereco(escolha):
+    """Resolve a chave de escolha (ex: 'obra_GGV03', 'casa') no endereço real — usada pelo
+    único handler _cb_endsel, compartilhado entre Pedido de Compra e Lista de Compras."""
+    if escolha.startswith("obra_"):
+        ggv_key = escolha[5:]
+        return buscar_obra(ggv_key).get("endereco_entrega") or ENDERECOS.get(escolha, escolha)
+    return ENDERECOS.get(escolha, escolha)
 
 GGV_CODIGO_RE = re.compile(r"^\s*(GGV\d{2})\s*$", re.IGNORECASE)
 
@@ -1946,16 +1972,20 @@ def teclado_condicao(doc_id, tipo, ggv):
         [InlineKeyboardButton("◀️ Voltar",                        callback_data=f"voltar_edit:{doc_id}:{tipo}:{ggv}")],
     ])
 
+def teclado_escolha_endereco(destino, param, ggv, voltar_callback):
+    """Teclado único de escolha de endereço — Pedido de Compra e Lista de Compras
+    convergem aqui, com as mesmas opções (_opcoes_endereco) e a mesma resolução
+    (_resolver_endereco em _cb_endsel). `destino` diz onde a escolha será gravada ('doc'
+    ou 'lista'); `param` carrega o identificador necessário (doc_id|ggv, ou '-' quando não
+    há); só o botão de voltar muda por quem chama (Dennis, 2026-07-05: "o objetivo não é
+    diminuir linhas, é diminuir duplicação de comportamento")."""
+    botoes = [[InlineKeyboardButton(label, callback_data=f"endsel:{destino}:{param}:{chave}")]
+              for label, chave in _opcoes_endereco(ggv)]
+    botoes.append([InlineKeyboardButton("← Voltar", callback_data=voltar_callback)])
+    return InlineKeyboardMarkup(botoes)
+
 def teclado_endereco(doc_id, tipo, ggv):
-    chave_obra = f"obra_{ggv}"
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"🏗 Obra ({ggv})",    callback_data=f"end:{doc_id}:{ggv}:{chave_obra}")],
-        [InlineKeyboardButton("🏠 Casa",             callback_data=f"end:{doc_id}:{ggv}:casa")],
-        [InlineKeyboardButton("🏢 Escritório",       callback_data=f"end:{doc_id}:{ggv}:escritorio")],
-        [InlineKeyboardButton("🌳 Chácara",          callback_data=f"end:{doc_id}:{ggv}:chacara")],
-        [InlineKeyboardButton("✏️ Outro (digitar)",  callback_data=f"end:{doc_id}:{ggv}:outro")],
-        [InlineKeyboardButton("◀️ Voltar",           callback_data=f"voltar_edit:{doc_id}:{tipo}:{ggv}")],
-    ])
+    return teclado_escolha_endereco("doc", f"{doc_id}|{ggv}", ggv, f"voltar_edit:{doc_id}:{tipo}:{ggv}")
 
 def _fmt_data_curta(dt_str):
     """'2026-07-03 10:30:00' → '03/07'"""
@@ -3076,11 +3106,90 @@ def _fmt_qtde_segura(qtde):
     except (TypeError, ValueError):
         return str(qtde)
 
+_CONFIANCA_LABEL_TECNICA = {"alta": "Alta confiança", "media": "Média confiança",
+                             "baixa": "Baixa confiança", "nenhuma": "Sem correspondência"}
+_GRAU_LABEL_LAURA = {"confirmada": "Confirmada", "aproximada": "Aproximada"}
+
+def _linhas_analise_item(item):
+    """Bloco de análise técnica de um item — reaproveitado tanto na análise da lista
+    inteira (Nível 3 clássico, todos os itens) quanto na análise de um item só (a partir
+    da Tela do Item). Nunca esconde origem/confiança de uma referência (Princípio 8,
+    Política de Compras)."""
+    if not isinstance(item, dict):
+        return [str(item)]
+    partes = [item["descricao"]]
+    if item.get("fabricante"):
+        partes.append(f"— {item['fabricante']}")
+    if item.get("codigo"):
+        partes.append(f"(cód. {item['codigo']})")
+    linha = " ".join(partes)
+
+    qtde, und, embalagem = item.get("quantidade"), item.get("unidade"), item.get("embalagem")
+    if qtde is not None and und:
+        linha += f" — {_fmt_qtde_segura(qtde)} {und}"
+    elif qtde is not None:
+        linha += f" — {_fmt_qtde_segura(qtde)} (unidade não identificada)"
+    elif und:
+        linha += f" — quantidade não identificada ({und})"
+    elif embalagem:
+        # Não achar a quantidade pedida não é o mesmo que não saber nada do produto —
+        # a embalagem (tamanho de uma unidade de venda) já é uma informação útil por si
+        # só, mesmo sem tabela legível o bastante pra dizer quantas foram compradas.
+        linha += f" — embalagem {embalagem}, quantidade comercial não identificada"
+    else:
+        linha += " — quantidade e unidade não identificadas"
+    linhas = [linha]
+
+    if item.get("sinapi_codigo"):
+        preco = item.get("sinapi_preco_referencia")
+        und_sinapi = item.get("sinapi_unidade_referencia")
+        confianca = _CONFIANCA_LABEL_TECNICA.get(item.get("sinapi_confianca"), "confiança não informada")
+        linhas.append(
+            f"   SINAPI ({confianca}): {item['sinapi_descricao_referencia']} "
+            f"(cód. {item['sinapi_codigo']}, ref. {item.get('sinapi_mes_referencia') or '?'})"
+        )
+        preco_equiv = item.get("sinapi_preco_equivalente")
+        if preco_equiv is not None and und:
+            # Referência sempre expressa na unidade comercial do item — nunca o
+            # contrário. O preço do SINAPI na unidade original vem só como contexto.
+            linhas.append(f"   Referência SINAPI: R$ {_fmt_brl(preco_equiv)} / {und}")
+            if preco:
+                linhas.append(f"   (equivalente a R$ {_fmt_brl(preco)}/{und_sinapi})")
+        elif preco:
+            if und and und_sinapi and not _mesma_unidade(und, und_sinapi):
+                linhas.append(
+                    f"   Referência SINAPI: R$ {_fmt_brl(preco)}/{und_sinapi} "
+                    f"(unidade diferente da comercial — conversão não calculada)"
+                )
+            else:
+                linhas.append(f"   Referência SINAPI: R$ {_fmt_brl(preco)}/{und_sinapi}")
+    else:
+        linhas.append("   SINAPI: sem correspondência confiável")
+
+    preco_laura = item.get("laura_preco_referencia")
+    if preco_laura is not None:
+        grau = _GRAU_LABEL_LAURA.get(item.get("laura_grau_confianca_referencia"), "")
+        grau_fmt = f" ({grau})" if grau else ""
+        und_laura = item.get("laura_unidade_referencia") or "?"
+        data_laura = item.get("laura_data_referencia")
+        data_fmt = f" em {_fmt_data_flexivel(data_laura)}" if data_laura else ""
+        fornecedor = item.get("laura_fornecedor_referencia") or "fornecedor não identificado"
+        linhas.append(
+            f"   Última compra{grau_fmt}: R$ {_fmt_brl(preco_laura)}/{und_laura}"
+            f"{data_fmt} — {fornecedor}"
+        )
+    else:
+        linhas.append("   Última compra: sem referência própria encontrada")
+
+    if item.get("observacoes"):
+        linhas.append(f"   Obs: {item['observacoes']}")
+    return linhas
+
 def _texto_analise_tecnica(itens, ggv):
-    """Nível 3 (Análise Técnica) — tudo que a Laura sabe sobre cada item: confiança, código
-    SINAPI, preço original, conversão, histórico. Só acessada por quem quer entender como a
-    Laura chegou na referência (Dennis, 2026-07-04: "a inteligência trabalha nos bastidores;
-    a tela principal não é um relatório técnico") — não é mais a primeira tela mostrada."""
+    """Nível 3 (Análise Técnica) — tudo que a Laura sabe sobre cada item da lista inteira:
+    confiança, código SINAPI, preço original, conversão, histórico. Só acessada por quem
+    quer entender como a Laura chegou na referência (Dennis, 2026-07-04: "a inteligência
+    trabalha nos bastidores; a tela principal não é um relatório técnico")."""
     label_ggv = f"Obra {ggv}" if ggv else "Obra ainda não definida"
     linhas = [f"🔍 <b>Análise técnica — {label_ggv}</b>"]
     if ggv:
@@ -3092,79 +3201,17 @@ def _texto_analise_tecnica(itens, ggv):
         linhas.append("Não consegui reconhecer nenhum item nesta lista.")
         return "\n".join(linhas)
     for i, item in enumerate(itens, 1):
-        if isinstance(item, dict):
-            partes = [item["descricao"]]
-            if item.get("fabricante"):
-                partes.append(f"— {item['fabricante']}")
-            if item.get("codigo"):
-                partes.append(f"(cód. {item['codigo']})")
-            linha = " ".join(partes)
+        bloco = _linhas_analise_item(item)
+        linhas.append(f"{i}. {bloco[0]}")
+        linhas.extend(bloco[1:])
+    return "\n".join(linhas)
 
-            qtde, und, embalagem = item.get("quantidade"), item.get("unidade"), item.get("embalagem")
-            if qtde is not None and und:
-                linha += f" — {_fmt_qtde_segura(qtde)} {und}"
-            elif qtde is not None:
-                linha += f" — {_fmt_qtde_segura(qtde)} (unidade não identificada)"
-            elif und:
-                linha += f" — quantidade não identificada ({und})"
-            elif embalagem:
-                # Não achar a quantidade pedida não é o mesmo que não saber nada do produto —
-                # a embalagem (tamanho de uma unidade de venda) já é uma informação útil por si
-                # só, mesmo sem tabela legível o bastante pra dizer quantas foram compradas.
-                linha += f" — embalagem {embalagem}, quantidade comercial não identificada"
-            else:
-                linha += " — quantidade e unidade não identificadas"
-
-            linhas.append(f"{i}. {linha}")
-
-            _CONFIANCA_LABEL = {"alta": "Alta confiança", "media": "Média confiança",
-                                 "baixa": "Baixa confiança", "nenhuma": "Sem correspondência"}
-            if item.get("sinapi_codigo"):
-                preco = item.get("sinapi_preco_referencia")
-                und_sinapi = item.get("sinapi_unidade_referencia")
-                confianca = _CONFIANCA_LABEL.get(item.get("sinapi_confianca"), "confiança não informada")
-                linhas.append(
-                    f"   SINAPI ({confianca}): {item['sinapi_descricao_referencia']} "
-                    f"(cód. {item['sinapi_codigo']}, ref. {item.get('sinapi_mes_referencia') or '?'})"
-                )
-                preco_equiv = item.get("sinapi_preco_equivalente")
-                if preco_equiv is not None and und:
-                    # Referência sempre expressa na unidade comercial do item — nunca o
-                    # contrário. O preço do SINAPI na unidade original vem só como contexto.
-                    linhas.append(f"   Referência SINAPI: R$ {_fmt_brl(preco_equiv)} / {und}")
-                    if preco:
-                        linhas.append(f"   (equivalente a R$ {_fmt_brl(preco)}/{und_sinapi})")
-                elif preco:
-                    if und and und_sinapi and not _mesma_unidade(und, und_sinapi):
-                        linhas.append(
-                            f"   Referência SINAPI: R$ {_fmt_brl(preco)}/{und_sinapi} "
-                            f"(unidade diferente da comercial — conversão não calculada)"
-                        )
-                    else:
-                        linhas.append(f"   Referência SINAPI: R$ {_fmt_brl(preco)}/{und_sinapi}")
-            else:
-                linhas.append("   SINAPI: sem correspondência confiável")
-
-            preco_laura = item.get("laura_preco_referencia")
-            if preco_laura is not None:
-                _GRAU_LABEL = {"confirmada": "Confirmada", "aproximada": "Aproximada"}
-                grau = _GRAU_LABEL.get(item.get("laura_grau_confianca_referencia"), "")
-                grau_fmt = f" ({grau})" if grau else ""
-                und_laura = item.get("laura_unidade_referencia") or "?"
-                data_laura = item.get("laura_data_referencia")
-                data_fmt = f" em {_fmt_data_flexivel(data_laura)}" if data_laura else ""
-                fornecedor = item.get("laura_fornecedor_referencia") or "fornecedor não identificado"
-                linhas.append(
-                    f"   Última compra{grau_fmt}: R$ {_fmt_brl(preco_laura)}/{und_laura}"
-                    f"{data_fmt} — {fornecedor}"
-                )
-            else:
-                linhas.append("   Última compra: sem referência própria encontrada")
-
-            if item.get("observacoes"):
-                linhas.append(f"   Obs: {item['observacoes']}")
-        else:
-            linhas.append(f"{i}. {item}")
+def _texto_item_tecnico(item, indice):
+    """Análise técnica de um item só, acessada a partir da Tela do Item (Dennis,
+    2026-07-05: "a análise técnica deve sair desta tela" — vira nível opcional por item,
+    não mais misturada com a view/menu principal)."""
+    linhas = [f"🔍 <b>Análise técnica — Item {indice}</b>", ""]
+    linhas.extend(_linhas_analise_item(item))
     return "\n".join(linhas)
 
 def _melhor_referencia_preco(item):
@@ -3223,18 +3270,23 @@ def _avaliar_item(item):
 
 _EMOJI_STATUS = {"ok": "🟢", "revisar": "🟡", "atencao": "🔴"}
 
-def _texto_lista_conferencia(itens, ggv):
+def _texto_lista_conferencia(itens, ggv, endereco_override=None, observacoes=None):
     """Nível 1 (Tela de Conferência) — a tela principal depois de interpretar. Objetivo não é
     explicar como a Laura chegou na resposta, é permitir conferir rápido (Dennis, 2026-07-04):
     "o que vou comprar, quanto, uma ideia de preço, o que precisa da minha atenção". Detalhe
-    técnico fica pro Nível 3 (Análise Técnica), edição completa de um item pro Nível 2."""
+    técnico fica pro Nível 3 (Análise Técnica), edição completa de um item pro Nível 2.
+
+    Cabeçalho ganhou 3 campos editáveis (Dennis, 2026-07-05): Obra, Endereço (herdado da
+    obra, mas com override só para esta lista — nunca sobrescreve obras.endereco_entrega) e
+    Observações gerais (opcional, instrução geral pro fornecedor)."""
     linhas = [f"📝 <b>Lista de Compras — Obra {ggv}</b>" if ggv else "📝 <b>Lista de Compras</b>"]
     if ggv:
         obra = buscar_obra(ggv)
-        endereco = obra.get("endereco_entrega") if obra else None
-        linhas.append(f"Endereço: {endereco}" if endereco else "⚠️ Endereço de entrega não definido")
+        endereco = endereco_override or (obra.get("endereco_entrega") if obra else None)
+        linhas.append(f"📍 Endereço: {endereco}" if endereco else "⚠️ Endereço de entrega não definido")
     else:
         linhas.append("⚠️ Obra ainda não definida")
+    linhas.append(f"🗒 Observações: {observacoes}" if observacoes else "🗒 Observações: —")
     linhas.append("")
 
     if not itens:
@@ -3306,11 +3358,35 @@ def _texto_lista_conferencia(itens, ggv):
 def _teclado_lista_conferencia(ggv):
     token = ggv or "nao_identificado"
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🏗 Obra",                  callback_data="lc_defobra"),
+         InlineKeyboardButton("📍 Endereço",               callback_data="lc_campolista:endereco"),
+         InlineKeyboardButton("🗒 Observações",            callback_data="lc_campolista:observacoes")],
         [InlineKeyboardButton("✏️ Editar item",           callback_data=f"lc_editar:{token}"),
          InlineKeyboardButton("🔍 Análise técnica",        callback_data=f"lc_tecnico:{token}")],
         [InlineKeyboardButton("✅ Gerar Lista de Compras", callback_data=f"lc_gerar:{token}")],
         [InlineKeyboardButton("✖ Fechar",                  callback_data="lc_fechar")],
     ])
+
+def _renderizar_lista_conferencia(itens, ggv, ctx):
+    """Helper de render pra centralizar a leitura do estado ephemeral de cabeçalho
+    (endereço/observações), evitando repetir ctx.user_data.get(...) nos ~8 pontos que
+    reemitem a Tela de Conferência."""
+    texto = _texto_lista_conferencia(
+        itens, ggv, ctx.user_data.get("lista_endereco"), ctx.user_data.get("lista_observacoes")
+    )
+    return texto, _teclado_lista_conferencia(ggv)
+
+def _teclado_definir_obra_lista(obras):
+    botoes, row = [], []
+    for codigo, _ in obras:
+        row.append(InlineKeyboardButton(codigo, callback_data=f"lc_setobra:{codigo}"))
+        if len(row) == 2:
+            botoes.append(row)
+            row = []
+    if row:
+        botoes.append(row)
+    botoes.append([InlineKeyboardButton("← Voltar", callback_data="lc_voltar")])
+    return InlineKeyboardMarkup(botoes)
 
 def _teclado_item_picker(itens):
     botoes = []
@@ -3320,49 +3396,100 @@ def _teclado_item_picker(itens):
     botoes.append([InlineKeyboardButton("← Voltar", callback_data="lc_voltar")])
     return InlineKeyboardMarkup(botoes)
 
-_CONFIANCA_LABEL_SINAPI = {"alta": "Alta confiança", "media": "Média confiança", "baixa": "Baixa confiança"}
-
-def _texto_item_detalhe(item, indice):
-    """Nível 2 (Edição) — só aqui aparece tudo sobre o item (Dennis, 2026-07-04: "os detalhes
-    aparecem somente quando realmente preciso editar")."""
-    if not isinstance(item, dict):
-        return f"📋 <b>Item {indice}</b>\n\n{item}"
-    qtde, und = item.get("quantidade"), item.get("unidade")
-    linhas = [
-        f"📋 <b>Item {indice} — {item['descricao']}</b>", "",
-        f"Descrição: {item['descricao']}",
-        f"Fabricante: {item.get('fabricante') or '—'}",
-        f"Código comercial: {item.get('codigo') or '—'}",
-        f"Quantidade: {_fmt_qtde_segura(qtde) if qtde is not None else 'não identificada'}",
-        f"Unidade comercial: {und or 'não identificada'}",
-    ]
-    if item.get("embalagem"):
-        linhas.append(f"Embalagem: {item['embalagem']}")
-    linhas.append("")
-    preco_ref = _melhor_referencia_preco(item)
-    linhas.append(f"Referência: R$ {_fmt_brl(preco_ref)}/{und}" if preco_ref is not None and und
-                  else "Referência: sem referência conhecida")
-    if item.get("sinapi_codigo"):
-        conf = _CONFIANCA_LABEL_SINAPI.get(item.get("sinapi_confianca"), "confiança não informada")
-        linhas.append(f"SINAPI: {item['sinapi_descricao_referencia']} (cód. {item['sinapi_codigo']}) — {conf}")
-    else:
-        linhas.append("SINAPI: sem correspondência confiável")
+def _referencia_e_correspondencia(item):
+    """(preço, rótulo de confiança) da melhor referência do item pra Tela do Item — mesma
+    prioridade de _melhor_referencia_preco (própria > SINAPI > nenhuma), mas junto com o
+    rótulo de quem venceu, pra nunca esconder a origem (Princípio 8, Política de Compras)."""
     if item.get("laura_preco_referencia") is not None:
-        linhas.append(f"Última compra própria: R$ {_fmt_brl(item['laura_preco_referencia'])}/"
-                       f"{item.get('laura_unidade_referencia') or '?'} — "
-                       f"{item.get('laura_fornecedor_referencia') or 'fornecedor não identificado'}")
-    if item.get("observacoes"):
-        linhas.append(f"Obs: {item['observacoes']}")
+        grau = _GRAU_LABEL_LAURA.get(item.get("laura_grau_confianca_referencia"), "Referência própria")
+        return item["laura_preco_referencia"], grau
+    preco = _melhor_referencia_preco(item)
+    if preco is not None:
+        label = _CONFIANCA_LABEL_TECNICA.get(item.get("sinapi_confianca"), "Confiança não informada")
+        return preco, label
+    return None, None
+
+_CAMPOS_ITEM_LISTA = {
+    "descricao":   ("Produto", "Digite a nova descrição."),
+    "fabricante":  ("Fabricante", "Digite o novo fabricante."),
+    "codigo":      ("Código comercial", "Digite o novo código."),
+    "quantidade":  ("Quantidade", "Digite a nova quantidade."),
+    "unidade":     ("Unidade comercial", "Digite a nova unidade comercial."),
+    "observacoes": ("Observações", "Digite a nova observação."),
+}
+
+def _texto_tela_item(indice, item, pendente):
+    """Tela do Item (Nível 2) — view e menu de correção juntos numa tela só (Dennis,
+    2026-07-05: "uma tela = uma decisão"; reduzir a ficha técnica a um menu de alteração).
+    Enquanto existe rascunho pendente, referência/correspondência somem da tela — nunca
+    mostradas como se ainda fossem válidas — até o usuário concluir a edição."""
+    if not isinstance(item, dict):
+        return f"📦 <b>Item {indice}</b>\n\n{item}"
+    qtde, und, fabricante = item.get("quantidade"), item.get("unidade"), item.get("fabricante")
+    linhas = [f"📦 <b>Item {indice}</b>", "", item["descricao"], ""]
+    partes = []
+    if qtde is not None and und:
+        partes.append(f"{_fmt_qtde_segura(qtde)} {und}")
+    elif und:
+        partes.append(f"{und} (quantidade não identificada)")
+    elif qtde is not None:
+        partes.append(f"{_fmt_qtde_segura(qtde)} (unidade não identificada)")
+    else:
+        partes.append("quantidade/unidade não identificadas")
+    if fabricante:
+        partes.append(fabricante)
+    linhas.append(" • ".join(partes))
+    linhas.append("")
+    if pendente:
+        linhas.append("⚠️ Alterações pendentes")
+        linhas.append("A referência será recalculada ao concluir a edição.")
+    else:
+        preco, label = _referencia_e_correspondencia(item)
+        linhas.append("Referência Laura")
+        linhas.append(f"~R$ {_fmt_brl(preco)}/{und}" if preco is not None and und else "ainda não conhecida")
+        if label:
+            linhas.append("")
+            linhas.append("Correspondência")
+            linhas.append(f"✔ {label}")
+    linhas.append("")
+    linhas.append("─" * 20)
+    linhas.append("O que deseja alterar?")
     return "\n".join(linhas)
 
-def _teclado_item_detalhe(indice):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✏️ Corrigir este item", callback_data=f"lc_corrigir:{indice}")],
-        [InlineKeyboardButton("← Voltar à lista",       callback_data="lc_voltar")],
-    ])
+def _teclado_item_tela(indice, item, pendente):
+    """Menu da Tela do Item — cada campo é uma ação direta (estilo configurações do
+    Telegram), sem tela intermediária de 'corrigir campos'. Item em fallback (string, não
+    interpretado) só oferece Reinterpretar — não há campos estruturados pra corrigir.
+
+    Item já interpretado NÃO mostra "Reinterpretar item" (Dennis, 2026-07-05: "se o usuário
+    fica em dúvida entre dois botões, um deles não deveria estar na tela principal" —
+    'Concluir edição' já recalcula SINAPI/referência/confiança sozinho; reinterpretar do
+    zero via texto livre vira recurso de exceção, sem lugar na tela principal por ora)."""
+    if not isinstance(item, dict):
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Reinterpretar item", callback_data=f"lc_reinterpretar:{indice}")],
+            [InlineKeyboardButton("⬅ Voltar", callback_data="lc_voltar")],
+        ])
+    botoes = [
+        [InlineKeyboardButton("📝 Produto",           callback_data=f"lc_campo:{indice}:descricao"),
+         InlineKeyboardButton("🏷 Fabricante",         callback_data=f"lc_campo:{indice}:fabricante")],
+        [InlineKeyboardButton("🔢 Código comercial",  callback_data=f"lc_campo:{indice}:codigo"),
+         InlineKeyboardButton("📦 Quantidade",         callback_data=f"lc_campo:{indice}:quantidade")],
+        [InlineKeyboardButton("📏 Unidade comercial",  callback_data=f"lc_campo:{indice}:unidade"),
+         InlineKeyboardButton("🗒 Observações",        callback_data=f"lc_campo:{indice}:observacoes")],
+        [InlineKeyboardButton("🔍 Ver análise técnica", callback_data=f"lc_tecnicoitem:{indice}")],
+    ]
+    if pendente:
+        botoes.append([InlineKeyboardButton("💾 Concluir edição", callback_data=f"lc_concluir:{indice}")])
+    else:
+        botoes.append([InlineKeyboardButton("⬅ Voltar", callback_data="lc_voltar")])
+    return InlineKeyboardMarkup(botoes)
 
 def _teclado_analise_tecnica():
     return InlineKeyboardMarkup([[InlineKeyboardButton("← Voltar", callback_data="lc_voltar")]])
+
+def _teclado_item_tecnico(indice):
+    return InlineKeyboardMarkup([[InlineKeyboardButton("⬅ Voltar", callback_data=f"lc_item:{indice}")]])
 
 async def _cb_lc_editar(query, ctx, partes):
     itens = ctx.user_data.get("lista_itens") or []
@@ -3371,22 +3498,99 @@ async def _cb_lc_editar(query, ctx, partes):
         return
     await query.edit_message_text("Escolha o item que deseja corrigir:", reply_markup=_teclado_item_picker(itens))
 
+def _preparar_tela_item(ctx, indice, itens):
+    """Resolve o item a exibir (rascunho ou committed) e se há alteração pendente de
+    verdade — rascunho comparado ao item real, não só "existe rascunho" (Dennis,
+    2026-07-05: abrir um campo e voltar sem digitar nada não pode aparecer como pendência).
+    Também descarta rascunho de um item diferente do que está sendo exibido agora."""
+    if ctx.user_data.get("lista_item_indice") != indice:
+        ctx.user_data.pop("lista_item_rascunho", None)
+        ctx.user_data.pop("lista_item_indice", None)
+    rascunho = ctx.user_data.get("lista_item_rascunho")
+    committed = itens[indice - 1] if 1 <= indice <= len(itens) else None
+    if rascunho is None:
+        return committed, False
+    return rascunho, isinstance(committed, dict) and rascunho != committed
+
+def _teclado_voltar_item(indice):
+    return InlineKeyboardMarkup([[InlineKeyboardButton("← Voltar", callback_data=f"lc_item:{indice}")]])
+
 async def _cb_lc_item(query, ctx, partes):
     indice = int(partes[1])
     itens = ctx.user_data.get("lista_itens") or []
     if not (1 <= indice <= len(itens)):
         await query.edit_message_text("Item não encontrado.")
         return
+    ctx.user_data["aguardando"] = None
+    item_exibir, pendente = _preparar_tela_item(ctx, indice, itens)
     await query.edit_message_text(
-        _texto_item_detalhe(itens[indice - 1], indice), parse_mode="HTML",
-        reply_markup=_teclado_item_detalhe(indice)
+        _texto_tela_item(indice, item_exibir, pendente), parse_mode="HTML",
+        reply_markup=_teclado_item_tela(indice, item_exibir, pendente)
     )
 
-async def _cb_lc_corrigir(query, ctx, partes):
+async def _cb_lc_campo(query, ctx, partes):
+    indice, campo = int(partes[1]), partes[2]
+    if ctx.user_data.get("lista_item_indice") != indice:
+        itens = ctx.user_data.get("lista_itens") or []
+        if not (1 <= indice <= len(itens)) or not isinstance(itens[indice - 1], dict):
+            await query.edit_message_text("Item não encontrado.")
+            return
+        ctx.user_data["lista_item_rascunho"] = dict(itens[indice - 1])
+        ctx.user_data["lista_item_indice"] = indice
+    ctx.user_data["aguardando"] = f"lista_campo_{campo}"
+    label, instrucao = _CAMPOS_ITEM_LISTA[campo]
+    valor_atual = ctx.user_data["lista_item_rascunho"].get(campo)
+    if campo == "quantidade":
+        valor_fmt = _fmt_qtde_segura(valor_atual) if valor_atual is not None else "—"
+    else:
+        valor_fmt = valor_atual or "—"
+    await query.edit_message_text(
+        f"{label}\n\nValor atual:\n{valor_fmt}\n\n{instrucao}",
+        reply_markup=_teclado_voltar_item(indice)
+    )
+
+async def _cb_lc_concluir(query, ctx, partes):
     indice = int(partes[1])
-    ctx.user_data["aguardando"] = "lista_editar_item"
-    ctx.user_data["lista_item_editando"] = indice
-    await query.edit_message_text("Envie a descrição corrigida deste item (texto):")
+    rascunho = ctx.user_data.get("lista_item_rascunho")
+    itens = ctx.user_data.get("lista_itens") or []
+    if rascunho is None or not (1 <= indice <= len(itens)):
+        await query.edit_message_text("Contexto perdido. Envie /lista novamente.")
+        return
+    await query.edit_message_text("Recalculando...")
+    # termo_busca_sinapi é uma paráfrase técnica da descrição antiga, inferida pela IA na
+    # Camada 1 — se a descrição mudou, essa pista fica obsoleta e atrapalharia a busca SINAPI.
+    # Descartada aqui pra sempre cair no fallback já existente (busca pela descrição atual).
+    rascunho.pop("termo_busca_sinapi", None)
+    novos = await _adicionar_correspondencia_sinapi([rascunho])
+    novo_item = _adicionar_referencia_laura(novos)[0]
+    itens[indice - 1] = novo_item
+    ctx.user_data["lista_itens"] = itens
+    ctx.user_data.pop("lista_item_rascunho", None)
+    ctx.user_data.pop("lista_item_indice", None)
+    ggv = ctx.user_data.get("lista_ggv")
+    texto, markup = _renderizar_lista_conferencia(itens, ggv, ctx)
+    await query.edit_message_text(texto, parse_mode="HTML", reply_markup=markup)
+
+async def _cb_lc_tecnicoitem(query, ctx, partes):
+    indice = int(partes[1])
+    itens = ctx.user_data.get("lista_itens") or []
+    if not (1 <= indice <= len(itens)):
+        await query.edit_message_text("Item não encontrado.")
+        return
+    await query.edit_message_text(
+        _texto_item_tecnico(itens[indice - 1], indice), parse_mode="HTML",
+        reply_markup=_teclado_item_tecnico(indice)
+    )
+
+async def _cb_lc_reinterpretar(query, ctx, partes):
+    indice = int(partes[1])
+    ctx.user_data.pop("lista_item_rascunho", None)
+    ctx.user_data["aguardando"] = "lista_reinterpretar_item"
+    ctx.user_data["lista_item_indice"] = indice
+    await query.edit_message_text(
+        "Envie a nova descrição pra reinterpretar este item:",
+        reply_markup=_teclado_voltar_item(indice)
+    )
 
 async def _cb_lc_tecnico(query, ctx, partes):
     ggv_token = partes[1]
@@ -3400,10 +3604,48 @@ async def _cb_lc_tecnico(query, ctx, partes):
 async def _cb_lc_voltar(query, ctx, partes):
     itens = ctx.user_data.get("lista_itens") or []
     ggv = ctx.user_data.get("lista_ggv")
+    texto, markup = _renderizar_lista_conferencia(itens, ggv, ctx)
+    await query.edit_message_text(texto, parse_mode="HTML", reply_markup=markup)
+
+async def _cb_lc_defobra(query, ctx, partes):
+    obras = _listar_obras()
     await query.edit_message_text(
-        _texto_lista_conferencia(itens, ggv), parse_mode="HTML",
-        reply_markup=_teclado_lista_conferencia(ggv)
+        mostrar_lista_obras(obras), reply_markup=_teclado_definir_obra_lista(obras)
     )
+
+async def _cb_lc_setobra(query, ctx, partes):
+    codigo = partes[1]
+    ctx.user_data["lista_ggv"] = codigo
+    itens = ctx.user_data.get("lista_itens") or []
+    texto, markup = _renderizar_lista_conferencia(itens, codigo, ctx)
+    await query.edit_message_text(texto, parse_mode="HTML", reply_markup=markup)
+
+_CAMPOS_LISTA_GERAL = {
+    "endereco":     ("Endereço de entrega", "Digite o novo endereço de entrega.", "lista_endereco"),
+    "observacoes":  ("Observações gerais", "Digite as observações gerais da compra.", "lista_observacoes"),
+}
+
+async def _cb_lc_campolista(query, ctx, partes):
+    """Observações continua texto livre direto; Endereço reaproveita o mesmo mecanismo de
+    presets do Pedido de Compra (Obra/Casa/Escritório/Chácara/Outro) — Dennis, 2026-07-05:
+    "endereço de entrega é o mesmo conceito... a Lista deve reaproveitar essa mesma
+    experiência, não criar um fluxo paralelo mais simples"."""
+    campo = partes[1]
+    if campo == "endereco":
+        ggv = ctx.user_data.get("lista_ggv")
+        await query.edit_message_text(
+            "Endereço de entrega — escolha uma opção:",
+            reply_markup=teclado_escolha_endereco("lista", "-", ggv, "lc_voltar")
+        )
+        return
+    label, instrucao, chave_estado = _CAMPOS_LISTA_GERAL[campo]
+    ctx.user_data["aguardando"] = f"lista_geral_{campo}"
+    valor_atual = ctx.user_data.get(chave_estado)
+    await query.edit_message_text(
+        f"{label}\n\nValor atual:\n{valor_atual or '—'}\n\n{instrucao}",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← Voltar", callback_data="lc_voltar")]])
+    )
+
 
 async def _cb_lc_gerar(query, ctx, partes):
     ggv_token = partes[1]
@@ -3411,8 +3653,7 @@ async def _cb_lc_gerar(query, ctx, partes):
     itens = ctx.user_data.get("lista_itens") or []
     if not ggv:
         await query.edit_message_text(
-            "Não dá pra gravar sem obra definida. Refaça com /lista e o código da obra "
-            "(ex: /lista GGV03).",
+            "Não dá pra gravar sem obra definida. Toque em \"📍 Definir obra\" abaixo.",
             reply_markup=_teclado_lista_conferencia(ggv)
         )
         return
@@ -3421,6 +3662,15 @@ async def _cb_lc_gerar(query, ctx, partes):
         await query.edit_message_text("Lista vazia — nada pra gravar.")
         return
     lista_id, _criada = criar_ou_buscar_lista_aberta(DB_PATH, ggv)
+    # Só grava endereço/observações se foram tocados nesta sessão — reabrir uma lista já
+    # existente sem reeditar esses campos não pode apagar um valor já salvo antes.
+    campos_lista = {}
+    if ctx.user_data.get("lista_endereco"):
+        campos_lista["endereco_entrega"] = ctx.user_data["lista_endereco"]
+    if ctx.user_data.get("lista_observacoes"):
+        campos_lista["observacoes"] = ctx.user_data["lista_observacoes"]
+    if campos_lista:
+        atualizar_lista(DB_PATH, lista_id, **campos_lista)
     for item in itens_validos:
         adicionar_item(
             DB_PATH, lista_id,
@@ -3444,6 +3694,8 @@ async def _cb_lc_gerar(query, ctx, partes):
     ctx.user_data["aguardando"] = None
     ctx.user_data.pop("lista_itens", None)
     ctx.user_data.pop("lista_ggv", None)
+    ctx.user_data.pop("lista_endereco", None)
+    ctx.user_data.pop("lista_observacoes", None)
     n = len(itens_validos)
     await query.edit_message_text(f"✅ Lista de Compras da Obra {ggv} salva — {n} ite{'m' if n == 1 else 'ns'}.")
 
@@ -3452,7 +3704,10 @@ async def _cb_lc_fechar(query, ctx, partes):
     ctx.user_data.pop("lista_ggv_preselecionada", None)
     ctx.user_data.pop("lista_itens", None)
     ctx.user_data.pop("lista_ggv", None)
-    ctx.user_data.pop("lista_item_editando", None)
+    ctx.user_data.pop("lista_endereco", None)
+    ctx.user_data.pop("lista_observacoes", None)
+    ctx.user_data.pop("lista_item_indice", None)
+    ctx.user_data.pop("lista_item_rascunho", None)
     await query.edit_message_text("Fechado.")
 
 def _itens_lista_materiais(dados):
@@ -3545,10 +3800,10 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         itens = await _interpretar_lista_arquivo(bytes(conteudo), mime)
         ctx.user_data["lista_itens"] = itens
         ctx.user_data["lista_ggv"] = ggv
-        await update.message.reply_text(
-            _texto_lista_conferencia(itens, ggv), parse_mode="HTML",
-            reply_markup=_teclado_lista_conferencia(ggv)
-        )
+        ctx.user_data["lista_endereco"] = None
+        ctx.user_data["lista_observacoes"] = None
+        texto, markup = _renderizar_lista_conferencia(itens, ggv, ctx)
+        await update.message.reply_text(texto, parse_mode="HTML", reply_markup=markup)
         return
 
     caminho = UPLOADS / nome
@@ -3851,16 +4106,16 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         itens = await _interpretar_lista_texto(texto)
         ctx.user_data["lista_itens"] = itens
         ctx.user_data["lista_ggv"] = ggv
-        await update.message.reply_text(
-            _texto_lista_conferencia(itens, ggv), parse_mode="HTML",
-            reply_markup=_teclado_lista_conferencia(ggv)
-        )
+        ctx.user_data["lista_endereco"] = None
+        ctx.user_data["lista_observacoes"] = None
+        texto_tela, markup = _renderizar_lista_conferencia(itens, ggv, ctx)
+        await update.message.reply_text(texto_tela, parse_mode="HTML", reply_markup=markup)
 
-    elif aguardando == "lista_editar_item":
-        indice = ctx.user_data.get("lista_item_editando")
+    elif aguardando == "lista_reinterpretar_item":
+        indice = ctx.user_data.get("lista_item_indice")
         itens = ctx.user_data.get("lista_itens") or []
         ctx.user_data["aguardando"] = None
-        ctx.user_data.pop("lista_item_editando", None)
+        ctx.user_data.pop("lista_item_indice", None)
         if not indice or not (1 <= indice <= len(itens)):
             await update.message.reply_text("Contexto perdido. Envie /lista novamente.")
             return
@@ -3868,15 +4123,70 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         novos = await _interpretar_lista_texto(texto)
         novo_item = next((it for it in novos if isinstance(it, dict)), novos[0] if novos else None)
         if novo_item is None:
-            await update.message.reply_text("Não consegui interpretar. Tente novamente.")
+            await update.message.reply_text(
+                "Não consegui interpretar. Tente novamente.",
+                reply_markup=_teclado_voltar_item(indice)
+            )
             return
         itens[indice - 1] = novo_item
         ctx.user_data["lista_itens"] = itens
         ggv = ctx.user_data.get("lista_ggv")
+        texto_tela, markup = _renderizar_lista_conferencia(itens, ggv, ctx)
+        await update.message.reply_text(texto_tela, parse_mode="HTML", reply_markup=markup)
+
+    elif aguardando and aguardando.startswith("lista_campo_"):
+        campo = aguardando[len("lista_campo_"):]
+        indice = ctx.user_data.get("lista_item_indice")
+        rascunho = ctx.user_data.get("lista_item_rascunho")
+        itens = ctx.user_data.get("lista_itens") or []
+        ctx.user_data["aguardando"] = None
+        if not indice or rascunho is None or campo not in _CAMPOS_ITEM_LISTA:
+            await update.message.reply_text("Contexto perdido. Envie /lista novamente.")
+            return
+        valor_bruto = texto.strip()
+        if campo == "descricao" and valor_bruto in ("", "-"):
+            ctx.user_data["aguardando"] = f"lista_campo_{campo}"
+            await update.message.reply_text(
+                "Descrição não pode ficar em branco. Envie o novo valor:",
+                reply_markup=_teclado_voltar_item(indice)
+            )
+            return
+        if campo == "quantidade":
+            if valor_bruto == "-":
+                valor = None
+            else:
+                try:
+                    valor = float(valor_bruto.replace(",", "."))
+                except ValueError:
+                    ctx.user_data["aguardando"] = f"lista_campo_{campo}"
+                    await update.message.reply_text(
+                        "Não entendi a quantidade. Envie só o número (ex: 250 ou 12,5) ou \"-\" pra deixar sem valor.",
+                        reply_markup=_teclado_voltar_item(indice)
+                    )
+                    return
+        else:
+            valor = None if valor_bruto == "-" else valor_bruto
+        rascunho[campo] = valor
+        ctx.user_data["lista_item_rascunho"] = rascunho
+        item_exibir, pendente = _preparar_tela_item(ctx, indice, itens)
         await update.message.reply_text(
-            _texto_lista_conferencia(itens, ggv), parse_mode="HTML",
-            reply_markup=_teclado_lista_conferencia(ggv)
+            _texto_tela_item(indice, item_exibir, pendente), parse_mode="HTML",
+            reply_markup=_teclado_item_tela(indice, item_exibir, pendente)
         )
+
+    elif aguardando and aguardando.startswith("lista_geral_"):
+        campo = aguardando[len("lista_geral_"):]
+        ctx.user_data["aguardando"] = None
+        if campo not in _CAMPOS_LISTA_GERAL:
+            await update.message.reply_text("Contexto perdido. Envie /lista novamente.")
+            return
+        _, _, chave_estado = _CAMPOS_LISTA_GERAL[campo]
+        valor_bruto = texto.strip()
+        ctx.user_data[chave_estado] = None if valor_bruto == "-" else valor_bruto
+        itens = ctx.user_data.get("lista_itens") or []
+        ggv = ctx.user_data.get("lista_ggv")
+        texto_tela, markup = _renderizar_lista_conferencia(itens, ggv, ctx)
+        await update.message.reply_text(texto_tela, parse_mode="HTML", reply_markup=markup)
 
 async def _cb_ok(query, ctx, partes):
     _, doc_id, tipo, ggv = partes
@@ -3972,10 +4282,10 @@ async def _cb_sel_tipo_inicial(query, ctx, partes):
         itens = await _interpretar_lista_arquivo(conteudo_lista, mime_inf_lista)
         ctx.user_data["lista_itens"] = itens
         ctx.user_data["lista_ggv"] = None
-        await query.edit_message_text(
-            _texto_lista_conferencia(itens, None), parse_mode="HTML",
-            reply_markup=_teclado_lista_conferencia(None)
-        )
+        ctx.user_data["lista_endereco"] = None
+        ctx.user_data["lista_observacoes"] = None
+        texto_tela, markup = _renderizar_lista_conferencia(itens, None, ctx)
+        await query.edit_message_text(texto_tela, parse_mode="HTML", reply_markup=markup)
         return
 
     mime_inf = "application/pdf" if caminho_doc.lower().endswith(".pdf") else "image/jpeg"
@@ -4201,20 +4511,38 @@ async def _cb_pgto(query, ctx, partes):
     await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
 
 
-async def _cb_end(query, ctx, partes):
-    _, doc_id, ggv, escolha = partes
+async def _cb_endsel(query, ctx, partes):
+    """Único handler de escolha de endereço — Pedido de Compra e Lista de Compras
+    convergem aqui (Dennis, 2026-07-05). Só a gravação final diverge por `destino`: 'doc'
+    grava direto em documentos (via doc_id embutido em `param`) e reabre o resumo do
+    pedido; 'lista' grava em ctx.user_data (a Lista ainda não existe no banco até
+    "Gerar") e reabre a Tela de Conferência. Mesma tolerância já aceita na Camada 2/3 da
+    Lista de Compras: computação/opções compartilhadas, gravação final por domínio."""
+    _, destino, param, escolha = partes
     if escolha == "outro":
-        ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": "endereco_entrega"})
-        await query.edit_message_text("Endereço de entrega:")
+        if destino == "doc":
+            doc_id, ggv = param.split("|", 1)
+            ctx.user_data.update({"doc_id": int(doc_id), "ggv": ggv, "aguardando": "endereco_entrega"})
+            await query.edit_message_text("Endereço de entrega:")
+        else:
+            ctx.user_data["aguardando"] = "lista_geral_endereco"
+            await query.edit_message_text(
+                "Endereço de entrega\n\nDigite o novo endereço de entrega.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← Voltar", callback_data="lc_voltar")]])
+            )
         return
-    if escolha.startswith("obra_"):
-        ggv_key = escolha[5:]
-        endereco = buscar_obra(ggv_key).get("endereco_entrega") or ENDERECOS.get(escolha, escolha)
+    endereco = _resolver_endereco(escolha)
+    if destino == "doc":
+        doc_id, _ggv = param.split("|", 1)
+        atualizar(int(doc_id), endereco_entrega=endereco)
+        texto, markup = _resumo_gerar(int(doc_id))
+        await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
     else:
-        endereco = ENDERECOS.get(escolha, escolha)
-    atualizar(int(doc_id), endereco_entrega=endereco)
-    texto, markup = _resumo_gerar(int(doc_id))
-    await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
+        ctx.user_data["lista_endereco"] = endereco
+        itens = ctx.user_data.get("lista_itens") or []
+        ggv = ctx.user_data.get("lista_ggv")
+        texto, markup = _renderizar_lista_conferencia(itens, ggv, ctx)
+        await query.edit_message_text(texto, parse_mode="HTML", reply_markup=markup)
 
 
 async def _cb_sel_edit(query, ctx, partes):
@@ -4880,7 +5208,7 @@ _CB_DISPATCH = {
     "sel_ggv": _cb_sel_ggv,
     "set_ggv": _cb_set_ggv,
     "pgto": _cb_pgto,
-    "end": _cb_end,
+    "endsel": _cb_endsel,
     "sel_edit": _cb_sel_edit,
     "edit_campo": _cb_edit_campo,
     "voltar_edit": _cb_voltar_edit,
@@ -4932,9 +5260,15 @@ _CB_DISPATCH = {
     "menu_nova_obra": _cb_menu_nova_obra,
     "lc_editar": _cb_lc_editar,
     "lc_item": _cb_lc_item,
-    "lc_corrigir": _cb_lc_corrigir,
+    "lc_campo": _cb_lc_campo,
+    "lc_campolista": _cb_lc_campolista,
+    "lc_concluir": _cb_lc_concluir,
+    "lc_tecnicoitem": _cb_lc_tecnicoitem,
+    "lc_reinterpretar": _cb_lc_reinterpretar,
     "lc_tecnico": _cb_lc_tecnico,
     "lc_voltar": _cb_lc_voltar,
+    "lc_defobra": _cb_lc_defobra,
+    "lc_setobra": _cb_lc_setobra,
     "lc_gerar": _cb_lc_gerar,
     "lc_fechar": _cb_lc_fechar,
 }

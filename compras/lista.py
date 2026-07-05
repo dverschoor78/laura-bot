@@ -69,6 +69,15 @@ _COLUNAS_ITEM = (
     "codigo TEXT",
 )
 
+# Atributos do cabeçalho da lista (não do item) — endereço herdado da obra, mas editável
+# por lista (nunca sobrescreve obras.endereco_entrega); observações gerais são novas,
+# opcionais, pensadas como instrução geral da compra (Dennis, 2026-07-05).
+_COLUNAS_LISTA = (
+    "endereco_entrega TEXT",
+    "observacoes TEXT",
+)
+_COLUNAS_LISTA_EDITAVEIS = {"endereco_entrega", "observacoes"}
+
 
 def init_db_compras(db_path):
     with sqlite3.connect(db_path) as con:
@@ -80,6 +89,11 @@ def init_db_compras(db_path):
                 criado_em  TEXT DEFAULT (datetime('now','localtime'))
             )
         """)
+        for col in _COLUNAS_LISTA:
+            try:
+                con.execute(f"ALTER TABLE listas_compra ADD COLUMN {col}")
+            except sqlite3.OperationalError:
+                pass
         con.execute(f"""
             CREATE TABLE IF NOT EXISTS lista_compra_itens (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -130,6 +144,19 @@ def criar_ou_buscar_lista_aberta(db_path, ggv):
             (ggv, StatusLista.ABERTA.value)
         )
         return cur.lastrowid, True
+
+
+def atualizar_lista(db_path, lista_id, **kwargs):
+    """Atualiza atributos do cabeçalho da lista (endereço de entrega, observações gerais)
+    — nunca o item. Só aceita colunas na allowlist (mesmo padrão de segurança de
+    atualizar()/atualizar_obra() em bot.py, corrigido em 2026-07-03 contra SQL injection
+    via nome de coluna dinâmico)."""
+    campos = {k: v for k, v in kwargs.items() if k in _COLUNAS_LISTA_EDITAVEIS}
+    if not campos:
+        return
+    set_clause = ", ".join(f"{k}=?" for k in campos)
+    with sqlite3.connect(db_path) as con:
+        con.execute(f"UPDATE listas_compra SET {set_clause} WHERE id=?", (*campos.values(), lista_id))
 
 
 def sugerir_itens(db_path, ggv, limite=8):
