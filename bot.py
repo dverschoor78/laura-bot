@@ -4797,10 +4797,17 @@ async def _cb_sel_tipo_inicial(query, ctx, partes):
     elif tipo == "nota_fiscal":
         dados_nfe = parse_nfe(corpo)
         candidatos = buscar_candidatos_nfe(dados_nfe["cnpj"], dados_nfe["valor_v"], DB_PATH)
-        await query.edit_message_text(
-            mostrar_nfe(dados_nfe, candidatos),
-            reply_markup=teclado_candidatos_nfe(int(doc_id), candidatos)
-        )
+        if not candidatos:
+            _descartar_documento(int(doc_id))
+            await query.edit_message_text(
+                mostrar_nfe(dados_nfe, candidatos) +
+                "\n\nArquivo descartado — pode reenviar depois de corrigir o pedido."
+            )
+        else:
+            await query.edit_message_text(
+                mostrar_nfe(dados_nfe, candidatos),
+                reply_markup=teclado_candidatos_nfe(int(doc_id), candidatos)
+            )
     elif tipo == "orcamento":
         texto, markup = _resumo_gerar(int(doc_id))
         await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
@@ -5474,7 +5481,11 @@ async def _cb_nfe_confirmar(query, ctx, partes):
 
 
 async def _cb_nfe_cancelar(query, ctx, partes):
-    await query.edit_message_text("NF-e não vinculada.")
+    doc_id = int(partes[1])
+    _descartar_documento(doc_id)
+    await query.edit_message_text(
+        "NF-e não vinculada. Arquivo descartado — pode reenviar depois de corrigir o pedido."
+    )
 
 
 async def _cb_parcelas_ver(query, ctx, partes):
