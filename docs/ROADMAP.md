@@ -1,8 +1,10 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-06 (**Lista de Compras — nome de arquivo padronizado (slug + data +
-> Resumo), "Gerar" agora encerra a lista (histórico por obra), picker "📝 Listas de Compras"
-> no Cockpit da Obra (buscar por nome, reabrir pra editar)**); mesmo dia: Consultoria de
+> Atualizado em: 2026-07-06 (**NF-e presa corrigida** — sem candidato ou "Nenhum destes" agora
+> descarta o documento, antes ficava presa pra sempre bloqueando reenvio; **Lista de Compras —
+> nome de arquivo padronizado (slug + data + Resumo), "Gerar" agora encerra a lista (histórico
+> por obra), picker "📝 Listas de Compras" no Cockpit da Obra (buscar por nome, reabrir pra
+> editar)**); mesmo dia: Consultoria de
 > Recompra implementada (painel "Você já comprou isso" + "Repetir esta compra", sem limiar de
 > tempo/preço); `LAURA_ENV=prod` reativado — Laura em produção real; histórico do dia anterior: PDF em
 > 2 variantes, enriquecimento de descrição genérica (histórico > SINAPI > original), bug de

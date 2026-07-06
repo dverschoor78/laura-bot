@@ -60,7 +60,14 @@ Telegram ──────► bot.py ──────► Claude API (haiku-4-
   (corrigido 2026-07-03); helpers de UPDATE dinâmico (`atualizar()`, `atualizar_obra()`) validam
   nome de coluna contra allowlist antes de montar o SQL
 - **`nfe/`** — parsing e exibição de NF-e (`nfe/nfe.py`); matching (`buscar_candidatos_nfe`) e
-  vinculação (`vincular_nfe`) continuam em `financeiro/lancamento.py`
+  vinculação (`vincular_nfe`) continuam em `financeiro/lancamento.py`. **Bug real corrigido
+  (2026-07-06)**: nem "Nenhum destes" nem zero candidatos descartavam o documento (ao contrário
+  do fluxo equivalente de comprovante PIX, que já descartava) — a NF-e ficava presa em
+  `documentos` pra sempre, bloqueando reenvio do mesmo arquivo (hash já "recebido"). Corrigido:
+  `teclado_candidatos_nfe()` embute `doc_id` no callback `nfe_cancelar:{doc_id}`,
+  `_cb_nfe_cancelar()` chama `_descartar_documento(doc_id)`, e `_cb_sel_tipo_inicial()` (ramo
+  `nota_fiscal`) descarta automaticamente quando `buscar_candidatos_nfe()` não acha nenhum
+  candidato — mesmo padrão já usado por `comprovante_pix`.
 - **`financeiro/consultas.py`** (2026-07-03) — 4 funções de leitura consolidada, sempre recebendo
   `db_path` explícito (ADR-002): `obter_pedido_completo()`, `obter_consolidado_obra()`,
   `listar_pedidos_pendentes()`, `procurar_item()`. Usadas por `scripts/consultar.py` (CLI) e por

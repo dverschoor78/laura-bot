@@ -1,12 +1,13 @@
 # Estado do Projeto Laura
 
-> Atualizado em: 2026-07-06 (encerramento — nome de arquivo da Lista de Compras padronizado
-> (slug + data + Resumo) e histórico de Listas de Compras por obra implementados; bot
-> reiniciado em produção com as mudanças)
+> Atualizado em: 2026-07-06 (encerramento — nome de arquivo da Lista de Compras padronizado,
+> histórico de Listas de Compras por obra, e bug real de NF-e presa corrigido; bot reiniciado
+> em produção com as mudanças)
 > Sessão: **Nome de arquivo da Lista de Compras (`GGV03-list-AAAA-MM-DD-resumo-orç/ref.pdf`) +
 > campo Resumo editável; "Gerar Lista de Compras" agora encerra a lista (vira registro
 > histórico) em vez de reaproveitar pra sempre; picker "📝 Listas de Compras" no Cockpit da
-> Obra (buscar por nome/Resumo, reabrir pra editar)**
+> Obra (buscar por nome/Resumo, reabrir pra editar); NF-e sem candidato ou "Nenhum destes"
+> agora descarta o documento — antes ficava presa pra sempre, bloqueando reenvio**
 
 Continuação da mesma sessão de ontem (Consultoria de Recompra): Dennis pediu para melhorar o
 nome dos PDFs da Lista de Compras — hoje saíam como "Lista de Compras - GGV03 - 2026-07-06 -
@@ -222,6 +223,45 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 ---
 
 ## Última Fiada Implementada
+
+**NF-e — Bug real corrigido: documento preso pra sempre quando não vincula** *(2026-07-06,
+mesmo dia, achado ao vivo testando o bot recém-reiniciado)*
+
+Dennis enviou uma NF-e real ("Verschoor 15.pdf"), ela não vinculou a nenhum pedido, e reenviar
+o mesmo arquivo travou em "Este arquivo já foi recebido." — pediu ideia antes de qualquer
+código (`me informe antes de executar qq código`).
+
+**Causa raiz**: comparando com o fluxo equivalente de comprovante PIX (que já descarta o
+documento automaticamente quando não acha candidato), o fluxo de NF-e não fazia isso em nenhum
+dos dois casos — zero candidatos ou usuário tocando "Nenhum destes". Pior: o botão "Nenhum
+destes" nem carregava o `doc_id` no callback (`nfe_cancelar`, sem parâmetro), então fisicamente
+não tinha como descartar nada. Resultado: todo documento de NF-e que não vincula fica pra
+sempre em `documentos`, com o hash bloqueando reenvio do mesmo arquivo.
+
+**Diagnóstico confirmado no banco** (leitura, antes de qualquer mudança): doc_id 40
+("Verschoor 15.pdf"), tipo `nota_fiscal`, obra GGV03, `status=recebido`, `pfm_numero=NULL`, sem
+nenhum `lancamentos.doc_id_nfe` apontando pra ele — confirmado órfão e seguro de descartar.
+
+**Corrigido** (aprovado por Dennis: "ja resolve tudo"):
+- `nfe/nfe.py::teclado_candidatos_nfe()` — botão "Nenhum destes" agora carrega o `doc_id`
+  (`nfe_cancelar:{doc_id}`)
+- `bot.py::_cb_nfe_cancelar()` — chama `_descartar_documento(doc_id)` e avisa "Arquivo
+  descartado — pode reenviar depois de corrigir o pedido." (mesma mensagem do fluxo PIX)
+- `bot.py::_cb_sel_tipo_inicial()` (ramo `nota_fiscal`) — descarta automaticamente quando
+  `buscar_candidatos_nfe()` não acha nenhum candidato, mesmo padrão já usado por
+  `comprovante_pix`
+- doc_id 40 descartado manualmente (arquivo e registro removidos) pra destravar o reenvio
+
+**Fora de escopo, por decisão já registrada antes**: os três pontos de entrada de confirmação
+de documento (`_cb_sel_tipo_inicial`, `_cb_set_tipo`, `_cb_ok`) continuam divergentes —
+`_cb_ok()` nem tem ramo `nota_fiscal` (cai no `else` genérico, "Confirmado: Nota Fiscal", sem
+oferecer matching). Esse problema maior já está registrado como dívida técnica/"Motor de
+Interpretação e Classificação de Documentos" em `docs/ROADMAP.md`; não expandido aqui.
+
+**Testado**: `py_compile` limpo; confirmado no banco real que doc_id 40 foi removido (registro
+e arquivo físico); bot reiniciado em produção (PID 79768) com a correção.
+
+---
 
 **Módulo de Compras — Nome de arquivo padronizado + campo Resumo + histórico de Listas de
 Compras** *(2026-07-06, mesmo dia da Consultoria de Recompra)*

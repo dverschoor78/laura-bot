@@ -44,14 +44,44 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > Produto antes da Correspondência SINAPI" (atributos técnicos completos antes de casar com
 > SINAPI — deliberadamente não persistido ainda, ver Visão de Longo Prazo em `docs/ROADMAP.md`).
 
-> Concluído desde a última revisão: nome de arquivo padronizado + campo Resumo + histórico de
-> Listas de Compras por obra (picker "📝 Listas de Compras", buscar por nome, reabrir lista
-> antiga pra editar, 2026-07-06); Consultoria de Recompra (painel "🔁 Você já comprou isso" +
+> Concluído desde a última revisão: bug real de NF-e presa corrigido (documento sem candidato
+> ou "Nenhum destes" agora descarta, 2026-07-06); nome de arquivo padronizado + campo Resumo +
+> histórico de Listas de Compras por obra (picker "📝 Listas de Compras", buscar por nome,
+> reabrir lista antiga pra editar, 2026-07-06); Consultoria de Recompra (painel "🔁 Você já comprou isso" +
 > botão "🔁 Repetir esta compra", sem limiar de tempo/preço, 2026-07-06) e `LAURA_ENV=prod`
 > reativado; PDF da Lista de Compras (2 variantes) + enriquecimento de descrição genérica +
 > correção de bug de duplicação (2026-07-05) e Camada 4b (correção campo a campo + Tela do
 > Item unificada + cabeçalho editável + convergência do endereço de entrega com o Pedido de
 > Compra, 2026-07-05, validado ao vivo no Telegram) — ver entradas abaixo.
+
+---
+
+## [NF-e presa corrigida] — 2026-07-06
+
+### Motivação
+
+Dennis enviou uma NF-e real que não vinculou a nenhum pedido; reenviar o mesmo arquivo travou
+em "Este arquivo já foi recebido." Investigação (só leitura, antes de qualquer código, a
+pedido explícito do Dennis) confirmou o documento órfão no banco (doc_id 40, tipo
+`nota_fiscal`, `status=recebido`, sem nenhum lançamento vinculado) e a causa raiz no código.
+
+### Corrigido
+
+- **NF-e sem candidato ou "Nenhum destes" agora descarta o documento** — antes, nenhum dos dois
+  casos limpava o registro (ao contrário do fluxo equivalente de comprovante PIX, que já
+  descartava); o botão "Nenhum destes" nem carregava o `doc_id` no callback, então não tinha
+  como descartar nada. `teclado_candidatos_nfe()` (`nfe/nfe.py`) passou a embutir o `doc_id`
+  (`nfe_cancelar:{doc_id}`); `_cb_nfe_cancelar()` chama `_descartar_documento(doc_id)`;
+  `_cb_sel_tipo_inicial()` (ramo `nota_fiscal`) descarta automaticamente quando
+  `buscar_candidatos_nfe()` não acha nenhum candidato — mesmo padrão já usado por
+  `comprovante_pix`.
+- doc_id 40 (o documento real preso) descartado manualmente pra destravar o reenvio.
+
+### Fora de escopo
+
+Os três pontos de entrada de confirmação de documento (`_cb_sel_tipo_inicial`, `_cb_set_tipo`,
+`_cb_ok`) continuam divergentes — `_cb_ok()` nem tem ramo `nota_fiscal`. Já registrado como
+dívida técnica em `docs/ROADMAP.md`, não expandido nesta correção.
 
 ---
 
