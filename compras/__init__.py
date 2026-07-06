@@ -15,6 +15,8 @@ from .lista import (
     buscar_lista_aberta,
     buscar_lista,
     atualizar_lista,
+    encerrar_lista,
+    listar_listas_obra,
     sugerir_itens,
     adicionar_item,
     remover_item,

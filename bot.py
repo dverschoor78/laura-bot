@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import unicodedata
 import shutil
 import hashlib
 import sqlite3
@@ -22,7 +23,8 @@ from financeiro.lancamento import (init_db_financeiro, sugerir_categoria, Catego
 from financeiro.consultas import procurar_item
 from nfe import parse_nfe, mostrar_nfe, teclado_candidatos_nfe
 from compras import (init_db_compras, criar_ou_buscar_lista_aberta, buscar_lista,
-                      atualizar_lista, sugerir_itens, adicionar_item, remover_item, listar_itens,
+                      atualizar_lista, encerrar_lista, listar_listas_obra,
+                      sugerir_itens, adicionar_item, remover_item, listar_itens,
                       GrauConfianca, OrigemReferencia)
 
 load_dotenv()
@@ -301,6 +303,13 @@ def _nome_arquivo_seguro(s: str, max_len: int = 60) -> str:
     s = re.sub(r'[<>:"/\\|?*]', "", s).strip()
     s = re.sub(r"\s+", " ", s)
     return s[:max_len].strip()
+
+def _slug_arquivo(s: str, max_len: int = 40) -> str:
+    """Slug em minúsculo, sem acento, palavras separadas por hífen — usado no nome dos PDFs
+    da Lista de Compras (ex: "Materiais Elétricos" -> "materiais-eletricos")."""
+    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode("ascii")
+    s = re.sub(r"[^a-zA-Z0-9]+", "-", s).strip("-").lower()
+    return s[:max_len].strip("-")
 
 def _nome_base_pfm(pfm_codigo: str, fornecedor: str, resumo: str, prefixo: str = "") -> str:
     """Monta o nome de arquivo do PFM: 'GGV03-008 - Fornecedor - Resumo'."""
@@ -1992,7 +2001,8 @@ def mostrar_ajuda():
         "<b>Registrar entrega</b>\n"
         "Envie a foto ou arquivo, ou use /entrega. Também disponível no botão 📦 Entregue dentro do pedido.\n\n"
         "<b>Montar lista de compras</b>\n"
-        "Use /lista e envie a lista — texto, foto ou PDF. Laura interpreta os itens pra você.\n\n"
+        "Use /lista e envie a lista — texto, foto ou PDF. Laura interpreta os itens pra você. "
+        "Para voltar numa lista já gerada, digite o código da obra e toque em 📝 Listas de Compras.\n\n"
         "<b>Consultas diretas</b>\n"
         "Digite o código da obra (GGV03) ou do pedido (GGV03-009)."
     )
@@ -2045,6 +2055,7 @@ def teclado_obra(codigo, pedidos=None):
     botoes = []
     if pedidos:
         botoes.append([InlineKeyboardButton("📋 Pedidos",   callback_data=f"obra_pedidos:{codigo}")])
+    botoes.append([InlineKeyboardButton("📝 Listas de Compras", callback_data=f"obra_listas:{codigo}")])
     botoes.append([InlineKeyboardButton("✏️ Editar obra",   callback_data=f"obra_editar:{codigo}")])
     botoes.append([InlineKeyboardButton("◀️ Obras",         callback_data="menu_obras")])
     botoes.append([InlineKeyboardButton("✖ Fechar",         callback_data=f"obra_fechar:{codigo}")])
@@ -2074,6 +2085,35 @@ def teclado_lista_pedidos(codigo, pedidos):
             row = []
     if row:
         botoes.append(row)
+    botoes.append([InlineKeyboardButton("◀️ Voltar à obra", callback_data=f"obra_ver:{codigo}")])
+    return InlineKeyboardMarkup(botoes)
+
+def mostrar_lista_listas_compra(codigo, listas, filtro=None):
+    """Picker "voltar numa lista pra editar" (Dennis, 2026-07-06) — cada "Gerar Lista de
+    Compras" fecha a lista atual (encerrar_lista), então esta tela mostra o histórico da
+    obra, mais recente primeiro, filtrável pelo Resumo."""
+    if not listas:
+        if filtro:
+            return f"Nenhuma lista de {codigo} com \"{filtro}\" no resumo."
+        return f"Nenhuma Lista de Compras gerada em {codigo} ainda."
+    titulo = f"Qual lista? · {codigo}"
+    if filtro:
+        titulo += f" · filtro: \"{filtro}\""
+    linhas = [titulo, ""]
+    for lst in listas:
+        data = lst["criado_em"][:10]
+        resumo = lst["resumo"] or "sem resumo"
+        n = lst["n_itens"]
+        linhas.append(f"📅 {data} · {resumo} · {n} ite{'m' if n == 1 else 'ns'}")
+    return "\n".join(linhas)
+
+def teclado_lista_listas_compra(codigo, listas):
+    botoes = []
+    for lst in listas:
+        data = lst["criado_em"][:10]
+        resumo_curto = (lst["resumo"] or "sem resumo")[:24]
+        botoes.append([InlineKeyboardButton(f"📅 {data} · {resumo_curto}", callback_data=f"lc_abrir:{lst['id']}")])
+    botoes.append([InlineKeyboardButton("🔍 Buscar por nome", callback_data=f"lc_buscar:{codigo}")])
     botoes.append([InlineKeyboardButton("◀️ Voltar à obra", callback_data=f"obra_ver:{codigo}")])
     return InlineKeyboardMarkup(botoes)
 
@@ -3539,7 +3579,7 @@ def _calcular_referencia_total(itens):
             parcial = True
     return total, parcial
 
-def _texto_lista_conferencia(itens, ggv, endereco_override=None, observacoes=None):
+def _texto_lista_conferencia(itens, ggv, endereco_override=None, observacoes=None, resumo=None):
     """Nível 1 (Tela de Conferência) — a tela principal depois de interpretar. Objetivo não é
     explicar como a Laura chegou na resposta, é permitir conferir rápido (Dennis, 2026-07-04):
     "o que vou comprar, quanto, uma ideia de preço, o que precisa da minha atenção". Detalhe
@@ -3556,6 +3596,7 @@ def _texto_lista_conferencia(itens, ggv, endereco_override=None, observacoes=Non
     else:
         linhas.append("⚠️ Obra ainda não definida")
     linhas.append(f"🗒 Observações: {observacoes}" if observacoes else "🗒 Observações: —")
+    linhas.append(f"🏷 Resumo: {resumo}" if resumo else "🏷 Resumo: —")
     linhas.append("")
 
     if not itens:
@@ -3625,6 +3666,7 @@ def _teclado_lista_conferencia(ggv):
         [InlineKeyboardButton("🏗 Obra",                  callback_data="lc_defobra"),
          InlineKeyboardButton("📍 Endereço",               callback_data="lc_campolista:endereco"),
          InlineKeyboardButton("🗒 Observações",            callback_data="lc_campolista:observacoes")],
+        [InlineKeyboardButton("🏷 Resumo",                 callback_data="lc_campolista:resumo")],
         [InlineKeyboardButton("✏️ Editar item",           callback_data=f"lc_editar:{token}"),
          InlineKeyboardButton("🔍 Análise técnica",        callback_data=f"lc_tecnico:{token}")],
         [InlineKeyboardButton("✅ Gerar Lista de Compras", callback_data=f"lc_gerar:{token}")],
@@ -3636,7 +3678,8 @@ def _renderizar_lista_conferencia(itens, ggv, ctx):
     (endereço/observações), evitando repetir ctx.user_data.get(...) nos ~8 pontos que
     reemitem a Tela de Conferência."""
     texto = _texto_lista_conferencia(
-        itens, ggv, ctx.user_data.get("lista_endereco"), ctx.user_data.get("lista_observacoes")
+        itens, ggv, ctx.user_data.get("lista_endereco"), ctx.user_data.get("lista_observacoes"),
+        ctx.user_data.get("lista_resumo")
     )
     return texto, _teclado_lista_conferencia(ggv)
 
@@ -3976,6 +4019,7 @@ async def _cb_lc_setobra(query, ctx, partes):
 _CAMPOS_LISTA_GERAL = {
     "endereco":     ("Endereço de entrega", "Digite o novo endereço de entrega.", "lista_endereco"),
     "observacoes":  ("Observações gerais", "Digite as observações gerais da compra.", "lista_observacoes"),
+    "resumo":       ("Resumo da lista", "Digite um resumo curto (aparece no nome dos PDFs gerados, ex: \"Materiais elétricos\").", "lista_resumo"),
 }
 
 async def _cb_lc_campolista(query, ctx, partes):
@@ -4014,7 +4058,11 @@ async def _cb_lc_gerar(query, ctx, partes):
     if not itens_validos:
         await query.edit_message_text("Lista vazia — nada pra gravar.")
         return
-    lista_id, _criada = criar_ou_buscar_lista_aberta(DB_PATH, ggv)
+    # Reabrindo uma lista antiga pelo picker (lc_abrir), regrava a mesma lista_id em vez de
+    # criar uma nova — só uma sessão nova (sem lista_id_edicao) cria um registro histórico.
+    lista_id = ctx.user_data.get("lista_id_edicao")
+    if not lista_id:
+        lista_id, _criada = criar_ou_buscar_lista_aberta(DB_PATH, ggv)
     # Só grava endereço/observações se foram tocados nesta sessão — reabrir uma lista já
     # existente sem reeditar esses campos não pode apagar um valor já salvo antes.
     campos_lista = {}
@@ -4022,6 +4070,8 @@ async def _cb_lc_gerar(query, ctx, partes):
         campos_lista["endereco_entrega"] = ctx.user_data["lista_endereco"]
     if ctx.user_data.get("lista_observacoes"):
         campos_lista["observacoes"] = ctx.user_data["lista_observacoes"]
+    if ctx.user_data.get("lista_resumo"):
+        campos_lista["resumo"] = ctx.user_data["lista_resumo"]
     if campos_lista:
         atualizar_lista(DB_PATH, lista_id, **campos_lista)
     # Cada confirmação reflete a lista inteira vista agora, não um incremento — reabrir e
@@ -4053,18 +4103,22 @@ async def _cb_lc_gerar(query, ctx, partes):
             laura_origem_referencia=item.get("laura_origem_referencia"),
             laura_grau_confianca_referencia=item.get("laura_grau_confianca_referencia"),
         )
+    # Fecha a lista (Dennis, 2026-07-06) — cada geração vira um registro histórico próprio,
+    # localizável depois pelo picker "📝 Listas de Compras" (data ou Resumo).
+    encerrar_lista(DB_PATH, lista_id)
     n = len(itens_validos)
     await query.edit_message_text(f"✅ Lista de Compras da Obra {ggv} salva — {n} ite{'m' if n == 1 else 'ns'}. Gerando PDF...")
 
     data_str = datetime.now().strftime('%Y-%m-%d')
+    resumo_slug = _slug_arquivo(ctx.user_data.get("lista_resumo")) or "lista-compras"
     pasta = _pasta_orcamentos(ggv)
     for com_precos, sufixo, caption in (
-        (True,  "Referência",  f"Lista de Compras — Obra {ggv} (com referência de preço, uso interno)"),
-        (False, "Orçamento",   f"Lista de Compras — Obra {ggv} (para solicitar orçamento ao fornecedor)"),
+        (True,  "ref",  f"Lista de Compras — Obra {ggv} (com referência de preço, uso interno)"),
+        (False, "orç",  f"Lista de Compras — Obra {ggv} (para solicitar orçamento ao fornecedor)"),
     ):
         html      = _gerar_html_lista(lista_id, com_precos=com_precos)
         pdf_bytes = await _html_para_pdf(html)
-        nome_arquivo = f"Lista de Compras - {ggv} - {data_str} - {sufixo}.pdf"
+        nome_arquivo = f"{ggv}-list-{data_str}-{resumo_slug}-{sufixo}.pdf"
         (pasta / nome_arquivo).write_bytes(pdf_bytes)
         await ctx.bot.send_document(
             chat_id=query.message.chat_id,
@@ -4078,6 +4132,8 @@ async def _cb_lc_gerar(query, ctx, partes):
     ctx.user_data.pop("lista_ggv", None)
     ctx.user_data.pop("lista_endereco", None)
     ctx.user_data.pop("lista_observacoes", None)
+    ctx.user_data.pop("lista_resumo", None)
+    ctx.user_data.pop("lista_id_edicao", None)
 
 async def _cb_lc_fechar(query, ctx, partes):
     ctx.user_data["aguardando"] = None
@@ -4086,6 +4142,8 @@ async def _cb_lc_fechar(query, ctx, partes):
     ctx.user_data.pop("lista_ggv", None)
     ctx.user_data.pop("lista_endereco", None)
     ctx.user_data.pop("lista_observacoes", None)
+    ctx.user_data.pop("lista_resumo", None)
+    ctx.user_data.pop("lista_id_edicao", None)
     ctx.user_data.pop("lista_item_indice", None)
     ctx.user_data.pop("lista_item_rascunho", None)
     await query.edit_message_text("Fechado.")
@@ -4183,6 +4241,8 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.user_data["lista_ggv"] = ggv
         ctx.user_data["lista_endereco"] = None
         ctx.user_data["lista_observacoes"] = None
+        ctx.user_data["lista_resumo"] = None
+        ctx.user_data.pop("lista_id_edicao", None)
         texto, markup = _renderizar_lista_conferencia(itens, ggv, ctx)
         await update.message.reply_text(texto, parse_mode="HTML", reply_markup=markup)
         return
@@ -4489,6 +4549,8 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.user_data["lista_ggv"] = ggv
         ctx.user_data["lista_endereco"] = None
         ctx.user_data["lista_observacoes"] = None
+        ctx.user_data["lista_resumo"] = None
+        ctx.user_data.pop("lista_id_edicao", None)
         texto_tela, markup = _renderizar_lista_conferencia(itens, ggv, ctx)
         await update.message.reply_text(texto_tela, parse_mode="HTML", reply_markup=markup)
 
@@ -4568,6 +4630,16 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ggv = ctx.user_data.get("lista_ggv")
         texto_tela, markup = _renderizar_lista_conferencia(itens, ggv, ctx)
         await update.message.reply_text(texto_tela, parse_mode="HTML", reply_markup=markup)
+
+    elif aguardando and aguardando.startswith("lista_buscar_nome_"):
+        codigo = aguardando[len("lista_buscar_nome_"):]
+        ctx.user_data["aguardando"] = None
+        filtro = texto.strip()
+        listas = listar_listas_obra(DB_PATH, codigo, limite=10, busca_resumo=filtro)
+        await update.message.reply_text(
+            mostrar_lista_listas_compra(codigo, listas, filtro=filtro),
+            reply_markup=teclado_lista_listas_compra(codigo, listas)
+        )
 
 async def _cb_ok(query, ctx, partes):
     _, doc_id, tipo, ggv = partes
@@ -4665,6 +4737,8 @@ async def _cb_sel_tipo_inicial(query, ctx, partes):
         ctx.user_data["lista_ggv"] = None
         ctx.user_data["lista_endereco"] = None
         ctx.user_data["lista_observacoes"] = None
+        ctx.user_data["lista_resumo"] = None
+        ctx.user_data.pop("lista_id_edicao", None)
         texto_tela, markup = _renderizar_lista_conferencia(itens, None, ctx)
         await query.edit_message_text(texto_tela, parse_mode="HTML", reply_markup=markup)
         return
@@ -5457,6 +5531,44 @@ async def _cb_obra_pedidos(query, ctx, partes):
     )
 
 
+async def _cb_obra_listas(query, ctx, partes):
+    codigo = partes[1]
+    listas = listar_listas_obra(DB_PATH, codigo, limite=10)
+    await query.edit_message_text(
+        mostrar_lista_listas_compra(codigo, listas),
+        reply_markup=teclado_lista_listas_compra(codigo, listas)
+    )
+
+
+async def _cb_lc_buscar(query, ctx, partes):
+    codigo = partes[1]
+    ctx.user_data["aguardando"] = f"lista_buscar_nome_{codigo}"
+    await query.edit_message_text(
+        "Buscar lista pelo nome (Resumo)\n\nDigite parte do texto:",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← Voltar", callback_data=f"obra_listas:{codigo}")]])
+    )
+
+
+async def _cb_lc_abrir(query, ctx, partes):
+    """Reabre uma lista já encerrada pra continuar editando — mesma Tela de Conferência,
+    itens/endereço/observações/resumo carregados do banco (Dennis, 2026-07-06: poder voltar
+    numa lista antiga por data ou nome). "Gerar" depois regrava esta mesma lista_id."""
+    lista_id = int(partes[1])
+    lista = buscar_lista(DB_PATH, lista_id)
+    if not lista:
+        await query.answer("Lista não encontrada.", show_alert=True)
+        return
+    itens = listar_itens(DB_PATH, lista_id)
+    ctx.user_data["lista_itens"] = itens
+    ctx.user_data["lista_ggv"] = lista["ggv"]
+    ctx.user_data["lista_endereco"] = lista.get("endereco_entrega")
+    ctx.user_data["lista_observacoes"] = lista.get("observacoes")
+    ctx.user_data["lista_resumo"] = lista.get("resumo")
+    ctx.user_data["lista_id_edicao"] = lista_id
+    texto, markup = _renderizar_lista_conferencia(itens, lista["ggv"], ctx)
+    await query.edit_message_text(texto, parse_mode="HTML", reply_markup=markup)
+
+
 async def _cb_pedido_abrir(query, ctx, partes):
     pfm_codigo = partes[1]
     pedido = buscar_pedido(pfm_codigo)
@@ -5626,6 +5738,7 @@ _CB_DISPATCH = {
     "recibo_parcela_motivo": _cb_recibo_parcela_motivo,
     "recibo_assinado_iniciar": _cb_recibo_assinado_iniciar,
     "obra_pedidos": _cb_obra_pedidos,
+    "obra_listas": _cb_obra_listas,
     "pedido_abrir": _cb_pedido_abrir,
     "pedido_excluir_confirmar": _cb_pedido_excluir_confirmar,
     "pedido_excluir_ok": _cb_pedido_excluir_ok,
@@ -5654,6 +5767,8 @@ _CB_DISPATCH = {
     "lc_setobra": _cb_lc_setobra,
     "lc_gerar": _cb_lc_gerar,
     "lc_fechar": _cb_lc_fechar,
+    "lc_abrir": _cb_lc_abrir,
+    "lc_buscar": _cb_lc_buscar,
 }
 
 async def responder_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):

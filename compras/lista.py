@@ -73,12 +73,15 @@ _COLUNAS_ITEM = (
 
 # Atributos do cabeçalho da lista (não do item) — endereço herdado da obra, mas editável
 # por lista (nunca sobrescreve obras.endereco_entrega); observações gerais são novas,
-# opcionais, pensadas como instrução geral da compra (Dennis, 2026-07-05).
+# opcionais, pensadas como instrução geral da compra (Dennis, 2026-07-05). Resumo é um texto
+# curto digitado pelo Dennis (ex: "Materiais elétricos"), usado no nome dos PDFs gerados
+# (Dennis, 2026-07-06).
 _COLUNAS_LISTA = (
     "endereco_entrega TEXT",
     "observacoes TEXT",
+    "resumo TEXT",
 )
-_COLUNAS_LISTA_EDITAVEIS = {"endereco_entrega", "observacoes"}
+_COLUNAS_LISTA_EDITAVEIS = {"endereco_entrega", "observacoes", "resumo"}
 
 
 def init_db_compras(db_path):
@@ -159,6 +162,40 @@ def atualizar_lista(db_path, lista_id, **kwargs):
     set_clause = ", ".join(f"{k}=?" for k in campos)
     with sqlite3.connect(db_path) as con:
         con.execute(f"UPDATE listas_compra SET {set_clause} WHERE id=?", (*campos.values(), lista_id))
+
+
+def encerrar_lista(db_path, lista_id):
+    """Fecha a lista depois de "Gerar Lista de Compras" — cada geração vira um registro
+    histórico próprio (Dennis, 2026-07-06: poder voltar numa lista antiga por data ou nome),
+    em vez de uma única lista "aberta" reaproveitada pra sempre."""
+    with sqlite3.connect(db_path) as con:
+        con.execute(
+            "UPDATE listas_compra SET status=? WHERE id=?",
+            (StatusLista.ENCERRADA.value, lista_id)
+        )
+
+
+def listar_listas_obra(db_path, ggv, limite=10, busca_resumo=None):
+    """Listas de Compras já geradas da obra, mais recente primeiro — base do picker "voltar
+    numa lista pra editar" (Dennis, 2026-07-06). `busca_resumo` filtra pelo texto digitado
+    no campo Resumo; sem filtro, mostra só as `limite` mais recentes."""
+    query = """
+        SELECT l.id, l.criado_em, l.resumo,
+               (SELECT COUNT(*) FROM lista_compra_itens i
+                WHERE i.lista_id = l.id AND i.status != ?) AS n_itens
+        FROM listas_compra l
+        WHERE l.ggv = ?
+    """
+    params = [StatusItem.REMOVIDO.value, ggv]
+    if busca_resumo:
+        query += " AND l.resumo LIKE ?"
+        params.append(f"%{busca_resumo}%")
+    query += " ORDER BY l.criado_em DESC LIMIT ?"
+    params.append(limite)
+    with sqlite3.connect(db_path) as con:
+        con.row_factory = sqlite3.Row
+        rows = con.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
 
 
 def sugerir_itens(db_path, ggv, limite=8):
