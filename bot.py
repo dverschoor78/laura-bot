@@ -311,28 +311,72 @@ def _nome_base_pfm(pfm_codigo: str, fornecedor: str, resumo: str, prefixo: str =
             partes.append(seguro)
     return " - ".join(partes)
 
-def _data_para_arquivo(data_str: str) -> str:
-    """Converte data extraída (DD/MM/AAAA ou "DD de mês de AAAA") para AAAA-MM-DD. Usa hoje se não conseguir."""
-    if data_str and data_str != "A PREENCHER":
-        m = re.match(r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})", data_str)
-        if m:
-            d, mth, y = m.groups()
-            if len(y) == 2:
-                y = "20" + y
+def _parse_data_qualquer(data_str):
+    """Interpreta uma data em qualquer formato já visto na extração real — numérico
+    (DD/MM/AAAA), "DD de mês de AAAA", ou "DD/nome-do-mês/AAAA" (achado 2026-07-06 em
+    lancamentos.data_pagamento real: "25/junho/2026 às 12:41:40" — nenhum dos dois formatos
+    acima cobria esse caso). Hora/minuto no final (ex: " às HH:MM:SS") é ignorada. Retorna
+    `None` quando não reconhece — nunca adivinha (2026-07-06: usado pra "há quanto tempo",
+    onde chutar "hoje" seria pior que admitir que não sabe)."""
+    if not data_str or data_str == "A PREENCHER":
+        return None
+    s = data_str.strip()
+    m = re.match(r"(\d{4})-(\d{1,2})-(\d{1,2})", s)
+    if m:
+        y, mth, d = m.groups()
+        try:
+            return datetime(int(y), int(mth), int(d))
+        except ValueError:
+            return None
+    m = re.match(r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})", s)
+    if m:
+        d, mth, y = m.groups()
+        if len(y) == 2:
+            y = "20" + y
+        try:
+            return datetime(int(y), int(mth), int(d))
+        except ValueError:
+            pass
+    m = re.match(r"(\d{1,2})/(\D[^/]*)/(\d{4})", s, re.IGNORECASE)
+    if m:
+        d, mes_nome, y = m.groups()
+        if mes_nome.strip().lower() in MESES:
             try:
-                return f"{y}-{int(mth):02d}-{int(d):02d}"
+                return datetime(int(y), MESES.index(mes_nome.strip().lower()) + 1, int(d))
             except ValueError:
                 pass
-        m = re.search(r"(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})", data_str, re.IGNORECASE)
-        if m:
-            d, mes_nome, y = m.groups()
-            if mes_nome.lower() in MESES:
-                mth = MESES.index(mes_nome.lower()) + 1
-                try:
-                    return f"{y}-{mth:02d}-{int(d):02d}"
-                except ValueError:
-                    pass
-    return datetime.now().strftime("%Y-%m-%d")
+    m = re.search(r"(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})", s, re.IGNORECASE)
+    if m:
+        d, mes_nome, y = m.groups()
+        if mes_nome.lower() in MESES:
+            try:
+                return datetime(int(y), MESES.index(mes_nome.lower()) + 1, int(d))
+            except ValueError:
+                pass
+    return None
+
+def _data_para_arquivo(data_str: str) -> str:
+    """Converte data extraída pra AAAA-MM-DD. Usa hoje se não conseguir reconhecer."""
+    dt = _parse_data_qualquer(data_str)
+    return dt.strftime("%Y-%m-%d") if dt else datetime.now().strftime("%Y-%m-%d")
+
+def _tempo_decorrido(data_str):
+    """'há quanto tempo' de forma legível, a partir de qualquer formato de data já visto
+    (Consultoria de Recompra, 2026-07-06). `None` quando a data não é reconhecível — melhor
+    omitir do que mostrar um tempo errado."""
+    dt = _parse_data_qualquer(data_str)
+    if dt is None:
+        return None
+    dias = (datetime.now() - dt).days
+    if dias < 0:
+        return None
+    if dias < 30:
+        return "menos de 1 mês"
+    meses = dias // 30
+    if meses < 12:
+        return f"{meses} mês" if meses == 1 else f"{meses} meses"
+    anos = meses // 12
+    return f"{anos} ano" if anos == 1 else f"{anos} anos"
 
 def _arquivar_documento(pfm_codigo: str, sufixo: str, caminho_original, data_str, pasta_fn):
     """Copia um documento vinculado a um pedido para a pasta certa, nome padronizado. Falha silenciosa."""
@@ -3411,6 +3455,20 @@ def _texto_item_tecnico(item, indice):
     linhas.extend(_linhas_analise_item(item))
     return "\n".join(linhas)
 
+def _preco_sinapi_item(item):
+    """Preço de referência do SINAPI, já na unidade comercial quando possível — extraído à
+    parte de _melhor_referencia_preco (2026-07-06) porque a Consultoria de Recompra precisa
+    comparar o preço pago no histórico contra a referência SINAPI *atual*, mesmo quando
+    também existe referência própria (que nesse caso venceria em _melhor_referencia_preco)."""
+    if not item.get("sinapi_codigo"):
+        return None
+    if item.get("sinapi_preco_equivalente") is not None:
+        return item["sinapi_preco_equivalente"]
+    preco = item.get("sinapi_preco_referencia")
+    if preco is not None and _mesma_unidade(item.get("unidade"), item.get("sinapi_unidade_referencia")):
+        return preco
+    return None
+
 def _melhor_referencia_preco(item):
     """Prioridade de referência de preço (Dennis, 2026-07-04): 1) última compra própria
     (Camada 3, já filtrada por unidade igual), 2) referência própria consolidada da Laura
@@ -3421,13 +3479,7 @@ def _melhor_referencia_preco(item):
         return None
     if item.get("laura_preco_referencia") is not None:
         return item["laura_preco_referencia"]
-    if item.get("sinapi_codigo"):
-        if item.get("sinapi_preco_equivalente") is not None:
-            return item["sinapi_preco_equivalente"]
-        preco = item.get("sinapi_preco_referencia")
-        if preco is not None and _mesma_unidade(item.get("unidade"), item.get("sinapi_unidade_referencia")):
-            return preco
-    return None
+    return _preco_sinapi_item(item)
 
 def _avaliar_item(item):
     """Classifica o item pra tela de conferência (Dennis, 2026-07-04):
@@ -3630,6 +3682,38 @@ _CAMPOS_ITEM_LISTA = {
     "observacoes": ("Observações", "Digite a nova observação."),
 }
 
+def _linhas_recompra(item):
+    """Painel "Você já comprou isso" — Consultoria de Recompra (Dennis, 2026-07-06): mostra
+    o que foi comprado da última vez com destaque (fornecedor + descrição real, não só um
+    preço), e compara com a referência SINAPI atual como informação neutra — sem limiar de
+    tempo/variação pra decidir "não vale mais a pena" ainda ("sem limites por enquanto"); a
+    decisão continua sempre do usuário."""
+    desc_hist = item.get("laura_descricao_referencia") or item["descricao"]
+    fornecedor = item.get("laura_fornecedor_referencia") or "fornecedor não identificado"
+    und_hist = item.get("laura_unidade_referencia") or item.get("unidade") or "?"
+    preco_hist = item["laura_preco_referencia"]
+    grau = _GRAU_LABEL_LAURA.get(item.get("laura_grau_confianca_referencia"), "")
+    grau_fmt = f" ({grau})" if grau else ""
+    tempo = _tempo_decorrido(item.get("laura_data_referencia"))
+    tempo_fmt = f" · há {tempo}" if tempo else ""
+
+    linhas = [
+        "🔁 Você já comprou isso",
+        f"{desc_hist} — {fornecedor}",
+        f"R$ {_fmt_brl(preco_hist)}/{und_hist}{grau_fmt}{tempo_fmt}",
+    ]
+    preco_sinapi = _preco_sinapi_item(item)
+    if preco_sinapi is not None and preco_hist:
+        variacao = (preco_sinapi - preco_hist) / preco_hist * 100
+        sinal = "+" if variacao >= 0 else ""
+        linhas.append("")
+        linhas.append(
+            f"📈 Referência SINAPI atual: R$ {_fmt_brl(preco_sinapi)}/{und_hist} "
+            f"({sinal}{variacao:.0f}% desde a última compra)"
+        )
+    linhas.append("")
+    return linhas
+
 def _texto_tela_item(indice, item, pendente):
     """Tela do Item (Nível 2) — view e menu de correção juntos numa tela só (Dennis,
     2026-07-05: "uma tela = uma decisão"; reduzir a ficha técnica a um menu de alteração).
@@ -3652,7 +3736,10 @@ def _texto_tela_item(indice, item, pendente):
         partes.append(fabricante)
     linhas.append(" • ".join(partes))
     linhas.append("")
-    if not pendente and item.get("descricao_sugerida"):
+    tem_recompra = not pendente and item.get("laura_preco_referencia") is not None
+    if tem_recompra:
+        linhas.extend(_linhas_recompra(item))
+    elif not pendente and item.get("descricao_sugerida"):
         linhas.append(
             f"💡 Descrição genérica. Sugestão: {item['descricao_sugerida']} "
             f"({item['descricao_sugerida_origem']})"
@@ -3661,7 +3748,7 @@ def _texto_tela_item(indice, item, pendente):
     if pendente:
         linhas.append("⚠️ Alterações pendentes")
         linhas.append("A referência será recalculada ao concluir a edição.")
-    else:
+    elif not tem_recompra:
         preco, label = _referencia_e_correspondencia(item)
         linhas.append("Referência Laura")
         linhas.append(f"~R$ {_fmt_brl(preco)}/{und}" if preco is not None and und else "ainda não conhecida")
@@ -3697,8 +3784,11 @@ def _teclado_item_tela(indice, item, pendente):
          InlineKeyboardButton("🗒 Observações",        callback_data=f"lc_campo:{indice}:observacoes")],
         [InlineKeyboardButton("🔍 Ver análise técnica", callback_data=f"lc_tecnicoitem:{indice}")],
     ]
-    if not pendente and item.get("descricao_sugerida"):
-        botoes.append([InlineKeyboardButton("✅ Usar sugestão", callback_data=f"lc_usarsugestao:{indice}")])
+    if not pendente:
+        if item.get("laura_preco_referencia") is not None:
+            botoes.append([InlineKeyboardButton("🔁 Repetir esta compra", callback_data=f"lc_repetircompra:{indice}")])
+        elif item.get("descricao_sugerida"):
+            botoes.append([InlineKeyboardButton("✅ Usar sugestão", callback_data=f"lc_usarsugestao:{indice}")])
     if pendente:
         botoes.append([InlineKeyboardButton("💾 Concluir edição", callback_data=f"lc_concluir:{indice}")])
     else:
@@ -3769,29 +3859,45 @@ async def _cb_lc_campo(query, ctx, partes):
         reply_markup=_teclado_voltar_item(indice)
     )
 
-async def _cb_lc_usarsugestao(query, ctx, partes):
-    """Aceita a descrição sugerida (histórico próprio ou SINAPI) — Dennis, 2026-07-05: "a
-    Laura deve me ajudar a melhorar a qualidade técnica da Lista de Compras". Aplica no
-    rascunho, igual a corrigir o campo Produto manualmente — "Concluir edição" recalcula
-    SINAPI/referência com a descrição nova, sem chamada de IA extra aqui."""
-    indice = int(partes[1])
-    itens = ctx.user_data.get("lista_itens") or []
+async def _aplicar_descricao_no_rascunho(query, ctx, indice, itens, nova_descricao, msg_vazio):
+    """Aplica uma descrição candidata (sugestão de enriquecimento ou repetição de compra) no
+    rascunho do item — mesmo mecanismo de corrigir o campo Produto manualmente. 'Concluir
+    edição' recalcula SINAPI/referência com a descrição nova, sem chamada de IA extra aqui.
+    Compartilhado entre "Usar sugestão" e "Repetir esta compra" (2026-07-06) — mesma ação,
+    só a origem da descrição muda."""
     if not (1 <= indice <= len(itens)) or not isinstance(itens[indice - 1], dict):
         await query.edit_message_text("Item não encontrado.")
         return
     item = itens[indice - 1]
-    sugestao = item.get("descricao_sugerida")
-    if not sugestao:
-        await query.edit_message_text("Sugestão não encontrada.", reply_markup=_teclado_voltar_item(indice))
+    if not nova_descricao:
+        await query.edit_message_text(msg_vazio, reply_markup=_teclado_voltar_item(indice))
         return
     rascunho = dict(item)
-    rascunho["descricao"] = sugestao
+    rascunho["descricao"] = nova_descricao
     ctx.user_data["lista_item_rascunho"] = rascunho
     ctx.user_data["lista_item_indice"] = indice
     await query.edit_message_text(
         _texto_tela_item(indice, rascunho, True), parse_mode="HTML",
         reply_markup=_teclado_item_tela(indice, rascunho, True)
     )
+
+async def _cb_lc_usarsugestao(query, ctx, partes):
+    """Aceita a descrição sugerida (histórico próprio ou SINAPI) — Dennis, 2026-07-05: "a
+    Laura deve me ajudar a melhorar a qualidade técnica da Lista de Compras"."""
+    indice = int(partes[1])
+    itens = ctx.user_data.get("lista_itens") or []
+    sugestao = itens[indice - 1].get("descricao_sugerida") if 1 <= indice <= len(itens) and isinstance(itens[indice - 1], dict) else None
+    await _aplicar_descricao_no_rascunho(query, ctx, indice, itens, sugestao, "Sugestão não encontrada.")
+
+async def _cb_lc_repetircompra(query, ctx, partes):
+    """"Repetir esta compra" — Consultoria de Recompra (Dennis, 2026-07-06): aplica a
+    descrição do item histórico encontrado (Camada 3) no rascunho. Preço/fornecedor não são
+    copiados — são só informação; "Concluir edição" recalcula a referência certa pra
+    descrição nova."""
+    indice = int(partes[1])
+    itens = ctx.user_data.get("lista_itens") or []
+    descricao_historica = itens[indice - 1].get("laura_descricao_referencia") if 1 <= indice <= len(itens) and isinstance(itens[indice - 1], dict) else None
+    await _aplicar_descricao_no_rascunho(query, ctx, indice, itens, descricao_historica, "Compra anterior não encontrada.")
 
 async def _cb_lc_concluir(query, ctx, partes):
     indice = int(partes[1])
@@ -5538,6 +5644,7 @@ _CB_DISPATCH = {
     "lc_campo": _cb_lc_campo,
     "lc_campolista": _cb_lc_campolista,
     "lc_usarsugestao": _cb_lc_usarsugestao,
+    "lc_repetircompra": _cb_lc_repetircompra,
     "lc_concluir": _cb_lc_concluir,
     "lc_tecnicoitem": _cb_lc_tecnicoitem,
     "lc_reinterpretar": _cb_lc_reinterpretar,
