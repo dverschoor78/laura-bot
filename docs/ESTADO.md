@@ -1,50 +1,50 @@
 # Estado do Projeto Laura
 
-> Atualizado em: 2026-07-05 (encerramento — PDF da Lista de Compras, enriquecimento de
-> descrição genérica, correção de bug de duplicação; mudança de prioridade pro Próximo Fiada:
-> consultoria de recompra, não glossário de sinônimos SINAPI)
-> Sessão: **Continuação direta da Camada 4b — PDF em 2 variantes, Camada de enriquecimento de
-> descrição (histórico > SINAPI > original), bug real de duplicação corrigido; investigação ao
-> vivo (Cal/Brita/Tijolo) redirecionou a prioridade da próxima fiada**
+> Atualizado em: 2026-07-06 (encerramento — Consultoria de Recompra implementada e validada;
+> **`LAURA_ENV=prod` ativado de novo — Laura em produção real a partir de agora**)
+> Sessão: **Consultoria de Recompra (painel "Você já comprou isso" + botão "Repetir esta
+> compra") na Tela do Item, sem limiar de tempo/preço; parser de data unificado; produção
+> ativada**
 
-Sessão de continuação: retomar o pipeline da Lista de Compras (Camadas 1-3 + gravação real,
-concluídas ontem) e implementar a Camada 4b — correção campo a campo, item #1 do "Objetivo da
-Próxima Sessão" de ontem. Redesenhada em várias rodadas de feedback do Dennis, sempre com
-mockup em texto validado antes do código:
+Continuação direta de ontem: item #1 do "Objetivo da Próxima Sessão" era desenhar a
+Consultoria de Recompra (mockup em texto validado com o Dennis antes do código, como sempre).
+Implementada, testada e o Dennis já ativou a produção pra usar de verdade.
 
-1. **Correção campo a campo com recálculo único**: a Tela do Item (Nível 2) deixou de ser
-   ficha técnica e virou visualização + menu de correção numa tela só — cada campo (Produto,
-   Fabricante, Código, Quantidade, Unidade, Observações) é uma ação direta; corrigir vários
-   campos em sequência não dispara IA a cada um, só ao clicar "💾 Concluir edição" (rascunho
-   comparado ao item real pra nunca mostrar "pendente" à toa).
-2. **"Reinterpretar item" saiu da tela principal** — "se o usuário fica em dúvida entre dois
-   botões, um deles não deveria estar ali"; continua existindo só pra itens em fallback
-   (string, não interpretado), onde é o único caminho possível.
-3. **Análise técnica por item**, extraída da análise de lista inteira sem duplicar a lógica
-   de formatação SINAPI/referência.
-4. **Cabeçalho da Lista de Compras ganhou 3 campos editáveis**: Obra (botão sempre visível,
-   não só quando falta), Endereço de entrega (herdado da obra, editável só para a lista) e
-   Observações gerais (campo novo, opcional) — duas colunas novas em `listas_compra`.
-5. **Convergência do endereço de entrega com o Pedido de Compra**: a primeira versão da
-   edição de endereço da Lista era um prompt de texto livre simples, diferente do picker já
-   maduro do Pedido (Obra/Casa/Escritório/Chácara/Outro). Dennis apontou a duplicação
-   ("Entradas diferentes podem existir. Processos diferentes não.") e, depois de uma primeira
-   correção incompleta (só funções puras compartilhadas, teclado e callback ainda
-   duplicados), a unificação ficou completa: um único `teclado_escolha_endereco()` + um
-   único `_cb_endsel()`, usados pelos dois domínios.
-6. **Todo prompt de texto livre ganhou "← Voltar"** — pedido do Dennis aplicado à Lista de
-   Compras inteira ("sempre que tem a opção de editar em cx de texto deve ter opção de
-   voltar").
-7. **Novo princípio permanente na `docs/CONSTITUICAO.md`**: "Convergência antes de
-   paralelismo" — formaliza a lição do item 5, com o teste prático "se eu adicionar uma
-   opção nova amanhã, em quantos lugares preciso mexer?".
+**Consultoria de Recompra** (`_linhas_recompra`, `_preco_sinapi_item`, `_cb_lc_repetircompra`)
+— quando a Camada 3 acha uma compra anterior (`laura_preco_referencia` não nulo), a Tela do
+Item mostra um painel com destaque, não mais só um preço solto:
+- O que foi comprado da última vez (descrição real do item histórico) e o fornecedor
+- Tempo decorrido ("há 3 meses") — sem limiar fixo, sem alerta automático
+- Comparação com a referência SINAPI atual (quando disponível), como informação neutra
+  ("+18% desde a última compra") — decisão de repetir ou trocar continua sempre humana,
+  conforme Dennis pediu: "sem limites de tempo e variação por enquanto"
+- Botão "🔁 Repetir esta compra" aplica a descrição histórica no rascunho — mesmo mecanismo
+  de "Concluir edição" já existente, recalcula a referência certa pra descrição nova
+- Quando não há histórico, mantém o comportamento de ontem (sugestão via SINAPI se a
+  descrição for genérica)
+- Tudo na mesma tela, por pedido explícito do Dennis — comparar fornecedores diferentes e
+  filtros ficam pra depois
 
-**Validado ao vivo no Telegram** — item #1 do "Objetivo da Próxima Sessão" de ontem: pipeline
-completo testado de ponta a ponta (Camadas 1-3 → Tela do Item → correção campo a campo →
-Concluir edição → cabeçalho → Gerar Lista de Compras), confirmado pelo Dennis com a mensagem
-real do bot: "Lista de Compras da Obra GGV03 salva — 8 itens". Ver detalhes completos na
-Última Fiada Implementada — histórico das sessões anteriores preservado nas entradas abaixo,
-sem repetir aqui.
+**Achado no caminho**: uma data real do banco ("25/junho/2026 às 12:41:40") não era
+reconhecida por nenhum parser existente (`_fmt_data_flexivel`, `_data_para_arquivo`).
+Escrito `_parse_data_qualquer()` como parser único (cobre numérico, "DD/mês-nome/AAAA",
+"DD de mês de AAAA", ISO — retorna `None` em vez de adivinhar quando não reconhece);
+`_data_para_arquivo()` refatorado pra usá-lo, sem mudar comportamento.
+
+**Testado**: 8 cenários cobrindo parser de data (inclusive o formato quebrado real),
+`_tempo_decorrido`, painel completo com e sem comparação SINAPI, fluxo "Repetir esta
+compra" → "Concluir edição" com recálculo real, e o fallback pro comportamento de ontem
+quando não há histórico.
+
+**`LAURA_ENV=prod` ativado** — Dennis: "pode colocar no modelo de produção". Verificado
+antes de trocar: banco real com 11 lançamentos e as 4 obras GGV, `listas_compra` ainda
+vazia (nada em risco). Schema de `lista_compra_itens`/`listas_compra` desatualizado desde
+antes de ontem (faltavam `fabricante`, `codigo`, `sinapi_confianca`,
+`sinapi_preco_equivalente`, `endereco_entrega`, `observacoes`) — `init_db()` aplicou tudo
+via ALTER seguro, sem tocar em dado existente.
+
+**Não concluído**: validar a Consultoria de Recompra ao vivo em produção (só testada com
+objetos simulados e dados reais fora do Telegram nesta sessão).
 
 ---
 
@@ -140,6 +140,9 @@ sem repetir aqui.
 
 ## Versão Atual
 
+**v0.13.0** — Lista de Compras: Consultoria de Recompra (painel "Você já comprou isso" +
+"Repetir esta compra") na Tela do Item; `LAURA_ENV=prod` reativado — Laura em produção real
+
 **v0.12.0** — Lista de Compras: PDF em 2 variantes (referência interna / orçamento pra
 fornecedor), enriquecimento de descrição genérica (histórico > SINAPI > original), bug de
 duplicação ao confirmar corrigido
@@ -206,6 +209,45 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 ---
 
 ## Última Fiada Implementada
+
+**Módulo de Compras — Consultoria de Recompra** *(2026-07-06)*
+
+Item #1 do "Objetivo da Próxima Sessão" de ontem — mockup em texto validado com o Dennis
+antes do código, como sempre: painel "Você já comprou isso" (fabricante/descrição real +
+fornecedor + tempo decorrido, não só um preço solto) e comparação com a referência SINAPI
+atual, sem limiar de tempo/variação pra decidir "não vale a pena" (Dennis: "sem limites por
+enquanto" — a decisão continua humana). Botão "🔁 Repetir esta compra" aplica a descrição
+histórica no rascunho, mesmo mecanismo de "Concluir edição" já existente.
+
+Implementado: `_linhas_recompra()` (painel), `_preco_sinapi_item()` (extraído de
+`_melhor_referencia_preco` — a Consultoria precisa do preço SINAPI mesmo quando também há
+referência própria, que venceria naquela função), `_cb_lc_repetircompra()` (compartilha
+`_aplicar_descricao_no_rascunho()` com `_cb_lc_usarsugestao()` de ontem — mesma ação,
+origem da descrição diferente). Painel tem prioridade sobre a sugestão de descrição de
+ontem quando há histórico (evita mostrar as duas ao mesmo tempo); sem histórico, cai no
+comportamento de ontem (sugestão SINAPI se a descrição for genérica).
+
+**Achado no caminho**: uma data real do banco ("25/junho/2026 às 12:41:40") não era
+reconhecida por nenhum parser existente. Escrito `_parse_data_qualquer()` — parser único
+(numérico, "DD/mês-nome/AAAA", "DD de mês de AAAA", ISO; retorna `None` em vez de adivinhar
+quando não reconhece); `_data_para_arquivo()` refatorado pra usá-lo, sem mudar comportamento.
+
+**Testado**: 8 cenários — parser de data (inclusive o formato quebrado real),
+`_tempo_decorrido`, painel completo com/sem comparação SINAPI, fluxo "Repetir esta compra"
+→ "Concluir edição" com recálculo real (dados reais do banco de teste), fallback pro
+comportamento de ontem sem histórico.
+
+**`LAURA_ENV=prod` ativado** — Dennis: "pode colocar no modelo de produção". Verificado
+antes de trocar: banco real com 11 lançamentos e as 4 obras GGV, `listas_compra` ainda
+vazia. Schema desatualizado desde antes de ontem (faltavam `fabricante`, `codigo`,
+`sinapi_confianca`, `sinapi_preco_equivalente`, `endereco_entrega`, `observacoes`) —
+`init_db()` aplicou tudo via ALTER seguro, sem tocar em dado existente.
+
+**Não concluído**: validar a Consultoria de Recompra ao vivo em produção — só testada com
+objetos simulados e dados reais fora do Telegram nesta sessão. Comparar fornecedores
+diferentes e filtros ficam pra depois, por decisão explícita do Dennis.
+
+---
 
 **Módulo de Compras — PDF da Lista de Compras + enriquecimento de descrição + correção de
 duplicação** *(2026-07-05, mesmo dia da Camada 4b)*
@@ -1364,6 +1406,15 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 
 ## Decisões Recentes
 
+- **`LAURA_ENV=prod` reativado (2026-07-06)** — Dennis: "pode colocar no modelo de
+  produção." A Lista de Compras (correção campo a campo, PDF, enriquecimento de descrição,
+  Consultoria de Recompra) passa a rodar contra `data/laura.db` real — não mais só
+  `data/laura_test.db`. Schema atualizado via `init_db()` (ALTER seguro) antes da troca.
+- **Consultoria de Recompra sem limiar fixo (2026-07-06)** — Dennis: "pode ser os dois [tempo
+  e variação de preço], sem limites de tempo e variação por enquanto." A Tela do Item mostra
+  tempo decorrido e variação vs. SINAPI atual como informação neutra, nunca como alerta
+  automático — decisão de repetir ou trocar continua sempre humana. Evita engessar uma regra
+  antes de aprender com o uso real.
 - **Programa vs. IA — critério pra decidir onde investir esforço (2026-07-05)** — bug de
   **programa** (código determinístico: banco, cálculo, exibição) se corrige uma vez e fica
   resolvido pra sempre; julgamento de **IA** (Camada 1/2: interpretar, classificar, decidir
@@ -1455,31 +1506,25 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 > gatilho arquitetural que ainda não ocorreu) não são fiada — ficam em Dívida Técnica/ADR, sem
 > duplicar aqui como se fossem tarefa da próxima sessão.
 
-1. **Consultoria de recompra — evolução da Camada 3** *(nova prioridade #1, 2026-07-05)*:
-   Dennis — "preciso de mais ajuda para repetir a compra... se sinto que não vale mais a
-   pena, principalmente por preço, ou indicar outro produto (fabricante e modelo, fornecedor
-   ou tipo)." Hoje a Camada 3 só acha UM preço de referência; a evolução é mostrar o que foi
-   comprado da última vez com destaque (fabricante/modelo/fornecedor, não só preço), ajudar a
-   decidir repetir vs. trocar (sinalizar quando não vale mais a pena, sobretudo por preço), e
-   sugerir alternativa quando fizer sentido. Escopo ainda a desenhar — mockup em texto antes
-   de qualquer código, como sempre. Ver Decisões Recentes.
-2. **3 correções de exibição diagnosticadas ao vivo, não implementadas** (achadas testando o
-   enriquecimento de descrição, ver Última Fiada Implementada):
+1. **Validar a Consultoria de Recompra ao vivo em produção** — implementada e testada com
+   objetos simulados/dados reais fora do Telegram; falta o teste ponta a ponta clicando nos
+   botões de verdade, agora que `LAURA_ENV=prod` está ativo
+2. **Comparar fornecedores diferentes na Consultoria de Recompra** — adiado por decisão
+   explícita do Dennis ("vamos deixar tudo na mesma tela... no futuro podemos pensar em
+   filtros e mais opções como comparar fornecedores")
+3. **3 correções de exibição diagnosticadas ao vivo, não implementadas** (achadas testando o
+   enriquecimento de descrição, ver Última Fiada Implementada de 2026-07-05):
    - Tela do Item não mostra `observacoes` do item (esconde o motivo de uma referência não
      calculada, ex: Cal Hidratada — SINAPI achou o código certo mas não sabia o peso do saco)
    - `_referencia_e_correspondencia` esconde "Correspondência: Alta confiança" quando não há
      preço computável — parece que não achou nada, mas achou
    - Prompt da Camada 1 não traduz termo coloquial pro vocabulário técnico SINAPI (ex: "brita"
      devia virar "pedra britada" na busca; hoje repete literal e erra a busca)
-3. **Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento** — a Lista
+4. **Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento** — a Lista
    de Compras já interpreta, corrige, tem cabeçalho completo, gera PDF e grava de verdade no
    banco; mas ainda é uma ilha — falta o próximo elo da cadeia até virar negociação/pedido real
-4. **Testar o fix de deduplicação (Gerar Lista de Compras 2x) ao vivo no Telegram** — só
-   testado com objetos simulados nesta sessão
-5. **Testar edição de endereço/observações reabrindo uma lista já existente** — a gravação
-   condicional (só grava se o campo foi tocado nesta sessão) foi validada só com objetos
-   simulados; falta confirmar ao vivo que reabrir uma lista aberta sem re-editar esses campos
-   não apaga o que já foi salvo antes
+5. **Testar o fix de deduplicação (Gerar Lista de Compras 2x) e edição de endereço/
+   observações reabrindo uma lista já existente** — ambos só testados com objetos simulados
 6. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
 7. **Alimentar `docs/LICOES_EXTRACAO.md`** sempre que aparecer um novo bug de parsing/extração —
    não só corrigir e seguir (ver [[feedback_documentar_padroes_bugs]] na memória)
@@ -1498,7 +1543,7 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
     documento divergiram antes de qualquer código (ver ROADMAP.md)
 14. **Aplicar "← Voltar" nos ~25 prompts de texto do resto do bot** — Obra, entrega, recibo,
     `/nova_obra` etc. ainda não têm saída quando aguardam texto livre; feito só na Lista de
-    Compras nesta sessão, a pedido explícito do Dennis de tratar o resto como fiada própria
+    Compras, a pedido explícito do Dennis de tratar o resto como fiada própria
 
 > **Explicitamente rejeitado, não entra na lista**: glossário determinístico de sinônimos
 > SINAPI (ex: "brita" → "pedra britada"). Ver Decisões Recentes.
@@ -1521,6 +1566,6 @@ Arquitetura detalhada:
 
 ---
 
-*Última atualização: 2026-07-05*
+*Última atualização: 2026-07-06*
 *Responsáveis: Dennis + Claude*
 *Próxima revisão: ao final da próxima sessão*

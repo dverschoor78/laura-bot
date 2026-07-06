@@ -15,23 +15,25 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > sozinhas com o uso do dia a dia não entram aqui (ex: fechar um pedido parcelado esperando
 > pagamento). Ver Dívida Técnica em `docs/ROADMAP.md`.
 
-1. **Consultoria de recompra — evolução da Camada 3** (nova prioridade #1, 2026-07-05): ajudar
-   a decidir repetir ou trocar um item já comprado (fabricante/modelo/fornecedor, não só
-   preço) — ver Visão de Longo Prazo em `docs/ROADMAP.md`
-2. 3 correções de exibição diagnosticadas ao vivo, não implementadas (observações não
+1. **Validar a Consultoria de Recompra ao vivo em produção** — implementada 2026-07-06,
+   testada com objetos simulados/dados reais fora do Telegram; falta o teste ponta a ponta
+   clicando nos botões de verdade, com `LAURA_ENV=prod` já ativo
+2. Comparar fornecedores diferentes na Consultoria de Recompra — adiado por decisão explícita
+   do Dennis, junto com filtros e mais opções
+3. 3 correções de exibição diagnosticadas ao vivo, não implementadas (observações não
    aparecem na Tela do Item; correspondência escondida junto com preço ausente; prompt não
    traduz termo coloquial pro vocabulário SINAPI)
-3. Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento
-4. Testar ao vivo no Telegram: fix de deduplicação (Gerar 2x) e edição de endereço/
+4. Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento
+5. Testar ao vivo no Telegram: fix de deduplicação (Gerar 2x) e edição de endereço/
    observações reabrindo uma lista já existente (só validados com objetos simulados)
-5. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
-6. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
-7. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
-8. Acesso via Claude Code Remote do celular — ideia registrada, servidor Proxmox em casa (Eric)
-9. Persistir os 9 índices de `data/laura.db` em código (hoje só existem no banco vivo — um `init_db()`
-   contra um banco novo não os recria; ver Dívida Técnica em `docs/ROADMAP.md`)
-10. Aplicar "← Voltar" nos ~25 prompts de texto do resto do bot (Obra, entrega, recibo,
-    `/nova_obra`...) — feito só na Lista de Compras em 2026-07-05
+6. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
+7. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
+8. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
+9. Acesso via Claude Code Remote do celular — ideia registrada, servidor Proxmox em casa (Eric)
+10. Persistir os 9 índices de `data/laura.db` em código (hoje só existem no banco vivo — um `init_db()`
+    contra um banco novo não os recria; ver Dívida Técnica em `docs/ROADMAP.md`)
+11. Aplicar "← Voltar" nos ~25 prompts de texto do resto do bot (Obra, entrega, recibo,
+    `/nova_obra`...) — feito só na Lista de Compras
 
 > **Explicitamente rejeitado**: glossário determinístico de sinônimos SINAPI — Dennis: "não é
 > problema meu hoje... já existe uma biblioteca com sinônimos de materiais de construção."
@@ -41,10 +43,61 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > Produto antes da Correspondência SINAPI" (atributos técnicos completos antes de casar com
 > SINAPI — deliberadamente não persistido ainda, ver Visão de Longo Prazo em `docs/ROADMAP.md`).
 
-> Concluído desde a última revisão: PDF da Lista de Compras (2 variantes) + enriquecimento de
-> descrição genérica + correção de bug de duplicação (2026-07-05) e Camada 4b (correção campo
-> a campo + Tela do Item unificada + cabeçalho editável + convergência do endereço de entrega
-> com o Pedido de Compra, 2026-07-05, validado ao vivo no Telegram) — ver entradas abaixo.
+> Concluído desde a última revisão: Consultoria de Recompra (painel "🔁 Você já comprou isso" +
+> botão "🔁 Repetir esta compra", sem limiar de tempo/preço, 2026-07-06) e `LAURA_ENV=prod`
+> reativado; PDF da Lista de Compras (2 variantes) + enriquecimento de descrição genérica +
+> correção de bug de duplicação (2026-07-05) e Camada 4b (correção campo a campo + Tela do
+> Item unificada + cabeçalho editável + convergência do endereço de entrega com o Pedido de
+> Compra, 2026-07-05, validado ao vivo no Telegram) — ver entradas abaixo.
+
+---
+
+## [Consultoria de Recompra] — 2026-07-06
+
+### Motivação
+
+Ao investigar 3 casos reais de erro de correspondência SINAPI (Cal Hidratada, Brita, Tijolo),
+Dennis rejeitou a ideia de construir um glossário determinístico de sinônimos como mitigação —
+"já existe uma biblioteca com sinônimos de materiais de construção... não é problema meu hoje".
+A pergunta que ele quer que a Laura ajude a responder não é "qual o sinônimo certo", é: **"eu já
+comprei isso antes — vale repetir, ou tem sinal de que devo trocar (principalmente por preço)?"**
+Isso redirecionou a prioridade da próxima fiada de correção de vocabulário pra evolução da
+Camada 3 (referência de compra própria) numa consultoria de decisão.
+
+### Adicionado
+
+- **Painel "🔁 Você já comprou isso"** (`_linhas_recompra`) — aparece na Tela do Item sempre que
+  o item tem referência própria (`laura_preco_referencia`), com prioridade sobre a sugestão de
+  descrição genérica. Mostra descrição/fornecedor/unidade/preço da última compra, "há quanto
+  tempo" (`_tempo_decorrido`), e — quando o item também tem referência SINAPI — a variação %
+  entre o preço pago e a referência SINAPI atual (`_preco_sinapi_item`, extraída de
+  `_melhor_referencia_preco` pra funcionar mesmo quando a referência própria já venceria ali).
+  Sem limiar de tempo ou variação — é sinal pra decisão humana, nunca bloqueio ou alerta forçado
+  (decisão explícita do Dennis: "sem limites de tempo e variação por enquanto").
+- **Botão "🔁 Repetir esta compra"** (`_cb_lc_repetircompra`) — aplica a descrição histórica no
+  rascunho do item, mesmo mecanismo de "✅ Usar sugestão" (refatorado em
+  `_aplicar_descricao_no_rascunho`, compartilhada entre os dois). Os dois botões são mutuamente
+  exclusivos na Tela do Item: "Repetir esta compra" aparece quando há referência própria,
+  "Usar sugestão" quando não há mas existe sugestão de descrição enriquecida.
+- **Achado no caminho**: dado real de produção com data `"25/junho/2026 às 12:41:40"` (mês por
+  nome, não coberto por nenhum parser existente) motivou `_parse_data_qualquer()` — parser único
+  cobrindo ISO, DD/MM/AAAA numérico, "DD/mês-nome/AAAA" e "DD de mês de AAAA", retornando `None`
+  quando não reconhece (nunca adivinha). `_data_para_arquivo()` refatorada por cima dele (mesmo
+  comportamento externo). Nova `_tempo_decorrido()` pra texto legível ("3 meses", "menos de 1
+  mês", "2 anos").
+
+### Ativado
+
+- **`LAURA_ENV=prod`** — Laura voltando a rodar contra o banco/pastas de produção real a partir
+  de agora, por decisão explícita do Dennis ("pode colocar no modelo de produção").
+
+### Testado
+
+8 cenários com objetos simulados (Fake `query`/`ctx`) fora do Telegram: painel aparecendo/não
+aparecendo conforme presença de referência própria, cálculo de variação % com e sem referência
+SINAPI, botão "Repetir esta compra" preenchendo o rascunho corretamente, parser de data cobrindo
+os 4 formatos incluindo o caso real que motivou a mudança. **Pendente**: validação ao vivo no
+Telegram, clicando nos botões de verdade com `LAURA_ENV=prod` já ativo.
 
 ---
 

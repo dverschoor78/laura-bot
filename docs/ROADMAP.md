@@ -1,9 +1,10 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-05 (**Lista de Compras — PDF em 2 variantes, enriquecimento de
-> descrição genérica (histórico > SINAPI > original), bug de duplicação ao confirmar
-> corrigido; prioridade da próxima fiada redirecionada pra "consultoria de recompra"**);
-> histórico do mesmo dia: Camada 4b (correção campo a campo, Tela do Item unificada,
+> Atualizado em: 2026-07-06 (**Lista de Compras — Consultoria de Recompra implementada
+> (painel "Você já comprou isso" + "Repetir esta compra", sem limiar de tempo/preço);
+> `LAURA_ENV=prod` reativado — Laura em produção real**); histórico do dia anterior: PDF em
+> 2 variantes, enriquecimento de descrição genérica (histórico > SINAPI > original), bug de
+> duplicação ao confirmar corrigido; Camada 4b (correção campo a campo, Tela do Item unificada,
 > cabeçalho editável, endereço convergido com o Pedido de Compra, princípio "Convergência
 > antes de paralelismo" na CONSTITUICAO.md); histórico anterior: módulo de Compras
 > redesenhado (Camada 1 interpretação unificada, snapshot histórico SINAPI+Laura, FTS5 de
@@ -481,6 +482,38 @@ prioridade #1 antes desses três.
 
 ---
 
+**Consultoria de Recompra** ✓ *(2026-07-06)*
+
+Implementação da visão registrada no dia anterior (ver seção própria abaixo, mantida como
+histórico da decisão). Mockup em texto validado com o Dennis antes do código.
+
+- **Painel "🔁 Você já comprou isso"** (`_linhas_recompra`) na Tela do Item, quando a Camada
+  3 acha compra anterior: descrição real do item histórico + fornecedor + tempo decorrido +
+  comparação com a referência SINAPI atual (`_preco_sinapi_item`, extraído de
+  `_melhor_referencia_preco`) — tudo como informação neutra, **sem limiar de tempo/preço**
+  ("sem limites por enquanto", Dennis) — decisão de repetir ou trocar continua humana
+- **Botão "🔁 Repetir esta compra"** (`_cb_lc_repetircompra`) aplica a descrição histórica no
+  rascunho — compartilha `_aplicar_descricao_no_rascunho()` com "✅ Usar sugestão" de ontem
+  (mesma ação, origem da descrição diferente); recalcula via "Concluir edição" já existente
+- Painel tem prioridade sobre a sugestão de descrição genérica quando há histórico; sem
+  histórico, cai no comportamento de ontem
+- **Achado no caminho**: uma data real ("25/junho/2026 às 12:41:40") não era reconhecida por
+  nenhum parser existente — `_parse_data_qualquer()` unificado corrige isso e substitui a
+  lógica interna de `_data_para_arquivo()`, sem mudar seu comportamento
+
+**Deliberadamente fora de escopo, por decisão do Dennis**: comparar fornecedores diferentes,
+filtros — "vamos deixar tudo na mesma tela... no futuro podemos pensar em implementar
+filtros e mais opções como comparar fornecedores".
+
+**`LAURA_ENV=prod` reativado** — Dennis: "pode colocar no modelo de produção". Schema de
+`lista_compra_itens`/`listas_compra` estava desatualizado no banco real desde antes da
+sessão anterior; `init_db()` aplicou via ALTER seguro.
+
+**Testado**: 8 cenários (parser de data, tempo decorrido, painel com/sem SINAPI, fluxo
+completo com recálculo real). **Pendente**: validar ao vivo em produção.
+
+---
+
 ## Em Andamento
 
 **Fase 2 — Estrutura** *(Sprint de Experiência)*
@@ -863,37 +896,39 @@ que `bot.py` parecia "bagunçado".
 > gatilho arquitetural que ainda não ocorreu) não são fiadas — ficam registradas em Dívida Técnica
 > ou no ADR correspondente, sem duplicar aqui como se fossem tarefa da próxima sessão.
 
-1. **Consultoria de recompra — evolução da Camada 3** *(nova prioridade #1, 2026-07-05)* —
-   ver Visão de Longo Prazo — Consultoria de Recompra, abaixo, pro raciocínio completo.
-   Escopo ainda a desenhar (mockup antes de código)
-2. **3 correções de exibição diagnosticadas, não implementadas** (Cal Hidratada/Brita/Tijolo
+1. **Validar a Consultoria de Recompra ao vivo em produção** — implementada 2026-07-06,
+   testada com objetos simulados/dados reais fora do Telegram; falta o teste ponta a ponta
+   clicando nos botões de verdade, com `LAURA_ENV=prod` já ativo
+2. **Comparar fornecedores diferentes na Consultoria de Recompra** — adiado por decisão
+   explícita do Dennis, junto com filtros e mais opções
+3. **3 correções de exibição diagnosticadas, não implementadas** (Cal Hidratada/Brita/Tijolo
    — ver Última Fiada Implementada pro diagnóstico completo):
    - Mostrar `observacoes` do item na Tela do Item (hoje só na Análise Técnica)
    - Separar "achou correspondência" de "calculou preço" em `_referencia_e_correspondencia`
      — hoje esconde os dois juntos quando o preço não é computável
    - Reforçar `PROMPT_INTERPRETAR_LISTA` pra traduzir termo coloquial → vocabulário técnico
      SINAPI no `termo_busca_sinapi` (ex: "brita" → "pedra britada")
-3. **Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento** — a Lista já
+5. **Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento** — a Lista já
    interpreta, corrige, tem cabeçalho completo, gera PDF e grava de verdade no banco (validada
    ao vivo), mas ainda é uma ilha
-4. **Testar ao vivo no Telegram**: fix de deduplicação (Gerar Lista de Compras 2x) e edição de
+6. **Testar ao vivo no Telegram**: fix de deduplicação (Gerar Lista de Compras 2x) e edição de
    endereço/observações reabrindo uma lista já existente — ambos só testados com objetos
    simulados
-5. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-6. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração encontrado
-7. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
+7. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+8. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração encontrado
+9. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
    — perguntar sobre a `- Copy.jpeg` antes, é backup pessoal do Dennis
-8. Acesso via Claude Code Remote do celular — sem ambiente configurado; ideia de hospedar Laura +
-   banco num servidor Proxmox em casa (Eric administra) registrada, não iniciada
-9. Persistir os 9 índices de `data/laura.db` em código — hoje só existem no banco vivo (nenhum
-   `CREATE INDEX` em `bot.py`/scripts); um `init_db()` contra um banco novo não os recria
-10. Integrar `financeiro/relatorios.py` a `bot.py` — hoje as funções só rodam chamadas manualmente,
+10. Acesso via Claude Code Remote do celular — sem ambiente configurado; ideia de hospedar Laura +
+    banco num servidor Proxmox em casa (Eric administra) registrada, não iniciada
+11. Persistir os 9 índices de `data/laura.db` em código — hoje só existem no banco vivo (nenhum
+    `CREATE INDEX` em `bot.py`/scripts); um `init_db()` contra um banco novo não os recria
+12. Integrar `financeiro/relatorios.py` a `bot.py` — hoje as funções só rodam chamadas manualmente,
     sem botão ou comando no Telegram
-11. Popular `itens_pedido.insumo_sinapi_codigo` — coluna já existe no schema, mas nada grava nela
+13. Popular `itens_pedido.insumo_sinapi_codigo` — coluna já existe no schema, mas nada grava nela
     ainda; é o vínculo real entre item comprado e `insumos_sinapi` que falta pra fase "lista de compras"
-12. Aplicar "← Voltar" nos ~25 prompts de texto do resto do bot (Obra, entrega, recibo,
-    `/nova_obra`...) — feito só na Lista de Compras em 2026-07-05, a pedido explícito do Dennis
-    de tratar o resto como fiada própria
+14. Aplicar "← Voltar" nos ~25 prompts de texto do resto do bot (Obra, entrega, recibo,
+    `/nova_obra`...) — feito só na Lista de Compras, a pedido explícito do Dennis de tratar o
+    resto como fiada própria
 
 > **Explicitamente rejeitado, não vira fiada**: glossário determinístico de sinônimos SINAPI
 > (ex: "brita" → "pedra britada" hardcoded). Dennis: "não é problema meu hoje... já existe
@@ -981,9 +1016,12 @@ gatilho original (consultar preço de item já comprado sem ler o texto inteiro 
 
 ## Visão de Longo Prazo — Consultoria de Recompra
 
+> ✓ **Implementada em 2026-07-06** — ver "Consultoria de Recompra" na Fase — Módulo de
+> Compras, acima. Seção mantida como histórico da decisão original; "comparar fornecedores
+> diferentes" e filtros seguem como visão de longo prazo, deliberadamente adiados.
+
 *Registrado em 2026-07-05, a partir de uma virada de prioridade do Dennis durante a
-investigação de 3 casos reais (Cal Hidratada/Brita/Tijolo). Vira a prioridade #1 da próxima
-sessão — ver Próximas Fiadas.*
+investigação de 3 casos reais (Cal Hidratada/Brita/Tijolo).*
 
 ### O que motivou
 

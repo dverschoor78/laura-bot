@@ -1,6 +1,6 @@
 # Arquitetura do Projeto Laura
 
-> Versão: 2026-07-05 — reflete o estado real do sistema (pós ADR-004: dispatch table + módulo
+> Versão: 2026-07-06 — reflete o estado real do sistema (pós ADR-004: dispatch table + módulo
 > `nfe/`; DOCX removido; segurança de `responder_botao()`/`atualizar()`/`atualizar_obra()`
 > corrigida; `itens_pedido`/`parcelas_pagamento`/`insumos_sinapi` documentadas; `financeiro/consultas.py`
 > e `financeiro/relatorios.py` adicionados; **módulo `compras/` — Lista de Compras com pipeline
@@ -9,7 +9,11 @@
 > cabeçalho editável (Obra/Endereço/Observações), gravação real em `listas_compra`/
 > `lista_compra_itens` (substitui, não duplica, a cada confirmação), geração de PDF em 2
 > variantes (`_gerar_html_lista`); endereço de entrega convergido entre Pedido de Compra e
-> Lista de Compras via `teclado_escolha_endereco()`/`_cb_endsel()` único**)
+> Lista de Compras via `teclado_escolha_endereco()`/`_cb_endsel()` único; **Consultoria de
+> Recompra** (2026-07-06) — painel "🔁 Você já comprou isso" e botão "🔁 Repetir esta compra"
+> na Tela do Item, sem limiar de tempo/preço; parser de data unificado (`_parse_data_qualquer`)**)
+>
+> **`LAURA_ENV=prod` ativo** — Laura em produção real desde 2026-07-06.
 
 ---
 
@@ -405,6 +409,15 @@ Dennis dispara por três caminhos, que convergem pras mesmas funções:
     pra itens em fallback (string, não interpretado) — não compete mais com "Concluir
     edição" na tela principal. "✅ Usar sugestão" (_cb_lc_usarsugestao, 2026-07-05) aplica a
     descrição sugerida no rascunho, mesmo mecanismo de "Concluir edição" — sem IA extra
+  → Consultoria de Recompra (_linhas_recompra, 2026-07-06): quando o item tem referência
+    própria (`laura_preco_referencia`), a Tela do Item mostra o painel "🔁 Você já comprou
+    isso" (descrição/fornecedor/unidade/preço históricos + "há quanto tempo" via
+    _tempo_decorrido, e a variação % contra o preço SINAPI atual via _preco_sinapi_item) no
+    lugar da sugestão de descrição genérica — sem limiar de tempo/preço fixo, é sinal pra
+    decisão humana, nunca bloqueio. Botão "🔁 Repetir esta compra" (_cb_lc_repetircompra)
+    aplica a descrição histórica no rascunho, mesmo mecanismo de "Usar sugestão"
+    (_aplicar_descricao_no_rascunho compartilhada entre os dois). Comparar fornecedores
+    diferentes fica pra depois (decisão do Dennis)
   → Análise Técnica (_texto_analise_tecnica para a lista inteira, _texto_item_tecnico por
     item — mesma formatação via _linhas_analise_item compartilhada): confiança, SINAPI
     bruto, histórico, e a alternativa não escolhida quando histórico venceu SINAPI — opcional,
