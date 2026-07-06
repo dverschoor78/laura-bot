@@ -1785,6 +1785,15 @@ def gerar_pfm(doc_id, categoria=None, pfm_codigo_override=None):
 
     if pfm_codigo_override:
         lanc_status, ja_existia = "a_pagar", True
+        # Revisão pode ter corrigido fornecedor/valor/data (ex: item com preço errado) — sem
+        # isto, o lançamento (fonte do Cockpit da Obra e da Tela do Pedido) ficava com o valor
+        # antigo pra sempre, mesmo com o PDF revisado mostrando o valor certo. Nunca mexe em
+        # status, valor pago, NF-e ou qualquer outro campo que só a jornada de pagamento grava.
+        with sqlite3.connect(DB_PATH) as _con:
+            _con.execute(
+                "UPDATE lancamentos SET fornecedor=?, valor=?, data_prevista_entrega=? WHERE pfm_codigo=?",
+                (fornecedor, total_final_v, data_entrega_db, pfm_codigo_base_itens)
+            )
     else:
         lanc_status, ja_existia = registrar_lancamento(
             doc_id, pfm_codigo, ggv, fornecedor, total_final_v, data_entrega_db, categoria
