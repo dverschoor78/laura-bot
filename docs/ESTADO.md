@@ -1,50 +1,50 @@
 # Estado do Projeto Laura
 
-> Atualizado em: 2026-07-06 (encerramento — Consultoria de Recompra implementada e validada;
-> **`LAURA_ENV=prod` ativado de novo — Laura em produção real a partir de agora**)
-> Sessão: **Consultoria de Recompra (painel "Você já comprou isso" + botão "Repetir esta
-> compra") na Tela do Item, sem limiar de tempo/preço; parser de data unificado; produção
-> ativada**
+> Atualizado em: 2026-07-06 (encerramento — nome de arquivo da Lista de Compras padronizado
+> (slug + data + Resumo) e histórico de Listas de Compras por obra implementados; bot
+> reiniciado em produção com as mudanças)
+> Sessão: **Nome de arquivo da Lista de Compras (`GGV03-list-AAAA-MM-DD-resumo-orç/ref.pdf`) +
+> campo Resumo editável; "Gerar Lista de Compras" agora encerra a lista (vira registro
+> histórico) em vez de reaproveitar pra sempre; picker "📝 Listas de Compras" no Cockpit da
+> Obra (buscar por nome/Resumo, reabrir pra editar)**
 
-Continuação direta de ontem: item #1 do "Objetivo da Próxima Sessão" era desenhar a
-Consultoria de Recompra (mockup em texto validado com o Dennis antes do código, como sempre).
-Implementada, testada e o Dennis já ativou a produção pra usar de verdade.
+Continuação da mesma sessão de ontem (Consultoria de Recompra): Dennis pediu para melhorar o
+nome dos PDFs da Lista de Compras — hoje saíam como "Lista de Compras - GGV03 - 2026-07-06 -
+Referência.pdf", sem jeito de diferenciar listas da mesma obra por assunto. No meio do ajuste,
+Dennis perguntou como voltar numa lista já gerada pra editar, filtrando por data ou localizando
+por nome — investigação mostrou que esse conceito não existia: cada obra tinha só uma lista
+"aberta" pra sempre, sobrescrita a cada geração. As duas perguntas viraram uma fiada só: nome
+de arquivo + campo Resumo + mudança de ciclo de vida (cada "Gerar" fecha a lista) + picker de
+busca. Duas rodadas de perguntas (`AskUserQuestion`) confirmaram formato exato do nome,
+persistência do Resumo, escopo do picker (limite de 10, sem apagar PDFs antigos) antes do
+código, como sempre.
 
-**Consultoria de Recompra** (`_linhas_recompra`, `_preco_sinapi_item`, `_cb_lc_repetircompra`)
-— quando a Camada 3 acha uma compra anterior (`laura_preco_referencia` não nulo), a Tela do
-Item mostra um painel com destaque, não mais só um preço solto:
-- O que foi comprado da última vez (descrição real do item histórico) e o fornecedor
-- Tempo decorrido ("há 3 meses") — sem limiar fixo, sem alerta automático
-- Comparação com a referência SINAPI atual (quando disponível), como informação neutra
-  ("+18% desde a última compra") — decisão de repetir ou trocar continua sempre humana,
-  conforme Dennis pediu: "sem limites de tempo e variação por enquanto"
-- Botão "🔁 Repetir esta compra" aplica a descrição histórica no rascunho — mesmo mecanismo
-  de "Concluir edição" já existente, recalcula a referência certa pra descrição nova
-- Quando não há histórico, mantém o comportamento de ontem (sugestão via SINAPI se a
-  descrição for genérica)
-- Tudo na mesma tela, por pedido explícito do Dennis — comparar fornecedores diferentes e
-  filtros ficam pra depois
+**Nome de arquivo padronizado** (`_slug_arquivo`, `_cb_lc_gerar`) — formato confirmado com
+Dennis: `{GGV}-list-{AAAA-MM-DD}-{resumo-slug}-{orç|ref}.pdf` (ex:
+`GGV03-list-2026-07-06-materiais-eletricos-orç.pdf`). Sem Resumo digitado, cai no slug
+`lista-compras`. `resumo TEXT` — nova coluna em `listas_compra`, editável no cabeçalho da Tela
+de Conferência (botão "🏷 Resumo", mesmo mecanismo de Endereço/Observações).
 
-**Achado no caminho**: uma data real do banco ("25/junho/2026 às 12:41:40") não era
-reconhecida por nenhum parser existente (`_fmt_data_flexivel`, `_data_para_arquivo`).
-Escrito `_parse_data_qualquer()` como parser único (cobre numérico, "DD/mês-nome/AAAA",
-"DD de mês de AAAA", ISO — retorna `None` em vez de adivinhar quando não reconhece);
-`_data_para_arquivo()` refatorado pra usá-lo, sem mudar comportamento.
+**Histórico de Listas de Compras por obra** (`encerrar_lista`, `listar_listas_obra`,
+`_cb_obra_listas`, `_cb_lc_abrir`, `_cb_lc_buscar`) — mudança de ciclo de vida: "Gerar Lista de
+Compras" agora fecha a lista (`status=encerrada`) em vez de deixá-la `aberta` pra sempre; cada
+geração vira um registro histórico próprio. Cockpit da Obra ganhou o botão "📝 Listas de
+Compras" → picker com as últimas 10 (data + Resumo + nº de itens); "🔍 Buscar por nome" filtra
+pelo Resumo. Tocar numa lista reabre a Tela de Conferência com itens e cabeçalho (Endereço/
+Observações/Resumo) carregados do banco; "Gerar" de novo regrava a mesma `lista_id` e fecha de
+novo. PDFs de gerações antigas nunca são apagados (CONSTITUICAO.md — "Dados são sagrados") —
+cada geração acrescenta novos com a data do dia, decisão confirmada com Dennis.
 
-**Testado**: 8 cenários cobrindo parser de data (inclusive o formato quebrado real),
-`_tempo_decorrido`, painel completo com e sem comparação SINAPI, fluxo "Repetir esta
-compra" → "Concluir edição" com recálculo real, e o fallback pro comportamento de ontem
-quando não há histórico.
+**Testado**: lógica de banco isolada contra um sqlite temporário (duas gerações da mesma obra
+viram registros distintos, filtro por Resumo funciona, reabrir carrega os itens certos) e
+`_slug_arquivo()` com acentos/pontuação (ex: "Materiais Elétricos" → "materiais-eletricos").
 
-**`LAURA_ENV=prod` ativado** — Dennis: "pode colocar no modelo de produção". Verificado
-antes de trocar: banco real com 11 lançamentos e as 4 obras GGV, `listas_compra` ainda
-vazia (nada em risco). Schema de `lista_compra_itens`/`listas_compra` desatualizado desde
-antes de ontem (faltavam `fabricante`, `codigo`, `sinapi_confianca`,
-`sinapi_preco_equivalente`, `endereco_entrega`, `observacoes`) — `init_db()` aplicou tudo
-via ALTER seguro, sem tocar em dado existente.
+**Bot reiniciado em produção** (`LAURA_ENV=prod`) a pedido do Dennis ("reinicia") — processo
+antigo (PID 69620, rodando desde 08:50) encerrado e um novo subido (PID 75796) já com essas
+mudanças. Confirmado: instância única, sem erro no log de inicialização.
 
-**Não concluído**: validar a Consultoria de Recompra ao vivo em produção (só testada com
-objetos simulados e dados reais fora do Telegram nesta sessão).
+**Não concluído**: validar ao vivo no Telegram (nome de arquivo, campo Resumo, picker de
+histórico, reabertura de lista antiga) — só testado estruturalmente nesta sessão.
 
 ---
 
@@ -127,6 +127,12 @@ objetos simulados e dados reais fora do Telegram nesta sessão).
   "Convergência antes de paralelismo" na CONSTITUICAO.md). Testado ao vivo no Telegram —
   "Lista de Compras da Obra GGV03 salva — 8 itens". Ainda sem geração de Pedido de Compra a
   partir da Lista nem vínculo com orçamento. Fluxo orçamento → pedido intocado.
+- **"Gerar Lista de Compras" agora fecha a lista** (2026-07-06) — cada geração vira um
+  registro histórico próprio (`status=encerrada`) em vez de reaproveitar a mesma lista
+  `aberta` pra sempre. PDFs saem com nome padronizado
+  (`GGV03-list-AAAA-MM-DD-resumo-orç/ref.pdf`, campo Resumo editável no cabeçalho). Cockpit da
+  Obra ganhou o picker "📝 Listas de Compras" (últimas 10, buscar por Resumo, reabrir pra
+  editar) — ainda não testado ao vivo no Telegram.
 - **Banco otimizado com 9 índices** + `financeiro/consultas.py` (`obter_pedido_completo`,
   `obter_consolidado_obra`, `listar_pedidos_pendentes`, `procurar_item`) + CLI
   `scripts/consultar.py` — consultas de pedido/obra/item em <3ms. Índices existem só no banco
@@ -139,6 +145,10 @@ objetos simulados e dados reais fora do Telegram nesta sessão).
 ---
 
 ## Versão Atual
+
+**v0.14.0** — Lista de Compras: nome de arquivo padronizado (slug + data + Resumo) + campo
+Resumo editável; "Gerar" agora encerra a lista (histórico por obra) + picker "📝 Listas de
+Compras" (buscar por nome, reabrir pra editar) no Cockpit da Obra
 
 **v0.13.0** — Lista de Compras: Consultoria de Recompra (painel "Você já comprou isso" +
 "Repetir esta compra") na Tela do Item; `LAURA_ENV=prod` reativado — Laura em produção real
@@ -200,15 +210,64 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
   recálculo único ao "Concluir edição"; "Reinterpretar item" reservado a itens em fallback;
   análise técnica disponível por item ou pra lista inteira; cabeçalho editável (Obra — presets
   Obra/Casa/Escritório/Chácara/Outro, mesmo mecanismo do Pedido de Compra; Endereço; e
-  Observações gerais, opcional); gravação real da lista no banco ao confirmar, substituindo
-  (não duplicando) itens de confirmações anteriores; **PDF gerado automaticamente em 2
-  variantes** — referência interna com preço e versão em branco pra pedir orçamento a
-  fornecedores, ambas arquivadas em `04 Compras/00 Orçamentos/` (ainda sem gerar Pedido de
-  Compra a partir da Lista)
+  Observações gerais, e Resumo — texto curto que nomeia os PDFs, opcional); gravação real da
+  lista no banco ao confirmar, substituindo (não duplicando) itens de confirmações anteriores
+  e **fechando a lista** (vira registro histórico); **PDF gerado automaticamente em 2
+  variantes**, nome padronizado `GGV03-list-AAAA-MM-DD-resumo-orç/ref.pdf` — referência interna
+  com preço e versão em branco pra pedir orçamento a fornecedores, ambas arquivadas em
+  `04 Compras/00 Orçamentos/` (ainda sem gerar Pedido de Compra a partir da Lista); histórico de
+  listas por obra acessível via Cockpit da Obra → "📝 Listas de Compras" (buscar por Resumo,
+  reabrir uma lista antiga pra continuar editando)
 
 ---
 
 ## Última Fiada Implementada
+
+**Módulo de Compras — Nome de arquivo padronizado + campo Resumo + histórico de Listas de
+Compras** *(2026-07-06, mesmo dia da Consultoria de Recompra)*
+
+Dennis pediu pra melhorar o nome dos PDFs gerados pela Lista de Compras (hoje saíam como
+"Lista de Compras - GGV03 - 2026-07-06 - Referência.pdf") e, no meio do ajuste, perguntou como
+voltar numa lista já gerada pra editar — filtrando por data ou localizando por nome. As duas
+viraram uma fiada só, com duas rodadas de `AskUserQuestion` confirmando o desenho antes do
+código (formato exato do nome, persistência do campo Resumo, limite do picker, o que fazer com
+PDFs de gerações antigas).
+
+**Nome de arquivo + campo Resumo** (`_slug_arquivo`, `_cb_lc_gerar`): formato
+`{GGV}-list-{AAAA-MM-DD}-{resumo-slug}-{orç|ref}.pdf` (ex:
+`GGV03-list-2026-07-06-materiais-eletricos-orç.pdf`); sem Resumo digitado, cai em
+`lista-compras`. `resumo TEXT` — nova coluna em `listas_compra`, editável no cabeçalho da Tela
+de Conferência (botão "🏷 Resumo"), mesmo mecanismo já usado por Endereço/Observações
+(`_CAMPOS_LISTA_GERAL`).
+
+**Histórico de Listas de Compras por obra** (`encerrar_lista`, `listar_listas_obra`,
+`_cb_obra_listas`, `_cb_lc_abrir`, `_cb_lc_buscar`): investigação mostrou que o conceito de
+"lista antiga" não existia — cada obra tinha só uma lista `aberta` pra sempre, sobrescrita a
+cada "Gerar Lista de Compras". Mudança de ciclo de vida: "Gerar" agora fecha a lista
+(`status=encerrada`); cada geração vira um registro histórico. Cockpit da Obra (já existia,
+abre digitando o código da obra) ganhou o botão "📝 Listas de Compras" → picker com as últimas
+10, mais recente primeiro (data + Resumo + nº de itens); "🔍 Buscar por nome" filtra pelo
+Resumo (`LIKE`). Tocar numa lista reabre a Tela de Conferência com itens e cabeçalho
+(Endereço/Observações/Resumo) carregados do banco; "Gerar" de novo regrava a mesma `lista_id`
+(via novo `ctx.user_data["lista_id_edicao"]`) e fecha de novo — não cria um registro duplicado.
+PDFs de gerações antigas nunca são apagados (CONSTITUICAO.md — "Dados são sagrados"): cada
+geração só acrescenta, com a data do dia.
+
+**Testado**: lógica de banco isolada contra um sqlite temporário — duas gerações da mesma obra
+viram registros distintos (`criar_ou_buscar_lista_aberta` sempre cria novo, já que nada fica
+`aberta` de verdade depois do "Gerar"), filtro por Resumo funciona, reabrir carrega os itens
+certos; `_slug_arquivo()` testado com acentos/pontuação ("Materiais Elétricos" →
+"materiais-eletricos").
+
+**Bot reiniciado em produção**, a pedido do Dennis ("reinicia"): processo antigo (PID 69620,
+rodando desde 08:50) encerrado, novo subido (PID 75796) já com essas mudanças. Confirmado
+instância única e sem erro no log de inicialização.
+
+**Não concluído**: validar ao vivo no Telegram — nome de arquivo, campo Resumo, picker de
+histórico e reabertura de lista antiga só testados estruturalmente nesta sessão, nunca
+clicados de verdade.
+
+---
 
 **Módulo de Compras — Consultoria de Recompra** *(2026-07-06)*
 

@@ -1,8 +1,10 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-06 (**Lista de Compras — Consultoria de Recompra implementada
-> (painel "Você já comprou isso" + "Repetir esta compra", sem limiar de tempo/preço);
-> `LAURA_ENV=prod` reativado — Laura em produção real**); histórico do dia anterior: PDF em
+> Atualizado em: 2026-07-06 (**Lista de Compras — nome de arquivo padronizado (slug + data +
+> Resumo), "Gerar" agora encerra a lista (histórico por obra), picker "📝 Listas de Compras"
+> no Cockpit da Obra (buscar por nome, reabrir pra editar)**); mesmo dia: Consultoria de
+> Recompra implementada (painel "Você já comprou isso" + "Repetir esta compra", sem limiar de
+> tempo/preço); `LAURA_ENV=prod` reativado — Laura em produção real; histórico do dia anterior: PDF em
 > 2 variantes, enriquecimento de descrição genérica (histórico > SINAPI > original), bug de
 > duplicação ao confirmar corrigido; Camada 4b (correção campo a campo, Tela do Item unificada,
 > cabeçalho editável, endereço convergido com o Pedido de Compra, princípio "Convergência
@@ -514,6 +516,34 @@ completo com recálculo real). **Pendente**: validar ao vivo em produção.
 
 ---
 
+**Nome de arquivo padronizado + campo Resumo + histórico de Listas de Compras por obra** ✓
+*(2026-07-06, mesmo dia)*
+
+Dennis pediu pra melhorar o nome dos PDFs da Lista de Compras; no meio do ajuste, perguntou
+como voltar numa lista já gerada pra editar (filtrar por data, localizar por nome) — as duas
+viraram uma fiada só, confirmada em duas rodadas de perguntas antes do código.
+
+- **Nome de arquivo**: `{GGV}-list-{AAAA-MM-DD}-{resumo-slug}-{orç|ref}.pdf`
+  (`_slug_arquivo()`, stdlib `unicodedata`, sem nova dependência) — sem Resumo digitado, cai
+  em `lista-compras`
+- **Campo Resumo** — nova coluna `resumo TEXT` em `listas_compra`, editável no cabeçalho da
+  Tela de Conferência (botão "🏷 Resumo"), mesmo mecanismo de Endereço/Observações
+- **Mudança de ciclo de vida**: "Gerar Lista de Compras" agora fecha a lista
+  (`encerrar_lista()`, `status=encerrada`) em vez de deixá-la `aberta` pra sempre — cada
+  geração vira um registro histórico
+- **Picker "📝 Listas de Compras"** no Cockpit da Obra (`_cb_obra_listas`) — últimas 10 mais
+  recentes (`listar_listas_obra()`), "🔍 Buscar por nome" filtra pelo Resumo
+  (`_cb_lc_buscar`); tocar numa lista reabre a Tela de Conferência com itens e cabeçalho
+  carregados do banco (`_cb_lc_abrir`); "Gerar" de novo regrava a mesma `lista_id`
+  (`ctx.user_data["lista_id_edicao"]`) e fecha de novo
+- PDFs de gerações antigas nunca são apagados — cada geração só acrescenta, com a data do dia
+
+**Testado**: lógica de banco isolada contra sqlite temporário (duas gerações viram registros
+distintos, filtro por Resumo, reabrir carrega os itens certos), `_slug_arquivo()` com
+acentos/pontuação. **Pendente**: validar ao vivo no Telegram.
+
+---
+
 ## Em Andamento
 
 **Fase 2 — Estrutura** *(Sprint de Experiência)*
@@ -911,9 +941,10 @@ que `bot.py` parecia "bagunçado".
 5. **Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento** — a Lista já
    interpreta, corrige, tem cabeçalho completo, gera PDF e grava de verdade no banco (validada
    ao vivo), mas ainda é uma ilha
-6. **Testar ao vivo no Telegram**: fix de deduplicação (Gerar Lista de Compras 2x) e edição de
-   endereço/observações reabrindo uma lista já existente — ambos só testados com objetos
-   simulados
+6. **Testar ao vivo no Telegram**: nome de arquivo padronizado, campo Resumo, picker "📝
+   Listas de Compras" (buscar por nome, reabrir lista antiga pra editar) e o novo ciclo de
+   vida (encerrar ao gerar) — implementados 2026-07-06, só testados estruturalmente contra um
+   banco temporário nesta sessão
 7. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
 8. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração encontrado
 9. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)

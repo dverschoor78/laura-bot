@@ -11,7 +11,12 @@
 > variantes (`_gerar_html_lista`); endereço de entrega convergido entre Pedido de Compra e
 > Lista de Compras via `teclado_escolha_endereco()`/`_cb_endsel()` único; **Consultoria de
 > Recompra** (2026-07-06) — painel "🔁 Você já comprou isso" e botão "🔁 Repetir esta compra"
-> na Tela do Item, sem limiar de tempo/preço; parser de data unificado (`_parse_data_qualquer`)**)
+> na Tela do Item, sem limiar de tempo/preço; parser de data unificado (`_parse_data_qualquer`);
+> **nome de arquivo padronizado** (`_slug_arquivo`, `GGV03-list-AAAA-MM-DD-resumo-orç/ref.pdf`)
+> + campo `resumo`; "Gerar Lista de Compras" agora **encerra a lista** (`encerrar_lista`) em
+> vez de reaproveitar uma `aberta` pra sempre — histórico por obra acessível via picker "📝
+> Listas de Compras" no Cockpit da Obra (`listar_listas_obra`, `_cb_obra_listas`,
+> `_cb_lc_abrir`, `_cb_lc_buscar`)**)
 >
 > **`LAURA_ENV=prod` ativo** — Laura em produção real desde 2026-07-06.
 
@@ -286,16 +291,35 @@ palavras muda (ex: "tubo pvc 25" não batia com "PVC, SOLDAVEL, DE 25 MM"); FTS5
 |---|---|
 | `id` | Chave primária |
 | `ggv` | Obra à qual a lista pertence — sem FK explícita |
-| `status` | `aberta` / `encerrada` / `descartada` (Modelo de Domínio) — só `aberta` é usada hoje |
+| `status` | `aberta` / `encerrada` / `descartada` (Modelo de Domínio) — desde 2026-07-06, `_cb_lc_gerar()` sempre fecha a lista (`encerrar_lista()`) depois de gravar; `aberta` só existe no intervalo entre a criação do registro e o fim daquela mesma chamada |
 | `endereco_entrega` | Override de endereço só desta lista (2026-07-05) — herdado de `obras.endereco_entrega` na tela, nunca sobrescreve o cadastro da obra; `NULL` até o usuário editar |
 | `observacoes` | Observações gerais da compra, opcional (2026-07-05) — instrução geral, não por item |
+| `resumo` | Texto curto digitado pelo usuário (2026-07-06) — nomeia os PDFs gerados (`_slug_arquivo()`) e é o campo de busca do picker "📝 Listas de Compras"; opcional, `NULL` vira slug `lista-compras` no nome do arquivo |
 | `criado_em` | Timestamp de criação |
 
-Uma obra tem no máximo uma lista `aberta` por vez (`buscar_lista_aberta()`); reaberturas
-reaproveitam a mesma lista em vez de criar outra. `atualizar_lista(db_path, lista_id, **kwargs)`
-grava `endereco_entrega`/`observacoes` (allowlist `_COLUNAS_LISTA_EDITAVEIS`, mesmo padrão de
-segurança de `atualizar()`/`atualizar_obra()`) — `_cb_lc_gerar()` só chama quando o campo foi
-tocado na sessão corrente, pra nunca apagar um valor já salvo ao reabrir uma lista existente.
+**Ciclo de vida mudou em 2026-07-06** — até então, uma obra tinha no máximo uma lista `aberta`
+por vez (`buscar_lista_aberta()`), reaproveitada indefinidamente a cada `/lista` novo. Dennis
+perguntou como voltar numa lista já gerada pra editar (filtrar por data, localizar por nome) —
+resposta exigiu que cada geração virasse um registro histórico, não uma edição in-place da
+mesma linha. Agora `_cb_lc_gerar()` sempre chama `encerrar_lista(db_path, lista_id)` depois de
+gravar; `criar_ou_buscar_lista_aberta()` continua existindo (usado quando não há
+`lista_id_edicao` na sessão) mas na prática sempre cria um registro novo, porque nada fica
+`aberta` de verdade entre uma sessão e outra. `listar_listas_obra(db_path, ggv, limite=10,
+busca_resumo=None)` lista o histórico, mais recente primeiro, com contagem de itens ativos por
+lista (subquery contra `lista_compra_itens`).
+
+`atualizar_lista(db_path, lista_id, **kwargs)` grava `endereco_entrega`/`observacoes`/`resumo`
+(allowlist `_COLUNAS_LISTA_EDITAVEIS`, mesmo padrão de segurança de
+`atualizar()`/`atualizar_obra()`) — `_cb_lc_gerar()` só chama quando o campo foi tocado na
+sessão corrente, pra nunca apagar um valor já salvo ao reabrir uma lista existente.
+
+**Reabrir uma lista antiga pra editar** (`_cb_lc_abrir`, callback `lc_abrir:{lista_id}` a partir
+do picker no Cockpit da Obra) carrega `listar_itens()` + o próprio registro (`buscar_lista()`)
+de volta em `ctx.user_data` — mesma Tela de Conferência de uma interpretação nova, e
+`ctx.user_data["lista_id_edicao"]` sinaliza pra `_cb_lc_gerar()` regravar essa mesma `lista_id`
+em vez de criar outra. Os 4 pontos que iniciam uma interpretação nova (`/lista` texto/foto,
+botão no menu de documento) resetam `lista_id_edicao` pra `None`, pra nunca confundir uma
+sessão nova com uma reabertura.
 
 **Cada confirmação substitui os itens ativos, não acumula** (2026-07-05) — achado real:
 confirmar "Gerar Lista de Compras" 2x na mesma lista aberta (ex: testar, corrigir, testar de
@@ -424,10 +448,28 @@ Dennis dispara por três caminhos, que convergem pras mesmas funções:
     acessada por botão, nunca a tela principal
   → botão "✅ Gerar Lista de Compras" (_cb_lc_gerar): remove (soft-delete) os itens ativos de
     confirmações anteriores dessa lista (2026-07-05 — evita duplicação ao confirmar 2x), grava
-    de verdade via criar_ou_buscar_lista_aberta() + adicionar_item() (itens) + atualizar_lista()
-    (endereço/observações, só se tocados nesta sessão) — bloqueia se a obra não estiver
-    definida — e gera + envia 2 PDFs automaticamente (_gerar_html_lista, "Referência" com
-    preço e "Orçamento" em branco pra fornecedor), arquivados em `04 Compras/00 Orçamentos/`
+    de verdade via criar_ou_buscar_lista_aberta() (ou a lista_id em edição, se reaberta pelo
+    picker) + adicionar_item() (itens) + atualizar_lista() (endereço/observações/resumo, só se
+    tocados nesta sessão) — bloqueia se a obra não estiver definida — encerra a lista
+    (encerrar_lista(), 2026-07-06) — e gera + envia 2 PDFs automaticamente (_gerar_html_lista,
+    "Referência" com preço e "Orçamento" em branco pra fornecedor), nome
+    `{GGV}-list-{data}-{resumo-slug}-{orç|ref}.pdf` (_slug_arquivo()), arquivados em
+    `04 Compras/00 Orçamentos/` (PDFs de gerações antigas nunca são apagados)
+```
+
+**Fluxo D — Reabrir uma Lista de Compras antiga pra editar** *(2026-07-06)*
+
+```
+Dennis digita o código da obra (ex: GGV03) → Cockpit da Obra
+  → botão "📝 Listas de Compras" (_cb_obra_listas): listar_listas_obra() mostra as últimas 10,
+    mais recente primeiro (data + Resumo + nº de itens)
+  → "🔍 Buscar por nome" (_cb_lc_buscar): filtra listar_listas_obra() pelo Resumo (LIKE)
+  → tocar numa lista (_cb_lc_abrir, callback lc_abrir:{lista_id}): carrega listar_itens() +
+    buscar_lista() (endereço/observações/resumo) de volta em ctx.user_data — mesma Tela de
+    Conferência de uma interpretação nova; ctx.user_data["lista_id_edicao"] guarda qual
+    lista_id está sendo editada
+  → edição normal (Tela do Item, cabeçalho) → "✅ Gerar Lista de Compras" regrava a mesma
+    lista_id (não cria outra) e encerra de novo — ver Fluxo C
 ```
 
 Endereço de entrega (Nível 1 e Pedido de Compra) usa o **mesmo mecanismo** —
@@ -458,7 +500,7 @@ Referências para navegação no arquivo (4.994 linhas):
 | Banco de dados | `init_db()`, `buscar_fornecedor()` | Criação de tabelas, CRUD |
 | Geração de PFM | `gerar_pfm()`, `_campo()`, `_itens()` | Helpers de parsing/formatação; define código, salva itens, registra lançamento (não gera documento — ver `_gerar_html_pc()`) |
 | Domínio — consulta | `buscar_pedido()`, `mostrar_pedido()` | Pipeline de visualização do pedido |
-| Domínio — Lista de Compras | `lista_cmd()`, `_interpretar_lista_texto/arquivo()`, `_adicionar_correspondencia_sinapi()`, `_adicionar_referencia_laura()`, `_adicionar_sugestao_descricao()`, `_texto_lista_conferencia()`, `_texto_tela_item()`, `_gerar_html_lista()`, `_cb_lc_*()` | Comando `/lista` + fluxo de foto (`lista_materiais`); Camadas 1-3 de interpretação, enriquecimento de descrição, Tela do Item (view + correção campo a campo), cabeçalho editável, gravação (substitui, não duplica) via `compras.*`, PDF em 2 variantes |
+| Domínio — Lista de Compras | `lista_cmd()`, `_interpretar_lista_texto/arquivo()`, `_adicionar_correspondencia_sinapi()`, `_adicionar_referencia_laura()`, `_adicionar_sugestao_descricao()`, `_texto_lista_conferencia()`, `_texto_tela_item()`, `_gerar_html_lista()`, `_slug_arquivo()`, `_cb_lc_*()`, `_cb_obra_listas()` | Comando `/lista` + fluxo de foto (`lista_materiais`); Camadas 1-3 de interpretação, enriquecimento de descrição, Tela do Item (view + correção campo a campo), cabeçalho editável (Obra/Endereço/Observações/Resumo), gravação (substitui, não duplica, encerra a lista) via `compras.*`, PDF em 2 variantes com nome padronizado; picker "📝 Listas de Compras" no Cockpit da Obra (buscar por nome, reabrir lista antiga) |
 | Teclados | `parse_resposta()`, `teclado_confirmacao()` | Parse da resposta Claude e botões inline |
 | Handlers Telegram | `receber_arquivo()`, `receber_texto()` | Handlers de mensagens |
 | Dispatch de callback | `responder_botao()`, `_CB_DISPATCH`, `_cb_*()` | Um único `CallbackQueryHandler`; roteia por dict `acao → função` (ADR-004, 2026-07-02) em vez de if/elif — 59 funções `_cb_*`, cada uma cobrindo os ramos que antes viviam soltos dentro de uma função de 929 linhas |

@@ -24,8 +24,9 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
    aparecem na Tela do Item; correspondência escondida junto com preço ausente; prompt não
    traduz termo coloquial pro vocabulário SINAPI)
 4. Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento
-5. Testar ao vivo no Telegram: fix de deduplicação (Gerar 2x) e edição de endereço/
-   observações reabrindo uma lista já existente (só validados com objetos simulados)
+5. Testar ao vivo no Telegram: nome de arquivo padronizado, campo Resumo, picker "📝 Listas
+   de Compras" (buscar por nome, reabrir lista antiga) e o novo ciclo de vida (encerrar ao
+   gerar) — implementados 2026-07-06, só validados contra um banco temporário nesta sessão
 6. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
 7. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
 8. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
@@ -43,12 +44,70 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > Produto antes da Correspondência SINAPI" (atributos técnicos completos antes de casar com
 > SINAPI — deliberadamente não persistido ainda, ver Visão de Longo Prazo em `docs/ROADMAP.md`).
 
-> Concluído desde a última revisão: Consultoria de Recompra (painel "🔁 Você já comprou isso" +
+> Concluído desde a última revisão: nome de arquivo padronizado + campo Resumo + histórico de
+> Listas de Compras por obra (picker "📝 Listas de Compras", buscar por nome, reabrir lista
+> antiga pra editar, 2026-07-06); Consultoria de Recompra (painel "🔁 Você já comprou isso" +
 > botão "🔁 Repetir esta compra", sem limiar de tempo/preço, 2026-07-06) e `LAURA_ENV=prod`
 > reativado; PDF da Lista de Compras (2 variantes) + enriquecimento de descrição genérica +
 > correção de bug de duplicação (2026-07-05) e Camada 4b (correção campo a campo + Tela do
 > Item unificada + cabeçalho editável + convergência do endereço de entrega com o Pedido de
 > Compra, 2026-07-05, validado ao vivo no Telegram) — ver entradas abaixo.
+
+---
+
+## [Nome de arquivo padronizado + campo Resumo + histórico de Listas de Compras] — 2026-07-06
+
+### Motivação
+
+Dennis pediu pra melhorar o nome dos PDFs gerados pela Lista de Compras — hoje saíam como
+"Lista de Compras - GGV03 - 2026-07-06 - Referência.pdf", sem jeito de diferenciar listas da
+mesma obra por assunto. No meio do ajuste, perguntou como voltar numa lista já gerada pra
+editar, filtrando por data ou localizando por nome. Investigação mostrou que esse conceito não
+existia: cada obra tinha só uma lista `aberta` pra sempre, sobrescrita a cada "Gerar Lista de
+Compras". As duas perguntas viraram uma fiada só. Duas rodadas de perguntas confirmaram o
+desenho antes do código: formato exato do nome do arquivo, se o Resumo persiste no banco,
+limite do picker (últimas 10) e se PDFs de gerações antigas são preservados.
+
+### Adicionado
+
+- **Nome de arquivo padronizado** (`_slug_arquivo()`, stdlib `unicodedata` — sem nova
+  dependência): `{GGV}-list-{AAAA-MM-DD}-{resumo-slug}-{orç|ref}.pdf` (ex:
+  `GGV03-list-2026-07-06-materiais-eletricos-orç.pdf`); sem Resumo digitado, cai no slug
+  `lista-compras`.
+- **Campo Resumo** — nova coluna `resumo TEXT` em `listas_compra`, editável no cabeçalho da
+  Tela de Conferência (botão "🏷 Resumo"), mesmo mecanismo já usado por Endereço/Observações
+  (`_CAMPOS_LISTA_GERAL`).
+- **Picker "📝 Listas de Compras"** no Cockpit da Obra (`_cb_obra_listas`,
+  `mostrar_lista_listas_compra`, `teclado_lista_listas_compra`) — últimas 10 listas da obra,
+  mais recente primeiro (`listar_listas_obra()`), mostrando data + Resumo + nº de itens.
+  Botão "🔍 Buscar por nome" (`_cb_lc_buscar`) filtra pelo Resumo (`LIKE`).
+- **Reabrir lista antiga pra editar** (`_cb_lc_abrir`) — carrega itens e cabeçalho
+  (Endereço/Observações/Resumo) do banco de volta pra Tela de Conferência;
+  `ctx.user_data["lista_id_edicao"]` sinaliza pra `_cb_lc_gerar()` regravar a mesma `lista_id`
+  em vez de criar um registro novo.
+
+### Alterado
+
+- **Ciclo de vida de `listas_compra`** — "Gerar Lista de Compras" agora chama
+  `encerrar_lista()` (`status=encerrada`) depois de gravar, em vez de deixar a lista `aberta`
+  pra sempre. Cada geração vira um registro histórico próprio, localizável pelo picker.
+  `criar_ou_buscar_lista_aberta()` continua existindo, mas na prática sempre cria um registro
+  novo — nada fica `aberta` de verdade entre sessões.
+- PDFs de gerações antigas nunca são apagados (CONSTITUICAO.md — "Dados são sagrados") — cada
+  geração só acrescenta novos arquivos, com a data do dia.
+
+### Testado
+
+Lógica de banco isolada contra um sqlite temporário: duas gerações da mesma obra viram
+registros distintos, filtro por Resumo funciona, reabrir carrega os itens certos;
+`_slug_arquivo()` com acentos e pontuação (ex: "Materiais Elétricos" → "materiais-eletricos").
+**Pendente**: validação ao vivo no Telegram, clicando nos botões de verdade.
+
+### Operacional
+
+Bot reiniciado em produção (`LAURA_ENV=prod`) a pedido do Dennis — processo antigo (PID 69620)
+encerrado, novo (PID 75796) subido já com essas mudanças; confirmado instância única e sem
+erro no log de inicialização.
 
 ---
 
