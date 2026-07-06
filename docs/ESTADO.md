@@ -1,13 +1,15 @@
 # Estado do Projeto Laura
 
 > Atualizado em: 2026-07-06 (encerramento — nome de arquivo da Lista de Compras padronizado,
-> histórico de Listas de Compras por obra, e bug real de NF-e presa corrigido; bot reiniciado
-> em produção com as mudanças)
+> histórico de Listas de Compras por obra, bug de NF-e presa corrigido, e bug de valor do
+> pedido não atualizando após revisão corrigido; bot reiniciado em produção com as mudanças)
 > Sessão: **Nome de arquivo da Lista de Compras (`GGV03-list-AAAA-MM-DD-resumo-orç/ref.pdf`) +
 > campo Resumo editável; "Gerar Lista de Compras" agora encerra a lista (vira registro
 > histórico) em vez de reaproveitar pra sempre; picker "📝 Listas de Compras" no Cockpit da
 > Obra (buscar por nome/Resumo, reabrir pra editar); NF-e sem candidato ou "Nenhum destes"
-> agora descarta o documento — antes ficava presa pra sempre, bloqueando reenvio**
+> agora descarta o documento — antes ficava presa pra sempre, bloqueando reenvio; revisão de
+> pedido (rev01/rev02) agora atualiza `lancamentos` — antes o valor corrigido só aparecia no
+> PDF, nunca no Cockpit da Obra/Tela do Pedido**
 
 Continuação da mesma sessão de ontem (Consultoria de Recompra): Dennis pediu para melhorar o
 nome dos PDFs da Lista de Compras — hoje saíam como "Lista de Compras - GGV03 - 2026-07-06 -
@@ -223,6 +225,29 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 ---
 
 ## Última Fiada Implementada
+
+**Pedido — Bug real corrigido: valor não atualizava após revisão** *(2026-07-06, mesmo dia,
+achado ao vivo pelo Dennis testando o Cockpit da Obra)*
+
+Dennis corrigiu o valor do pedido GGV03-012 (item com preço errado) via "Revisar", mas o
+Cockpit da Obra continuou mostrando o valor antigo (R$ 745,00 em vez de R$ 820,00).
+
+**Causa raiz**: `gerar_pfm()` tem dois caminhos — geração nova (chama `registrar_lancamento()`,
+grava fornecedor/valor/data no lançamento) e revisão (`pfm_codigo_override`, botão "Revisar" →
+rev01/rev02). O caminho de revisão nunca executava esse passo — o PDF saía com o valor
+recalculado, mas `lancamentos` (fonte do Cockpit da Obra e da Tela do Pedido) ficava travado no
+valor da geração original pra sempre. Bug de programa (critério do próprio Dennis: "conserta
+uma vez, resolvido pra sempre"), não de IA.
+
+**Corrigido**: revisão agora também executa `UPDATE lancamentos SET fornecedor=?, valor=?,
+data_prevista_entrega=?` com os dados recalculados — nunca mexe em `status`, `valor_pago`,
+NF-e ou qualquer campo que só a jornada de pagamento grava. Verificado no banco real antes de
+corrigir (`pfm_numero=12`, `rev_numero=1`, pagamento já registrado em R$ 820,00 — só o campo
+`valor` do lançamento estava desatualizado, criando uma inconsistência entre valor do pedido e
+valor pago). GGV03-012 corrigido manualmente pra refletir o valor certo; bot reiniciado (PID
+50212) com a correção de código, válida pra qualquer pedido revisado daqui pra frente.
+
+---
 
 **NF-e — Bug real corrigido: documento preso pra sempre quando não vincula** *(2026-07-06,
 mesmo dia, achado ao vivo testando o bot recém-reiniciado)*

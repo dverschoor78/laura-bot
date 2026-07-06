@@ -1,7 +1,9 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-06 (**NF-e presa corrigida** — sem candidato ou "Nenhum destes" agora
-> descarta o documento, antes ficava presa pra sempre bloqueando reenvio; **Lista de Compras —
+> Atualizado em: 2026-07-06 (**Valor de pedido não atualizava após revisão, corrigido** —
+> `gerar_pfm()` no modo revisão agora atualiza `lancamentos`, não só o PDF; **NF-e presa
+> corrigida** — sem candidato ou "Nenhum destes" agora descarta o documento, antes ficava
+> presa pra sempre bloqueando reenvio; **Lista de Compras —
 > nome de arquivo padronizado (slug + data + Resumo), "Gerar" agora encerra a lista (histórico
 > por obra), picker "📝 Listas de Compras" no Cockpit da Obra (buscar por nome, reabrir pra
 > editar)**); mesmo dia: Consultoria de

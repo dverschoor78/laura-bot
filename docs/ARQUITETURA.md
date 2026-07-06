@@ -560,6 +560,16 @@ Referências para navegação no arquivo (4.994 linhas):
 - **`gerar_pfm()` acumula responsabilidades** — grava no banco, cria o lançamento e arquiva em
   disco na mesma função (a geração do documento em si — Word — foi removida em 2026-07-02).
 
+- **Bug real corrigido (2026-07-06)**: `gerar_pfm()` no modo revisão (`pfm_codigo_override`,
+  botão "Revisar" → rev01/rev02) nunca atualizava `lancamentos` — o PDF saía com o valor
+  corrigido, mas o Cockpit da Obra e a Tela do Pedido (que leem `lancamentos.valor`) ficavam
+  travados no valor da geração original pra sempre. Achado ao vivo com um caso real
+  (GGV03-012: revisão corrigiu o item pra R$ 820,00, lançamento continuava em R$ 745,00 — o
+  pagamento já registrado já estava certo em R$ 820,00, só o campo `valor` do lançamento
+  estava desatualizado). Corrigido: revisão agora também executa
+  `UPDATE lancamentos SET fornecedor=?, valor=?, data_prevista_entrega=?` — nunca mexe em
+  `status`, `valor_pago`, NF-e ou qualquer campo da jornada de pagamento.
+
 - **`dados_claude` armazena texto bruto** — campos não são estruturados no banco;
   toda extração ocorre na leitura via `_campo()`. Mudanças no formato do Claude
   podem afetar a leitura de documentos antigos.

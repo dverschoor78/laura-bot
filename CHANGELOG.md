@@ -44,7 +44,8 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > Produto antes da Correspondência SINAPI" (atributos técnicos completos antes de casar com
 > SINAPI — deliberadamente não persistido ainda, ver Visão de Longo Prazo em `docs/ROADMAP.md`).
 
-> Concluído desde a última revisão: bug real de NF-e presa corrigido (documento sem candidato
+> Concluído desde a última revisão: bug real de valor de pedido não atualizando após revisão
+> corrigido (2026-07-06); bug real de NF-e presa corrigido (documento sem candidato
 > ou "Nenhum destes" agora descarta, 2026-07-06); nome de arquivo padronizado + campo Resumo +
 > histórico de Listas de Compras por obra (picker "📝 Listas de Compras", buscar por nome,
 > reabrir lista antiga pra editar, 2026-07-06); Consultoria de Recompra (painel "🔁 Você já comprou isso" +
@@ -53,6 +54,29 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > correção de bug de duplicação (2026-07-05) e Camada 4b (correção campo a campo + Tela do
 > Item unificada + cabeçalho editável + convergência do endereço de entrega com o Pedido de
 > Compra, 2026-07-05, validado ao vivo no Telegram) — ver entradas abaixo.
+
+---
+
+## [Valor do pedido não atualizava após revisão] — 2026-07-06
+
+### Motivação
+
+Dennis corrigiu o valor do pedido GGV03-012 (item com preço errado) via "Revisar", mas o
+Cockpit da Obra continuou mostrando o valor antigo (R$ 745,00 em vez de R$ 820,00).
+
+### Corrigido
+
+- **`gerar_pfm()` no modo revisão agora atualiza `lancamentos`** — antes, só a geração original
+  chamava `registrar_lancamento()` (grava fornecedor/valor/data no lançamento); o caminho de
+  revisão (`pfm_codigo_override`, botão "Revisar" → rev01/rev02) nunca atualizava esse
+  registro, então o PDF saía com o valor certo mas o Cockpit da Obra e a Tela do Pedido (que
+  leem `lancamentos.valor`) ficavam travados no valor da geração original pra sempre. Agora
+  toda revisão executa `UPDATE lancamentos SET fornecedor=?, valor=?,
+  data_prevista_entrega=?` — nunca mexe em `status`, `valor_pago`, NF-e ou qualquer campo da
+  jornada de pagamento.
+- GGV03-012 corrigido manualmente (valor de R$ 745,00 para R$ 820,00) — o pagamento já
+  registrado já estava certo em R$ 820,00, só o campo `valor` do lançamento estava
+  desatualizado.
 
 ---
 
