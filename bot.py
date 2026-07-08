@@ -2408,7 +2408,7 @@ def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
 
 # Categorias cujo fechamento fiscal é a própria fatura (CREA, ONR, prefeitura, Copel, Sanepar
 # não emitem NF-e separada) — não exibir "NF-e pendente" nem exigir vínculo de NF-e
-CATEGORIAS_SEM_NFE_OBRIGATORIA = {"taxa", "imposto", "servicos"}
+CATEGORIAS_SEM_NFE_OBRIGATORIA = {"taxa", "imposto", "servico_publico"}
 
 def _status_pago_label(pedido: "Pedido") -> str:
     if pedido.nfe_numero:

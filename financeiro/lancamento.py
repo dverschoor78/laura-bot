@@ -19,27 +19,29 @@ from enum import Enum
 
 
 class CategoriaLancamento(str, Enum):
-    MATERIAL = "material"
-    MO       = "mo"
-    SERVICOS = "servicos"
-    TAXA     = "taxa"
-    TERRENO  = "terreno"
-    IMPOSTO  = "imposto"
-    APORTE   = "aporte"
-    VENDA    = "venda"
-    COMISSAO = "comissao"
+    MATERIAL        = "material"
+    MO              = "mo"
+    SERVICOS        = "servicos"           # serviços privados (gestão, engenharia, MO especializada) — exigem NF-e
+    SERVICO_PUBLICO = "servico_publico"    # concessionárias (Copel, Sanepar) — a fatura é o fechamento fiscal
+    TAXA            = "taxa"
+    TERRENO         = "terreno"
+    IMPOSTO         = "imposto"
+    APORTE          = "aporte"
+    VENDA           = "venda"
+    COMISSAO        = "comissao"
 
     def label(self):
         return {
-            "material": "Material",
-            "mo":       "Mão de obra",
-            "servicos": "Serviços",
-            "taxa":     "Taxa / Licença",
-            "terreno":  "Terreno",
-            "imposto":  "Imposto",
-            "aporte":   "Aporte de capital",
-            "venda":    "Venda",
-            "comissao": "Comissão",
+            "material":        "Material",
+            "mo":              "Mão de obra",
+            "servicos":        "Serviços",
+            "servico_publico": "Serviço público",
+            "taxa":            "Taxa / Licença",
+            "terreno":         "Terreno",
+            "imposto":         "Imposto",
+            "aporte":          "Aporte de capital",
+            "venda":           "Venda",
+            "comissao":        "Comissão",
         }[self.value]
 
 
@@ -64,7 +66,15 @@ class TipoDocumento(str, Enum):
 
 # Mapeamento ramo do fornecedor → categoria sugerida.
 # Chaves em minúsculas; comparação via substring (chave in ramo.lower()).
+# A ORDEM IMPORTA: a primeira chave que casar vence. Serviço público vem antes de
+# material porque "Distribuição de Energia Elétrica" (Copel) contém "eletric" — sem a
+# precedência, a fatura de energia era sugerida como Material (caso real, 2026-07-08).
 _RAMO_PARA_CATEGORIA = {
+    "energia":              CategoriaLancamento.SERVICO_PUBLICO,
+    "água":                 CategoriaLancamento.SERVICO_PUBLICO,
+    "agua":                 CategoriaLancamento.SERVICO_PUBLICO,
+    "saneamento":           CategoriaLancamento.SERVICO_PUBLICO,
+    "distribui":            CategoriaLancamento.SERVICO_PUBLICO,
     "material":             CategoriaLancamento.MATERIAL,
     "materiais":            CategoriaLancamento.MATERIAL,
     "ferro":                CategoriaLancamento.MATERIAL,
@@ -99,10 +109,6 @@ _RAMO_PARA_CATEGORIA = {
     "taxa":                 CategoriaLancamento.TAXA,
     "licença":              CategoriaLancamento.TAXA,
     "licenca":              CategoriaLancamento.TAXA,
-    "energia":              CategoriaLancamento.TAXA,
-    "água":                 CategoriaLancamento.TAXA,
-    "agua":                 CategoriaLancamento.TAXA,
-    "distribui":            CategoriaLancamento.TAXA,
 }
 
 

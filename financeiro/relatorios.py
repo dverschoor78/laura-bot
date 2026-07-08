@@ -110,7 +110,7 @@ def _extrair_descricao(dados_claude: str, categoria: str = None, nome_arquivo: s
         return resumo[:100]
 
     # Para taxa/ART/servicos: tenta extrair do nome do arquivo
-    if categoria in ("taxa", "servicos") and nome_arquivo:
+    if categoria in ("taxa", "servicos", "servico_publico") and nome_arquivo:
         match = re.search(r'([^/_-]*(?:Projeto|Execucao|Servico|Obra|Art)[^/_-]*)', nome_arquivo, re.IGNORECASE)
         if match:
             desc = match.group(1).strip()
@@ -259,6 +259,7 @@ def gerar_fluxo_pagamentos_obra(db_path: Path, ggv: str = None, output_dir: Path
         'material': 'MATERIAL',
         'mo': 'MO',
         'servicos': 'SERVIÇOS',
+        'servico_publico': 'SERVIÇO PÚBLICO',
         'taxa': 'TAXA',
         'imposto': 'IMPOSTO',
     }
@@ -450,6 +451,7 @@ def gerar_relatorio_pagamentos(db_path: Path, output_dir: Path = None) -> Path:
         'material': 'MATERIAL',
         'mo': 'MO',
         'servicos': 'SERVIÇOS',
+        'servico_publico': 'SERVIÇO PÚBLICO',
         'taxa': 'TAXA',
         'imposto': 'IMPOSTO',
     }
