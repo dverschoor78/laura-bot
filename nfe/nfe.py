@@ -80,5 +80,6 @@ def teclado_candidatos_nfe(doc_id: int, candidatos: list):
             f"#{c['pfm_codigo']}",
             callback_data=f"nfe_confirmar:{doc_id}:{c['pfm_codigo']}"
         )])
-    botoes.append([InlineKeyboardButton("Nenhum destes", callback_data=f"nfe_cancelar:{doc_id}")])
+    botoes.append([InlineKeyboardButton("✖ Nenhum destes — descartar arquivo",
+                                        callback_data=f"nfe_cancelar:{doc_id}")])
     return InlineKeyboardMarkup(botoes)

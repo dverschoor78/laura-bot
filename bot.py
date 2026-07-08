@@ -2231,7 +2231,8 @@ def teclado_candidatos_pix(doc_id_comp: int, candidatos: list):
             f"Pedido #{c['pfm_codigo']}",
             callback_data=f"pix_confirmar:{doc_id_comp}:{c['pfm_codigo']}"
         )])
-    botoes.append([InlineKeyboardButton("Nenhum destes", callback_data="pix_cancelar")])
+    botoes.append([InlineKeyboardButton("✖ Nenhum destes — descartar arquivo",
+                                        callback_data=f"pix_cancelar:{doc_id_comp}")])
     return InlineKeyboardMarkup(botoes)
 
 def teclado_tipo_inicial(doc_id):
@@ -5025,7 +5026,18 @@ async def _cb_pix_pagar(query, ctx, partes):
 
 
 async def _cb_pix_cancelar(query, ctx, partes):
-    await query.edit_message_text("Cancelado.")
+    # Com doc_id (botão "Nenhum destes" da lista de candidatos): descarta o documento —
+    # sem isso o arquivo ficava preso pra sempre como `recebido`, com o hash bloqueando
+    # reenvio (mesmo bug já corrigido no fluxo de NF-e em 2026-07-06, caso real: fatura
+    # Copel identificada errado como comprovante). Sem doc_id (botão "↩️ Voltar" da tela
+    # de confirmação de pagamento): só cancela a conversa, nunca apaga nada.
+    if len(partes) > 1:
+        _descartar_documento(int(partes[1]))
+        await query.edit_message_text(
+            "Arquivo descartado — pode reenviar se precisar."
+        )
+    else:
+        await query.edit_message_text("Cancelado.")
 
 
 async def _cb_sel_ggv(query, ctx, partes):
