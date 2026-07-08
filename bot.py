@@ -205,15 +205,25 @@ Se [orcamento]:
 - Ramo de atividade: (ex: Comércio de Materiais de Construção, Serralheria, Elétrica — informe como aparece no documento ou deduza pelo contexto)
 - Resumo da compra: (2 a 4 palavras que identifiquem o item principal do orçamento — ex: "aço", "tubos caixa d'água", "material elétrico", "portas"; vai virar nome de arquivo)
 - CNPJ/CPF:
-- Chave PIX: (procure em qualquer parte do documento — dados cadastrais, cabeçalho, rodapé, condições de pagamento; pode ser CPF, CNPJ, e-mail ou telefone)
+- Chave PIX: (só extraia se estiver claramente rotulada como PIX/chave de pagamento do
+  fornecedor, perto dos dados de cobrança/beneficiário; NUNCA use um telefone ou identificador
+  de outra pessoa/entidade que apareça no documento por outro motivo — ex: "Responsável pela
+  Iluminação Pública" numa fatura de energia não é a chave PIX do fornecedor. Na dúvida, não
+  preencha)
 - Número do orçamento: (número ou código do orçamento emitido pelo fornecedor, se houver)
 - Vendedor: (nome do vendedor ou representante que emitiu o orçamento, se houver)
 - Telefone do vendedor: (telefone ou WhatsApp do vendedor, se houver)
-- Itens (formato: N. Descrição do produto (QTDE UND) — R$ TOTAL; liste todos os itens do orçamento):
-- Valor total:
+- Itens (formato: N. Descrição do produto (QTDE UND) — R$ TOTAL; liste TODAS as linhas de
+  cobrança do documento, mesmo as que não têm quantidade/unidade clara — ex: uma fatura de
+  energia pode ter uma linha "Valor ref. conta do mês anterior" sem kWh associado; nesse caso
+  use QTDE=1 e UND=UN, mas NUNCA omita a linha só porque ela foge do padrão das demais):
+- Valor total: (o valor total cobrado no documento, como fonte independente da soma dos itens —
+  extraia mesmo que a soma dos itens não bata exatamente, nunca ajuste um pra bater com o outro)
 - Desconto (valor em R$, se houver; se informado em %, calcule o valor sobre o total):
 - Condição de pagamento:
 - Prazo de entrega: (lead time ou data de entrega do material — NÃO a validade da proposta)
+- Vencimento: (data de vencimento do pagamento, se o documento for boleto/fatura — diferente de
+  prazo de entrega, que é sobre a entrega do material)
 - Validade da proposta: (data até quando o preço é válido)
 - Observações:
 
@@ -418,6 +428,28 @@ def _total_pago(pfm_codigo: str) -> float:
             "SELECT COALESCE(SUM(valor), 0) FROM parcelas_pagamento WHERE pfm_codigo=?", (pfm_codigo,)
         ).fetchone()
     return row[0] or 0.0
+
+def _recalcular_status_pagamento(pfm_codigo: str, valor: float, data_pagamento: str = None) -> bool:
+    """Sincroniza status/valor_pago de `lancamentos` com a soma real das parcelas já registradas
+    contra o `valor` atual do pedido. Chamada tanto ao registrar uma parcela quanto depois de uma
+    revisão que muda o valor — uma revisão pode fazer a soma já paga alcançar (ou deixar de
+    alcançar) o valor corrigido, e o status precisa refletir isso, não só o PDF. Nunca inventa
+    parcela nova, só reconcilia o que já existe. Retorna True se o pedido está quitado."""
+    total_pago = _total_pago(pfm_codigo)
+    quitado = bool(valor) and total_pago >= valor - 0.01
+    with sqlite3.connect(DB_PATH) as con:
+        if quitado:
+            con.execute(
+                "UPDATE lancamentos SET status='pago', valor_pago=?, "
+                "data_pagamento=COALESCE(?, data_pagamento) WHERE pfm_codigo=?",
+                (total_pago, data_pagamento, pfm_codigo)
+            )
+        else:
+            con.execute(
+                "UPDATE lancamentos SET status='a_pagar', valor_pago=? WHERE pfm_codigo=?",
+                (total_pago, pfm_codigo)
+            )
+    return quitado
 
 def _registrar_parcela(pfm_codigo, valor, data_pagamento, doc_id_comprovante, identificador_comprovante) -> int:
     with sqlite3.connect(DB_PATH) as con:
@@ -795,6 +827,7 @@ def _resumo_gerar(doc_id):
     vend_fone  = _v(_campo(dados, "Telefone do vendedor"))
     cond       = _v(condicao) or _v(_campo(dados, "Condição de pagamento"))
     entrega    = _v(data_ent) or _v(_campo(dados, "Prazo de entrega"))
+    venc_txt   = _v(vencimento) or _v(_campo(dados, "Vencimento"))
     validade   = _v(_campo(dados, "Validade da proposta"))
     obs        = _obs(dados).strip()
     _obra      = buscar_obra(ggv)
@@ -827,6 +860,11 @@ def _resumo_gerar(doc_id):
             linhas.append(_esc_html(linha.strip()))
     if subtotal_v > 0:
         linhas.append(f"Total — R$ {_fmt_brl(subtotal_v)}")
+    valor_total_doc = _totais_divergem(dados, subtotal_v)
+    if valor_total_doc:
+        linhas.append(
+            f"⚠️ Valor total do documento: R$ {_fmt_brl(valor_total_doc)} — confira os itens"
+        )
     linhas.append(SEP)
 
     # Bloco 4 — Financeiro (desconto → valor final → condição → vencimento)
@@ -838,7 +876,7 @@ def _resumo_gerar(doc_id):
     else:
         linhas.append("<b>Valor final: não informado</b>")
     linhas.append(_esc_html(cond) if cond else "Pagamento: não informado")
-    linhas.append(_esc_html(_v(vencimento)) if _v(vencimento) else "Vencimento: não informado")
+    linhas.append(_esc_html(venc_txt) if venc_txt else "Vencimento: não informado")
     linhas.append(SEP)
 
     # Bloco 5 — Logística
@@ -998,19 +1036,27 @@ def _substituir_campo(dados, nome, novo_valor):
             return "\n".join(linhas)
     return dados + f"\n{nome}: {novo_valor}"
 
+# Campos que legitimamente vêm depois de "Itens:" no template do PROMPT (Fase [orcamento]) —
+# lista fechada, usada pra marcar o fim do bloco de itens com segurança. Mais confiável que a
+# heurística antiga ("primeira linha sem número que tem ':'"), que falhava sempre que uma
+# variação de formatação da Claude não incluía ':' na própria linha do cabeçalho "Itens" —
+# nesse caso a função não achava o bloco original e caía num fallback que só ACRESCENTAVA o
+# texto novo no fim do documento, nunca substituindo (ver LICOES_EXTRACAO.md, Lição #1).
+_CAMPOS_APOS_ITENS_RE = r"^(valor total|desconto|condi[cç][aã]o|prazo|validade|observ)"
+
 def _bloco_itens(dados):
     linhas = dados.splitlines()
     capturando, resultado = False, []
     for linha in linhas:
         stripped = linha.strip().lstrip("- *")
-        if re.match(r"^(itens|materiais)", stripped, re.IGNORECASE) and ":" in stripped:
+        if re.match(r"^(itens|materiais)\b", stripped, re.IGNORECASE):
             capturando = True
-            inline = stripped.split(":", 1)[1].strip().strip("*").strip()
+            inline = stripped.split(":", 1)[1].strip().strip("*").strip() if ":" in stripped else ""
             if inline:
                 resultado.append(inline)
             continue
         if capturando:
-            if stripped and not re.match(r"^\d+\.", stripped) and ":" in stripped and not stripped.startswith("http"):
+            if stripped and re.match(_CAMPOS_APOS_ITENS_RE, stripped, re.IGNORECASE):
                 break
             resultado.append(linha)
     return "\n".join(resultado).strip() or "Nenhum item encontrado."
@@ -1020,15 +1066,23 @@ def _substituir_itens(dados, novo_bloco):
     inicio, fim, capturando = None, len(linhas), False
     for i, linha in enumerate(linhas):
         stripped = linha.strip().lstrip("- *")
-        if re.match(r"^(itens|materiais)", stripped, re.IGNORECASE) and ":" in stripped:
+        if re.match(r"^(itens|materiais)\b", stripped, re.IGNORECASE):
             inicio = i
             capturando = True
             continue
         if capturando:
-            if stripped and not re.match(r"^\d+\.", stripped) and ":" in stripped and not stripped.startswith("http"):
+            if stripped and re.match(_CAMPOS_APOS_ITENS_RE, stripped, re.IGNORECASE):
                 fim = i
                 break
     if inicio is None:
+        # Não achou o cabeçalho "Itens:" original — nunca acrescentar cegamente no fim (isso
+        # corrompe o registro pra sempre: toda edição seguinte voltaria a só acrescentar, nunca
+        # substituir, porque a próxima busca acharia ESTE acréscimo como se fosse o bloco real).
+        # Em vez disso, insere antes do primeiro campo conhecido que vier depois de Itens.
+        for i, linha in enumerate(linhas):
+            stripped = linha.strip().lstrip("- *")
+            if re.match(_CAMPOS_APOS_ITENS_RE, stripped, re.IGNORECASE):
+                return "\n".join(linhas[:i] + ["Itens:"] + novo_bloco.splitlines() + [""] + linhas[i:])
         return dados + f"\nItens:\n{novo_bloco}"
     return "\n".join(linhas[:inicio + 1] + novo_bloco.splitlines() + linhas[fim:])
 
@@ -1039,12 +1093,12 @@ def _recalcular_itens(dados: str) -> str:
     novo_total = 0.0
     for linha in dados.splitlines():
         stripped = linha.strip().lstrip("- *")
-        if re.match(r"^(itens|materiais)", stripped, re.IGNORECASE) and ":" in stripped:
+        if re.match(r"^(itens|materiais)\b", stripped, re.IGNORECASE):
             capturando = True
             linhas_out.append(linha)
             continue
         if capturando:
-            if re.match(r"^(valor total|condição|condicao|prazo|validade|observ)", stripped, re.IGNORECASE):
+            if re.match(_CAMPOS_APOS_ITENS_RE, stripped, re.IGNORECASE):
                 capturando = False
                 linhas_out.append(linha)
                 continue
@@ -1121,16 +1175,16 @@ def _itens(dados):
     resultado, capturando = [], False
     for linha in dados.splitlines():
         stripped = linha.strip().lstrip("- *")
-        if re.match(r"^(itens|materiais)", stripped, re.IGNORECASE) and ":" in stripped:
+        if re.match(r"^(itens|materiais)\b", stripped, re.IGNORECASE):
             capturando = True
-            inline = stripped.split(":", 1)[1].strip().strip("*").strip()
+            inline = stripped.split(":", 1)[1].strip().strip("*").strip() if ":" in stripped else ""
             if not inline:
                 continue
             stripped = inline
         if capturando:
             if not stripped:
                 continue
-            if re.match(r"^(valor total|condição|condicao|prazo|validade|observ)", stripped, re.IGNORECASE):
+            if re.match(_CAMPOS_APOS_ITENS_RE, stripped, re.IGNORECASE):
                 break
             m = ITEM_RE.match(stripped)
             if m:
@@ -1211,6 +1265,24 @@ def _calcular_totais(dados, desconto_rs):
         except Exception:
             desconto_v = 0.0
     return subtotal_v, desconto_v, subtotal_v - desconto_v
+
+def _totais_divergem(dados, subtotal_v) -> Optional[float]:
+    """Compara a soma dos itens (subtotal_v) com o campo 'Valor total' extraído
+    independentemente pela Claude. As duas leituras vêm de passos diferentes do mesmo
+    documento — quando divergem além de centavos de arredondamento, é sinal de que a extração
+    perdeu (ou inventou) alguma linha de item, não que um dos dois esteja "certo por padrão".
+    Retorna o valor total extraído quando diverge, ou None quando bate ou não há valor extraído
+    (nesse caso `_calcular_totais` já usa a soma dos itens como o próprio Valor total)."""
+    valor_total_raw = _campo(dados, "Valor total")
+    if not valor_total_raw or valor_total_raw == "A PREENCHER":
+        return None
+    try:
+        valor_total_v = _parse_brl(re.sub(r"[^\d,.]", "", valor_total_raw))
+    except Exception:
+        return None
+    if valor_total_v > 0 and subtotal_v > 0 and abs(valor_total_v - subtotal_v) > 0.01:
+        return valor_total_v
+    return None
 
 def proximo_pfm_numero(ggv):
     with sqlite3.connect(DB_PATH) as con:
@@ -1787,13 +1859,15 @@ def gerar_pfm(doc_id, categoria=None, pfm_codigo_override=None):
         lanc_status, ja_existia = "a_pagar", True
         # Revisão pode ter corrigido fornecedor/valor/data (ex: item com preço errado) — sem
         # isto, o lançamento (fonte do Cockpit da Obra e da Tela do Pedido) ficava com o valor
-        # antigo pra sempre, mesmo com o PDF revisado mostrando o valor certo. Nunca mexe em
-        # status, valor pago, NF-e ou qualquer outro campo que só a jornada de pagamento grava.
+        # antigo pra sempre, mesmo com o PDF revisado mostrando o valor certo. Nunca inventa nem
+        # apaga parcela — só reconcilia status/valor_pago contra a soma das parcelas já
+        # registradas e o valor corrigido (ex: desconto negociado depois de já ter pago).
         with sqlite3.connect(DB_PATH) as _con:
             _con.execute(
                 "UPDATE lancamentos SET fornecedor=?, valor=?, data_prevista_entrega=? WHERE pfm_codigo=?",
                 (fornecedor, total_final_v, data_entrega_db, pfm_codigo_base_itens)
             )
+        _recalcular_status_pagamento(pfm_codigo_base_itens, total_final_v)
     else:
         lanc_status, ja_existia = registrar_lancamento(
             doc_id, pfm_codigo, ggv, fornecedor, total_final_v, data_entrega_db, categoria
@@ -4488,6 +4562,21 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if row:
             dados_atuais, ggv_db = row
             if aguardando == "edit_itens":
+                # Editar no celular costuma vir com o texto da própria pergunta colado junto
+                # (copiar/colar a mensagem inteira em vez de só a edição) — achado real: isso
+                # gravou "Novos itens:\nUse o formato..." dentro do campo Itens do documento,
+                # junto com o item de exemplo, corrompendo o valor total calculado. Recusar em
+                # vez de gravar texto que reconhecidamente não é uma lista de itens.
+                texto_lower = texto.lower()
+                if any(marca in texto_lower for marca in (
+                    "novos itens:", "use o formato para cálculo automático", "itens atuais:"
+                )):
+                    await update.message.reply_text(
+                        "Recebi o texto da minha própria mensagem junto com a edição — costuma "
+                        "acontecer copiando e colando pelo celular. Envie só a lista de itens "
+                        "nova (sem repetir \"Itens atuais\" nem as instruções)."
+                    )
+                    return
                 novos_dados = _recalcular_itens(_substituir_itens(dados_atuais, texto))
                 nome_campo = "Itens"
             else:
@@ -4906,19 +4995,8 @@ async def _cb_pix_pagar(query, ctx, partes):
     parcela_id = _registrar_parcela(pfm_codigo, valor_parcela, data_pgto, int(doc_id_comp), ident_comp)
     _arquivar_doc_financeiro(pfm_codigo, f"comprovante-parcela{parcela_id}", caminho_comp, data_pgto)
 
+    quitado = _recalcular_status_pagamento(pfm_codigo, valor_total, data_pgto)
     total_pago = _total_pago(pfm_codigo)
-    quitado = valor_total and total_pago >= valor_total - 0.01
-    with sqlite3.connect(DB_PATH) as con:
-        if quitado:
-            con.execute(
-                "UPDATE lancamentos SET status='pago', valor_pago=?, data_pagamento=? WHERE pfm_codigo=?",
-                (total_pago, data_pgto, pfm_codigo)
-            )
-        else:
-            con.execute(
-                "UPDATE lancamentos SET valor_pago=? WHERE pfm_codigo=?",
-                (total_pago, pfm_codigo)
-            )
 
     if quitado and categoria_lanc in CATEGORIAS_SEM_NFE_OBRIGATORIA:
         # Taxa/imposto/serviço público: a fatura já enviada é a "terceira via" — não há NF-e separada
