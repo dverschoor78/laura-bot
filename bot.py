@@ -2753,12 +2753,15 @@ def _tela_categoria(cat, ramo):
         return f"Como classificar este pedido?\n\n{cat.label()}{linha_ramo}"
     return "Como classificar este pedido?"
 
-def _teclado_selecao_categorias(doc_id, ggv):
+def _teclado_selecao_categorias(doc_id, ggv, acao="cat_sel"):
+    """Grade única de categorias, usada em dois momentos com ações diferentes:
+    `cat_sel` (geração — escolher categoria e gerar o pedido) e `cat_upd` (pedido já
+    existente — só reclassificar o lançamento, via Corrigir dados)."""
     cats = list(CategoriaLancamento)
     botoes = []
     for i in range(0, len(cats), 2):
         linha = [
-            InlineKeyboardButton(c.label(), callback_data=f"cat_sel:{doc_id}:{ggv}:{c.value}")
+            InlineKeyboardButton(c.label(), callback_data=f"{acao}:{doc_id}:{ggv}:{c.value}")
             for c in cats[i:i+2]
         ]
         botoes.append(linha)
@@ -5108,6 +5111,11 @@ async def _cb_endsel(query, ctx, partes):
 
 async def _cb_sel_edit(query, ctx, partes):
     _, doc_id, tipo, ggv = partes
+    # Categoria só é editável depois que o pedido existe (lancamentos.categoria é gravada na
+    # geração); antes disso a tela de categoria aparece no próprio "Gerar Pedido de Compra"
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute("SELECT pfm_numero FROM documentos WHERE id=?", (int(doc_id),)).fetchone()
+    pedido_gerado = bool(row and row[0])
     botoes = [
         [InlineKeyboardButton("👤 Fornecedor",    callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:fornecedor")],
         [InlineKeyboardButton("🔢 CNPJ/CPF",      callback_data=f"edit_campo:{doc_id}:{tipo}:{ggv}:cnpj")],
@@ -5126,6 +5134,10 @@ async def _cb_sel_edit(query, ctx, partes):
         [InlineKeyboardButton("📋 Tipo doc.",      callback_data=f"sel_tipo:{doc_id}:{tipo}:{ggv}")],
         [InlineKeyboardButton("◀️ Voltar",         callback_data=f"voltar_edit:{doc_id}:{tipo}:{ggv}")],
     ]
+    if pedido_gerado:
+        botoes.insert(-1, [InlineKeyboardButton(
+            "🏷 Categoria da compra", callback_data=f"cat_edit:{doc_id}:{ggv}"
+        )])
     await query.edit_message_reply_markup(InlineKeyboardMarkup(botoes))
 
 
@@ -5272,6 +5284,44 @@ async def _cb_cat_corrigir(query, ctx, partes):
 async def _cb_cat_sel(query, ctx, partes):
     _, doc_id, ggv, cat_val = partes
     await _executar_gerar_pfm(query, ctx, int(doc_id), ggv, CategoriaLancamento(cat_val))
+
+
+async def _cb_cat_edit(query, ctx, partes):
+    _, doc_id, ggv = partes
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT pfm_codigo, categoria FROM lancamentos WHERE doc_id=?", (int(doc_id),)
+        ).fetchone()
+    if not row:
+        await query.answer("Pedido ainda não gerado — a categoria é escolhida ao gerar.", show_alert=True)
+        return
+    atual = CategoriaLancamento(row[1]).label() if row[1] else "não definida"
+    await query.edit_message_text(
+        f"#{row[0]} — categoria atual: {atual}\n\nSelecione a nova categoria:",
+        reply_markup=_teclado_selecao_categorias(int(doc_id), ggv, acao="cat_upd")
+    )
+
+
+async def _cb_cat_upd(query, ctx, partes):
+    _, doc_id, ggv, cat_val = partes
+    cat = CategoriaLancamento(cat_val)
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT pfm_codigo FROM lancamentos WHERE doc_id=?", (int(doc_id),)
+        ).fetchone()
+        if not row:
+            await query.edit_message_text("Pedido não encontrado.")
+            return
+        # Só reclassifica — nunca toca status, valor, pagamento ou NF-e
+        con.execute(
+            "UPDATE lancamentos SET categoria=? WHERE doc_id=?", (cat.value, int(doc_id))
+        )
+    extra = ""
+    if cat.value in CATEGORIAS_SEM_NFE_OBRIGATORIA:
+        extra = "\nCategoria dispensa NF-e — a fatura vale como fechamento."
+    await query.edit_message_text(
+        f"#{row[0]} reclassificado: {cat.label()}.{extra}"
+    )
 
 
 async def _cb_pfm_revisar(query, ctx, partes):
@@ -5820,6 +5870,8 @@ _CB_DISPATCH = {
     "cat_confirmar": _cb_cat_confirmar,
     "cat_corrigir": _cb_cat_corrigir,
     "cat_sel": _cb_cat_sel,
+    "cat_edit": _cb_cat_edit,
+    "cat_upd": _cb_cat_upd,
     "pfm_revisar": _cb_pfm_revisar,
     "pfm_ver": _cb_pfm_ver,
     "pfm_orc": _cb_pfm_orc,
