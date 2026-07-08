@@ -1,6 +1,13 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-08 (**Sessão da fatura Copel — 5 correções**: revisão de pedido
+> Atualizado em: 2026-07-08 (segunda rodada do dia: **"Nenhum destes" do PIX descarta o
+> documento** (mesmo bug da NF-e de 2026-07-06; botão renomeado pra "✖ Nenhum destes —
+> descartar arquivo" nos dois fluxos); **Categoria da compra editável após o pedido gerado**
+> (botão "🏷 Categoria da compra" no Corrigir dados, grade única `cat_sel`/`cat_upd`);
+> **categoria "Serviço público" separada de "Serviços"** — só concessionária dispensa NF-e,
+> serviço privado volta a exigir; precedência do `_RAMO_PARA_CATEGORIA` corrigida ("Energia
+> Elétrica" casava com "eletric"→Material antes de "energia"; Copel GGV03-015 reclassificada);
+> primeira rodada: **Sessão da fatura Copel — 5 correções**: revisão de pedido
 > recalcula saldo/status contra as parcelas pagas (`_recalcular_status_pagamento()`,
 > GGV03-013 corrigido no banco); edição de itens não corrompe mais o registro — bug
 > intermitente relatado em 2026-07-07; PROMPT de fatura captura todas as linhas de cobrança,
@@ -803,6 +810,9 @@ Implementar junto com a Fiada 6b.
 - Prompt reconhece boleto/fatura/conta de consumo (CREA, ONR, prefeitura, Copel, Sanepar) como `[orcamento]`
 - Categorias `taxa`/`imposto`/`servicos` fecham com "Pago" — sem exigir NF-e que essas entidades
   não emitem (pesquisado: nenhuma tem documento fiscal separado da fatura; Copel já é a própria NF)
+  — **refinado em 2026-07-08**: `servicos` saiu do conjunto (serviço privado — gestão, engenharia,
+  MO especializada — exige NF-e); criada a categoria `servico_publico` (Copel, Sanepar) que herda
+  a dispensa. Conjunto atual: `{taxa, imposto, servico_publico}`
 - Fatura arquivada de novo em `01 Controle financeiro` como "fatura" (terceira via) ao confirmar pagamento
 - Documento do Pedido de Compra oculta campos de entrega para essas categorias
 - Novo campo `categoria` no `Pedido`; nova constante `CATEGORIAS_SEM_NFE_OBRIGATORIA`

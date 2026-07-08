@@ -60,6 +60,34 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [PIX descarta, categoria editável, Serviço público] — 2026-07-08 (rodada 2)
+
+### Motivação
+
+Dennis testou o fluxo completo da fatura Copel em produção; cada passo real expôs uma lacuna.
+
+### Adicionado
+
+- **Botão "🏷 Categoria da compra"** no menu Corrigir dados de pedido já gerado — reclassifica
+  o lançamento (nunca toca status/valor/pagamento). Antes, a categoria era escolhida uma única
+  vez na geração, sem caminho de correção.
+- **Categoria "Serviço público"** (`servico_publico`) — concessionárias (Copel, Sanepar), cuja
+  fatura é o próprio fechamento fiscal. "Serviços" (privados — gestão, engenharia, MO
+  especializada) volta a exigir NF-e: `CATEGORIAS_SEM_NFE_OBRIGATORIA` agora é
+  `{taxa, imposto, servico_publico}`.
+
+### Corrigido
+
+- **"Nenhum destes" do comprovante PIX agora descarta o documento** — mesmo bug da NF-e presa
+  (2026-07-06): o botão não carregava `doc_id`, o arquivo ficava preso como `recebido` com o
+  hash bloqueando reenvio. Rótulo novo nos dois fluxos: "✖ Nenhum destes — descartar arquivo".
+- **Sugestão de categoria errada pra fatura de energia** — o ramo da Copel ("Distribuição de
+  Energia Elétrica") contém "eletric", que casava com Material antes de "energia" ser avaliada
+  em `_RAMO_PARA_CATEGORIA`; precedência corrigida (serviço público avaliado primeiro).
+- GGV03-015 (Copel) reclassificada pra Serviço público no banco.
+
+---
+
 ## [Fatura Copel — 5 correções de pagamento, edição e extração] — 2026-07-08
 
 ### Motivação

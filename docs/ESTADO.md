@@ -1,7 +1,9 @@
 # Estado do Projeto Laura
 
-> Atualizado em: 2026-07-08 (encerramento — sessão da fatura Copel: 5 correções de pagamento,
-> edição e extração; bot reiniciado em produção com as mudanças, PID 63580)
+> Atualizado em: 2026-07-08, segundo encerramento do dia (rodada 2 — "Nenhum destes" do PIX
+> descarta o documento; categoria editável após o pedido gerado; categoria "Serviço público"
+> separada de "Serviços"; bot em produção, PID 41696. Rodada 1 — sessão da fatura Copel:
+> 5 correções de pagamento, edição e extração)
 > Sessão: **Revisão de pedido agora recalcula saldo/status contra as parcelas já pagas
 > (`_recalcular_status_pagamento()`, convergida com `_cb_pix_pagar`); edição de itens não
 > corrompe mais o registro quando a formatação da Claude varia; PROMPT de fatura captura
@@ -249,6 +251,40 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 ---
 
 ## Última Fiada Implementada
+
+**Rodada 2 de 2026-07-08 — PIX descarta, categoria editável, Serviço público** *(mesmo dia)*
+
+Continuação ao vivo: Dennis testou o fluxo real da fatura Copel em produção e cada clique
+expôs a próxima lacuna, resolvida na hora:
+
+1. **"Nenhum destes" do comprovante PIX agora descarta o documento** — identificou a fatura
+   errado como comprovante, clicou "Nenhum destes" e o arquivo ficou preso como `recebido`
+   (hash bloqueando reenvio). Mesmo bug já corrigido no fluxo de NF-e em 2026-07-06: o botão
+   não carregava `doc_id`. Corrigido nos dois fluxos com o mesmo rótulo novo
+   ("✖ Nenhum destes — descartar arquivo", convergência); o "↩️ Voltar" da tela de
+   confirmação de pagamento continua só cancelando, nunca apaga. Doc 53 (fatura presa)
+   removido do banco e do disco.
+2. **Categoria da compra editável após o pedido gerado** — GGV03-015 nasceu como Material e
+   não havia nenhum caminho pra reclassificar (a categoria só era escolhida na geração).
+   Botão "🏷 Categoria da compra" no menu Corrigir dados (visível só com pedido gerado);
+   `_teclado_selecao_categorias()` parametrizada (`cat_sel` gera, `cat_upd` só reclassifica,
+   nunca toca status/valor/pagamento).
+3. **Categoria "Serviço público" separada de "Serviços"** — Dennis: "serviços podem ser
+   privados, MO inst elétrica, MO pintura" — esses exigem NF-e. `SERVICO_PUBLICO` novo no
+   enum; `CATEGORIAS_SEM_NFE_OBRIGATORIA` = `{taxa, imposto, servico_publico}`. **Causa raiz
+   da sugestão errada achada no caminho**: ramo da Copel ("Distribuição de Energia Elétrica")
+   contém "eletric", que casava com Material antes de "energia" ser avaliada no
+   `_RAMO_PARA_CATEGORIA` — precedência corrigida (serviço público primeiro, ordem
+   documentada no código), 6 casos testados. GGV03-015 migrada pra `servico_publico`.
+   **Efeito colateral informado a Dennis, decisão dele pendente**: GGV03-002/003 (DeltaD
+   projetos/gestão, categoria `servicos`) agora exigem NF-e — reclassificáveis pelo botão
+   novo se ele preferir.
+
+Também nesta rodada: texto de apresentação da Laura pro Fabio (primo, possível entusiasta) —
+ângulo central definido por Dennis: "recebo os arquivos no WhatsApp normalmente e encaminho
+pra Laura, ela faz o resto" — o produto não cria trabalho novo, absorve o que já chega.
+
+---
 
 **Fatura Copel — 5 correções de pagamento, edição e extração** *(2026-07-08)*
 
