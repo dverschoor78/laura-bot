@@ -1,6 +1,12 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-06 (**Valor de pedido não atualizava após revisão, corrigido** —
+> Atualizado em: 2026-07-08 (**Sessão da fatura Copel — 5 correções**: revisão de pedido
+> recalcula saldo/status contra as parcelas pagas (`_recalcular_status_pagamento()`,
+> GGV03-013 corrigido no banco); edição de itens não corrompe mais o registro — bug
+> intermitente relatado em 2026-07-07; PROMPT de fatura captura todas as linhas de cobrança,
+> extrai Vencimento e não inventa Chave PIX; alerta ⚠️ de divergência soma × total na tela
+> de resumo; trava contra colar a mensagem do bot na edição de itens); histórico anterior
+> 2026-07-06: **Valor de pedido não atualizava após revisão, corrigido** —
 > `gerar_pfm()` no modo revisão agora atualiza `lancamentos`, não só o PDF; **NF-e presa
 > corrigida** — sem candidato ou "Nenhum destes" agora descarta o documento, antes ficava
 > presa pra sempre bloqueando reenvio; **Lista de Compras —

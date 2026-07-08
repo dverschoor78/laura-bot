@@ -1,53 +1,77 @@
 # Estado do Projeto Laura
 
-> Atualizado em: 2026-07-06 (encerramento — nome de arquivo da Lista de Compras padronizado,
-> histórico de Listas de Compras por obra, bug de NF-e presa corrigido, e bug de valor do
-> pedido não atualizando após revisão corrigido; bot reiniciado em produção com as mudanças)
-> Sessão: **Nome de arquivo da Lista de Compras (`GGV03-list-AAAA-MM-DD-resumo-orç/ref.pdf`) +
-> campo Resumo editável; "Gerar Lista de Compras" agora encerra a lista (vira registro
-> histórico) em vez de reaproveitar pra sempre; picker "📝 Listas de Compras" no Cockpit da
-> Obra (buscar por nome/Resumo, reabrir pra editar); NF-e sem candidato ou "Nenhum destes"
-> agora descarta o documento — antes ficava presa pra sempre, bloqueando reenvio; revisão de
-> pedido (rev01/rev02) agora atualiza `lancamentos` — antes o valor corrigido só aparecia no
-> PDF, nunca no Cockpit da Obra/Tela do Pedido**
+> Atualizado em: 2026-07-08 (encerramento — sessão da fatura Copel: 5 correções de pagamento,
+> edição e extração; bot reiniciado em produção com as mudanças, PID 63580)
+> Sessão: **Revisão de pedido agora recalcula saldo/status contra as parcelas já pagas
+> (`_recalcular_status_pagamento()`, convergida com `_cb_pix_pagar`); edição de itens não
+> corrompe mais o registro quando a formatação da Claude varia; PROMPT de fatura captura
+> todas as linhas de cobrança, extrai Vencimento e não inventa Chave PIX; tela de resumo
+> alerta ⚠️ quando soma dos itens diverge do Valor total; edição de itens recusa texto com a
+> mensagem de instrução do próprio bot colada junto (caso real do celular)**
 
-Continuação da mesma sessão de ontem (Consultoria de Recompra): Dennis pediu para melhorar o
-nome dos PDFs da Lista de Compras — hoje saíam como "Lista de Compras - GGV03 - 2026-07-06 -
-Referência.pdf", sem jeito de diferenciar listas da mesma obra por assunto. No meio do ajuste,
-Dennis perguntou como voltar numa lista já gerada pra editar, filtrando por data ou localizando
-por nome — investigação mostrou que esse conceito não existia: cada obra tinha só uma lista
-"aberta" pra sempre, sobrescrita a cada geração. As duas perguntas viraram uma fiada só: nome
-de arquivo + campo Resumo + mudança de ciclo de vida (cada "Gerar" fecha a lista) + picker de
-busca. Duas rodadas de perguntas (`AskUserQuestion`) confirmaram formato exato do nome,
-persistência do Resumo, escopo do picker (limite de 10, sem apagar PDFs antigos) antes do
-código, como sempre.
+Dennis abriu a sessão reportando duas coisas do dia anterior: (1) o pedido GGV03-003r1 (na
+verdade GGV03-013, rev01) com desconto de R$ 0,56 ficou "sem saldo a pagar" errado — pago
+integralmente numa parcela única, mas status travado em "Aguardando pagamento"; (2) mandou uma
+fatura da Copel pra gerar pedido e "não conseguiu editar o item correto", e o registro da
+captura não foi apagado. A fatura real foi reenviada em modo teste (`LAURA_ENV=test`) pra
+diagnóstico ao vivo, que expôs cinco bugs — três deles descobertos só porque o documento real
+estava disponível.
 
-**Nome de arquivo padronizado** (`_slug_arquivo`, `_cb_lc_gerar`) — formato confirmado com
-Dennis: `{GGV}-list-{AAAA-MM-DD}-{resumo-slug}-{orç|ref}.pdf` (ex:
-`GGV03-list-2026-07-06-materiais-eletricos-orç.pdf`). Sem Resumo digitado, cai no slug
-`lista-compras`. `resumo TEXT` — nova coluna em `listas_compra`, editável no cabeçalho da Tela
-de Conferência (botão "🏷 Resumo", mesmo mecanismo de Endereço/Observações).
+**1. Revisão não recalculava saldo/status** (`_recalcular_status_pagamento()`, nova) — a
+correção de 2026-07-06 atualizava `lancamentos.valor` na revisão mas deliberadamente nunca
+tocava `status`/`valor_pago`; quando a revisão mudava o valor (desconto negociado depois do
+pagamento), ninguém reavaliava se `SUM(parcelas) >= valor` de novo. A nova função reconcilia
+`status`/`valor_pago` contra a soma real das parcelas — nunca inventa nem apaga parcela — e é
+usada tanto pela revisão quanto por `_cb_pix_pagar()` (lógica que antes vivia duplicada lá
+dentro). GGV03-013 corrigido no banco real: `a_pagar` → `pago`, R$ 22.732,00.
 
-**Histórico de Listas de Compras por obra** (`encerrar_lista`, `listar_listas_obra`,
-`_cb_obra_listas`, `_cb_lc_abrir`, `_cb_lc_buscar`) — mudança de ciclo de vida: "Gerar Lista de
-Compras" agora fecha a lista (`status=encerrada`) em vez de deixá-la `aberta` pra sempre; cada
-geração vira um registro histórico próprio. Cockpit da Obra ganhou o botão "📝 Listas de
-Compras" → picker com as últimas 10 (data + Resumo + nº de itens); "🔍 Buscar por nome" filtra
-pelo Resumo. Tocar numa lista reabre a Tela de Conferência com itens e cabeçalho (Endereço/
-Observações/Resumo) carregados do banco; "Gerar" de novo regrava a mesma `lista_id` e fecha de
-novo. PDFs de gerações antigas nunca são apagados (CONSTITUICAO.md — "Dados são sagrados") —
-cada geração acrescenta novos com a data do dia, decisão confirmada com Dennis.
+**2. Edição de itens corrompia o registro** (`_CAMPOS_APOS_ITENS_RE`, compartilhada) — o
+relato "não havia maneira de apagar as linhas capturadas, ele juntava a linha editada com as
+originais" (2026-07-07, celular): `_substituir_itens()` exigia `:` na mesma linha do cabeçalho
+"Itens"; quando a variação de formatação da Claude daquele dia não tinha isso, a função caía
+num fallback que só ACRESCENTAVA o bloco novo no fim do texto — e toda edição seguinte
+re-encontrava o próprio acréscimo, acumulando pra sempre (auto-reforçante; por isso no dia
+seguinte, com captura nova, "não tinha nada de errado"). Corrigido nas 4 funções que tinham
+cópias da mesma regra frágil (`_bloco_itens`/`_substituir_itens`/`_itens`/`_recalcular_itens`):
+cabeçalho tolerante (sem exigir `:`), fim de bloco por lista fechada dos campos que realmente
+vêm depois de Itens no template, e fallback que insere no lugar certo em vez de anexar às cegas.
 
-**Testado**: lógica de banco isolada contra um sqlite temporário (duas gerações da mesma obra
-viram registros distintos, filtro por Resumo funciona, reabrir carrega os itens certos) e
-`_slug_arquivo()` com acentos/pontuação (ex: "Materiais Elétricos" → "materiais-eletricos").
+**3. PROMPT de fatura, 3 ajustes** — a fatura Copel real expôs: (a) a IA capturou só 3 das 4
+linhas de cobrança (omitiu "Valor ref. conta do mês anterior", R$ 45,19, por não ter kWh como
+as demais) e como `_calcular_totais()` prioriza a soma dos itens, o pedido nasceria com
+R$ 44,67 em vez de R$ 89,86 — instrução explícita de listar TODAS as linhas de cobrança,
+mesmo fora do padrão; (b) Chave PIX extraída era o telefone do "Responsável pela Iluminação
+Pública - Município" — agora só extrai se claramente rotulada como PIX do fornecedor; (c)
+campo novo **Vencimento** no template `[orcamento]` — estava impresso em destaque na fatura
+("04/07/2026") mas só existia por digitação manual; `_resumo_gerar()` usa o extraído como
+fallback do digitado.
 
-**Bot reiniciado em produção** (`LAURA_ENV=prod`) a pedido do Dennis ("reinicia") — processo
-antigo (PID 69620, rodando desde 08:50) encerrado e um novo subido (PID 75796) já com essas
-mudanças. Confirmado: instância única, sem erro no log de inicialização.
+**4. Alerta de divergência soma × total** (`_totais_divergem()`) — rede de segurança
+permanente (programa, não IA): a tela de resumo mostra "⚠️ Valor total do documento: R$ X —
+confira os itens" quando a soma dos itens não bate com o Valor total extraído
+independentemente. Antes, a soma errada era usada em silêncio — vale pra qualquer orçamento
+onde a extração perca uma linha, não só fatura.
 
-**Não concluído**: validar ao vivo no Telegram (nome de arquivo, campo Resumo, picker de
-histórico, reabertura de lista antiga) — só testado estruturalmente nesta sessão.
+**5. Trava contra colar a mensagem do bot** — achado ao vivo em teste: no celular, a edição
+de itens voltou com o texto de instrução da própria Laura colado junto ("Itens atuais:...
+Novos itens: Use o formato...") e foi gravado dentro do campo Itens, inflando o total pra
+R$ 99,86. `receber_texto()` (ramo `edit_itens`) reconhece os marcadores e recusa com
+orientação, sem tocar no banco.
+
+**Testado**: `py_compile` limpo; correção 1 validada contra o GGV03-013 real (status virou
+`pago` no banco); correção 2 com os dois cenários (cabeçalho normal e quebrado) + edição
+dupla sem acúmulo; correção 4 com os dados reais da Copel (alerta com R$ 89,86 ÷ soma
+R$ 44,67; silêncio quando bate); correção 5 com o texto corrompido real vs. edição limpa.
+Doc de teste 123 restaurado ao estado original. **Bot reiniciado em produção** (PID 63580,
+instância única, sem erro).
+
+**Não concluído**: validar as correções 3-5 ao vivo com a fatura real de ponta a ponta
+(gerar o pedido de verdade em produção); o mistério do registro da Copel de 2026-07-07 que
+sumiu sem rastro (nem produção nem teste) ficou sem explicação — pode ter sido descartado
+por botão sem Dennis perceber.
+
+**Nota da sessão**: Dennis ativou o acesso promocional ao Claude Fable 5 via `/model`
+(válido até 2026-07-12, consome até 50% do limite semanal compartilhado).
 
 ---
 
@@ -226,7 +250,19 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 
 ## Última Fiada Implementada
 
-**Pedido — Bug real corrigido: valor não atualizava após revisão** *(2026-07-06, mesmo dia,
+**Fatura Copel — 5 correções de pagamento, edição e extração** *(2026-07-08)*
+
+Ver a crônica completa no topo deste documento (é a sessão mais recente). Em resumo:
+`_recalcular_status_pagamento()` (revisão reconcilia saldo/status com as parcelas;
+GGV03-013 corrigido); `_CAMPOS_APOS_ITENS_RE` (edição de itens não corrompe mais o registro
+— era o bug intermitente de 2026-07-07); PROMPT de fatura (todas as linhas de cobrança,
+Vencimento extraído, Chave PIX só rotulada); `_totais_divergem()` (alerta ⚠️ soma × total);
+trava contra colar a mensagem do bot na edição de itens. Bot reiniciado em produção
+(PID 63580).
+
+---
+
+**Pedido — Bug real corrigido: valor não atualizava após revisão** *(2026-07-06,
 achado ao vivo pelo Dennis testando o Cockpit da Obra)*
 
 Dennis corrigiu o valor do pedido GGV03-012 (item com preço errado) via "Revisar", mas o

@@ -44,8 +44,11 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > Produto antes da Correspondência SINAPI" (atributos técnicos completos antes de casar com
 > SINAPI — deliberadamente não persistido ainda, ver Visão de Longo Prazo em `docs/ROADMAP.md`).
 
-> Concluído desde a última revisão: bug real de valor de pedido não atualizando após revisão
-> corrigido (2026-07-06); bug real de NF-e presa corrigido (documento sem candidato
+> Concluído desde a última revisão: 5 correções da sessão de fatura Copel (2026-07-08 — saldo
+> não recalculado após revisão com desconto, edição de itens corrompendo o registro, prompt de
+> fatura perdendo linha de cobrança/Chave PIX falsa/sem Vencimento, alerta de divergência
+> soma×total, trava contra colar mensagem do bot na edição); bug real de valor de pedido não
+> atualizando após revisão corrigido (2026-07-06); bug real de NF-e presa corrigido (documento sem candidato
 > ou "Nenhum destes" agora descarta, 2026-07-06); nome de arquivo padronizado + campo Resumo +
 > histórico de Listas de Compras por obra (picker "📝 Listas de Compras", buscar por nome,
 > reabrir lista antiga pra editar, 2026-07-06); Consultoria de Recompra (painel "🔁 Você já comprou isso" +
@@ -54,6 +57,48 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > correção de bug de duplicação (2026-07-05) e Camada 4b (correção campo a campo + Tela do
 > Item unificada + cabeçalho editável + convergência do endereço de entrega com o Pedido de
 > Compra, 2026-07-05, validado ao vivo no Telegram) — ver entradas abaixo.
+
+---
+
+## [Fatura Copel — 5 correções de pagamento, edição e extração] — 2026-07-08
+
+### Motivação
+
+Dennis reportou dois problemas do dia anterior: (1) o pedido GGV03-013 (rev01, desconto de
+R$ 0,56 inserido na revisão) ficou "Aguardando pagamento" mesmo com a parcela única cobrindo
+o valor inteiro; (2) ao mandar uma fatura da Copel pra gerar pedido, não conseguiu editar o
+item correto. A investigação com a fatura real (reenviada em modo teste) expôs cinco bugs.
+
+### Corrigido
+
+- **Revisão agora recalcula saldo/status do pagamento** — a correção de 2026-07-06 atualizava
+  `lancamentos.valor` na revisão mas deliberadamente nunca tocava em `status`/`valor_pago`;
+  quando a revisão mudava o valor (ex: desconto negociado depois do pagamento), ninguém
+  reavaliava se a soma das parcelas já cobria o valor novo. Nova
+  `_recalcular_status_pagamento()` reconcilia `status`/`valor_pago` contra a soma real das
+  parcelas — usada tanto pela revisão quanto por `_cb_pix_pagar()` (mesma lógica, um lugar
+  só). GGV03-013 corrigido no banco real (`a_pagar` → `pago`).
+- **Edição de itens não corrompe mais o registro** — `_substituir_itens()` exigia `:` na
+  mesma linha do cabeçalho "Itens"; quando a variação de formatação da Claude não tinha isso,
+  a função caía num fallback que só ACRESCENTAVA o bloco novo no fim do texto, nunca
+  substituindo — e toda edição seguinte re-encontrava o acréscimo, acumulando pra sempre
+  (era isso o "não havia maneira de apagar as linhas capturadas" de 2026-07-07). Cabeçalho
+  tolerante + fim de bloco por lista fechada de campos (`_CAMPOS_APOS_ITENS_RE`, compartilhada
+  por `_bloco_itens`/`_substituir_itens`/`_itens`/`_recalcular_itens`) + fallback que insere
+  no lugar certo em vez de anexar às cegas.
+- **PROMPT de fatura** — 3 ajustes: itens devem listar TODAS as linhas de cobrança (a fatura
+  Copel tem "Valor ref. conta do mês anterior" sem kWh — era omitida, e o pedido nasceria com
+  R$ 44,67 em vez de R$ 89,86); Chave PIX só quando claramente rotulada (extraía o telefone do
+  "Responsável pela Iluminação Pública" como se fosse PIX da Copel); campo novo **Vencimento**
+  extraído do documento (antes só existia por digitação manual).
+- **Alerta de divergência soma × total** (`_totais_divergem()`) — a tela de resumo agora
+  mostra "⚠️ Valor total do documento: R$ X — confira os itens" quando a soma dos itens não
+  bate com o Valor total extraído independentemente; antes a soma errada era usada em
+  silêncio. Rede de segurança permanente: vale pra qualquer orçamento, não só fatura.
+- **Trava contra colar a mensagem do bot na edição de itens** — no celular, a edição voltou
+  com o texto de instrução da própria Laura colado junto ("Itens atuais:... Novos itens:...")
+  e isso foi gravado dentro do campo Itens, inflando o total. Agora a Laura reconhece os
+  marcadores e recusa, pedindo só a lista nova.
 
 ---
 

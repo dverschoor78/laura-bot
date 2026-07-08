@@ -292,11 +292,65 @@ quantidade ambígua, porque não existe "melhor interpretação" possível pra u
 
 ---
 
+## 14. Editar o bloco de itens acrescentava em vez de substituir (corrupção auto-reforçante)
+
+**Sintoma:** relatado em 2026-07-07 pelo celular — editar a lista de itens de uma fatura Copel
+"juntava a linha editada com as originais... não havia maneira de apagar as linhas capturadas".
+No dia seguinte, reenviando o mesmo documento, o problema "sumiu" — típico bug intermitente.
+
+**Causa raiz:** `_substituir_itens()` localizava o cabeçalho do bloco exigindo `:` na mesma
+linha (`re.match(r"^(itens|materiais)", ...) and ":" in stripped`). Quando a variação de
+formatação da Claude daquele dia não incluía `:` ali, a função não achava o bloco original e
+caía num fallback que só ACRESCENTAVA `\nItens:\n{novo_bloco}` no fim do texto — e o pior:
+a edição seguinte encontrava esse acréscimo como se fosse o bloco real, mas sem delimitador de
+fim (nada depois dele), então toda edição futura também virava acréscimo. Corrupção
+**auto-reforçante**: um único tropeço de formato prendia o documento no padrão errado pra
+sempre. A heurística de "fim do bloco" ("primeira linha sem número que tem `:`") era
+igualmente frágil. Quatro funções tinham cópias divergentes da mesma regra
+(`_bloco_itens`/`_substituir_itens`/`_itens`/`_recalcular_itens`).
+
+**Correção:** cabeçalho tolerante (`^(itens|materiais)\b`, sem exigir `:`); fim de bloco por
+lista fechada dos campos que realmente vêm depois de Itens no template
+(`_CAMPOS_APOS_ITENS_RE`: valor total, desconto, condição, prazo, validade, observações) —
+compartilhada pelas 4 funções; e o fallback nunca mais anexa às cegas no fim — insere antes
+do primeiro campo conhecido, preservando a estrutura.
+
+**Lição geral:** Família A clássica (código assume forma fixa de string do Claude), com um
+agravante novo: quando a função que **grava** de volta no registro tem um fallback permissivo,
+o erro não é pontual — ele **contamina o dado persistido** e muda o comportamento de todas as
+operações futuras sobre aquele documento. Fallback de escrita nunca pode "fazer qualquer
+coisa razoável"; ou acha o lugar certo com segurança, ou falha visível.
+
+---
+
+## 15. Texto de instrução do próprio bot gravado como dado (colar do celular)
+
+**Sintoma:** no celular, a edição de itens voltou contendo a mensagem de instrução da própria
+Laura ("Itens atuais:... Novos itens: Use o formato para cálculo automático:...") colada antes
+da edição real — e tudo foi gravado dentro do campo Itens do documento, incluindo o item de
+exemplo ("Ex: 1. Cimento 50kg (10 sc) — R$ 350,00" não, mas o total inflou de R$ 89,86 pra
+R$ 99,86 com linhas fantasma).
+
+**Causa raiz:** `receber_texto()` (ramo `edit_itens`) aceitava qualquer texto como a nova
+lista de itens — nenhuma validação de que o conteúdo parece uma lista e não a própria
+pergunta do bot. Copiar/colar a mensagem inteira é um erro fácil de cometer no celular.
+
+**Correção:** o ramo `edit_itens` reconhece marcadores da própria mensagem de instrução
+("Itens atuais:", "Novos itens:", "Use o formato para cálculo automático") e recusa com
+orientação clara, sem tocar no banco.
+
+**Lição geral:** entrada digitada pelo usuário é tão variável quanto saída de IA — quando o
+bot faz uma pergunta cujo texto pode ser confundido com a resposta esperada (instrução com
+exemplo no mesmo formato do dado), a validação precisa reconhecer a própria pergunta. Vale
+pra qualquer prompt de texto livre que mostre exemplos no formato exato do que espera receber.
+
+---
+
 ## Padrão geral por trás de tudo isso
 
 Três famílias de bug, não uma só.
 
-**Família A (itens 1-6, 11, 12) — o código assume uma forma fixa de string vinda do Claude**
+**Família A (itens 1-6, 11, 12, 14) — o código assume uma forma fixa de string vinda do Claude**
 (largura de caractere, formato numérico americano, unidade só-letra, gênero gramatical, campo
 com nome exato, vocabulário implícito de "o que é uma unidade válida") — mas a extração por IA
 é inerentemente variável, principalmente em documentos que fogem do padrão esperado (boleto em
@@ -319,7 +373,10 @@ recuperar essa estrutura depois com regex é frágil por natureza. Regra prátic
 tabular, o formato de saída também deve ser tabular/estruturado (JSON, um objeto por linha) —
 nunca uma frase por item.
 
-Regra prática comum às três famílias: testar contra pelo menos um caso real de produção antes de
-considerar corrigido — não só contra dado fictício. Foi assim que todos os 13 casos acima foram
+Item 15 abre uma quarta frente: **entrada humana contaminada** — o texto digitado/colado pelo
+usuário pode conter a própria pergunta do bot; validação de entrada precisa reconhecer isso.
+
+Regra prática comum a todas as famílias: testar contra pelo menos um caso real de produção antes
+de considerar corrigido — não só contra dado fictício. Foi assim que todos os 15 casos acima foram
 confirmados (lendo o PDF/imagem real ou consultando o banco de produção, não assumindo a partir do
 sintoma).
