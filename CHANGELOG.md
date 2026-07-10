@@ -30,7 +30,9 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 6. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
 7. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
 8. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
-9. Acesso via Claude Code Remote do celular — ideia registrada, servidor Proxmox em casa (Eric)
+9. Executar a migração pro container Proxmox (repositório preparado em 2026-07-10 — roteiro e
+   checklist em `docs/DEPLOY.md`; CT 109 já criado pelo Eric; Tailscale cobre o acesso remoto
+   via Claude Code do celular)
 10. Persistir os 9 índices de `data/laura.db` em código (hoje só existem no banco vivo — um `init_db()`
     contra um banco novo não os recria; ver Dívida Técnica em `docs/ROADMAP.md`)
 11. Aplicar "← Voltar" nos ~25 prompts de texto do resto do bot (Obra, entrega, recibo,
@@ -57,6 +59,37 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > correção de bug de duplicação (2026-07-05) e Camada 4b (correção campo a campo + Tela do
 > Item unificada + cabeçalho editável + convergência do endereço de entrega com o Pedido de
 > Compra, 2026-07-05, validado ao vivo no Telegram) — ver entradas abaixo.
+
+---
+
+## [0.15.0] — Preparação do deploy Linux/Proxmox — 2026-07-10
+
+### Motivação
+
+Eric criou o container 109 "laura" no Proxmox dele (Debian LXC, 2 vCPU/2 GB) e avisou:
+"agora só precisa dar um git clone no servidor". O repositório precisava ficar à altura —
+o único acoplamento real com o Windows era o OneDrive como pasta local.
+
+### Adicionado
+
+- **`ONEDRIVE_PATH` (.env) agora é lida pelo código** — `_raiz_obra()` resolve
+  `obras.pasta_onedrive` relativo contra ela; caminho absoluto segue funcionando
+  (compatibilidade com o banco atual do Windows). Proteção: caminho Windows num host Linux
+  (banco não migrado) cai em `data/pfms/` em vez de gravar em pasta inexistente.
+- **`scripts/migrar_caminhos_obras.py`** — converte os caminhos do banco de absoluto pra
+  relativo; dry-run por padrão, idempotente, testado contra cópia do banco real.
+- **`deploy/`** — `laura.service` e `rclone-onedrive.service` (systemd) + `setup.sh`
+  (dependências, Playwright Chromium, fuso horário, checagem de Python ≥ 3.12).
+- **`docs/DEPLOY.md`** — roteiro completo: features FUSE+Nesting no CT, clone do repo
+  privado, rclone, transferência de `.env`/`data/` fora do git, teste em `LAURA_ENV=test` e
+  checklist do corte de produção (instância única!).
+
+### Removido
+
+- Dict `GGV_ONEDRIVE` (hardcode Windows, morto desde que a tabela `obras` o substituiu) e o
+  caminho Windows no seed de `_migrar_obras()`.
+- `.env.example`: variáveis que o código nunca leu (`CLAUDE_MODEL`, `DB_PATH`, `GGV_ATIVO`,
+  `LOG_LEVEL`) — documento agora reflete só o que existe.
 
 ---
 

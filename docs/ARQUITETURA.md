@@ -150,6 +150,17 @@ silenciosamente (não bloqueia nenhum fluxo do Telegram) se o arquivo original n
 Se `pasta_onedrive` estiver vazia para uma obra, os documentos caem em `data/pfms/` (local, não
 sincronizado) em vez de falhar — evita gravar no lugar errado por engano.
 
+**Resolução de caminhos (2026-07-10, preparação pro deploy Linux/Proxmox)** — `_raiz_obra()`
+aceita `pasta_onedrive` em duas formas: **relativa** (ex: `00 Obras/2026-06 GGV03`), resolvida
+contra a env `ONEDRIVE_PATH` do `.env` (`C:\Users\denni\OneDrive` no Windows, `/mnt/onedrive`
+no servidor via rclone) — forma portátil, o mesmo banco funciona nas duas máquinas; ou
+**absoluta**, usada como está (compatibilidade com o banco atual do Windows). Proteções: caminho
+relativo sem `ONEDRIVE_PATH` definida, e caminho Windows (`C:\...`) num host Linux, caem em
+`data/pfms/` em vez de gravar em lugar inexistente. `scripts/migrar_caminhos_obras.py` converte
+o banco de absoluto pra relativo (dry-run por padrão, idempotente). O dict morto `GGV_ONEDRIVE`
+(hardcode Windows, sem uso desde a tabela `obras`) foi removido. Deploy completo no container
+LXC (systemd, rclone, checklist de corte): `docs/DEPLOY.md` + `deploy/`.
+
 ---
 
 ## 3. Banco de Dados
@@ -501,7 +512,7 @@ Referências para navegação no arquivo (4.994 linhas):
 | Bloco | Referência | O que faz |
 |---|---|---|
 | Imports e inicialização | `load_dotenv()`, `claude = anthropic...` | Dependências, variáveis de ambiente, cliente Claude |
-| Constantes e configuração | `TIPOS`, `DELTAD`, `GGV_ONEDRIVE` | Mapeamentos de tipos, GGVs, dados DeltaD, endereços |
+| Constantes e configuração | `TIPOS`, `DELTAD`, `ONEDRIVE_PATH` | Mapeamentos de tipos, GGVs, dados DeltaD, endereços, raiz do OneDrive |
 | Domínio — Pedido | `StatusPedido`, `Pedido` | Enum de status e dataclass com 17 campos |
 | Integração Claude | `PROMPT` | Prompt de extração estruturada (inclui template `lista_materiais`, 2026-07-03) |
 | Banco de dados | `init_db()`, `buscar_fornecedor()` | Criação de tabelas, CRUD |
@@ -576,10 +587,6 @@ Referências para navegação no arquivo (4.994 linhas):
 - **`dados_claude` armazena texto bruto** — campos não são estruturados no banco;
   toda extração ocorre na leitura via `_campo()`. Mudanças no formato do Claude
   podem afetar a leitura de documentos antigos.
-
-- **`pfm_caminho` não existe como coluna** — o path do arquivo .docx é reconstruído
-  a cada consulta com base em `GGV_ONEDRIVE` + `pfm_codigo`. Inconsistente se a
-  estrutura de pastas mudar.
 
 - **BD fornecedores com dados incorretos** — MO Construção com CNPJ errado;
   PRUDENTÓPOLIS com split incorreto. Afeta `buscar_fornecedor()`.

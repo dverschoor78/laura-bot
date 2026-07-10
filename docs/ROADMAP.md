@@ -969,8 +969,12 @@ que `bot.py` parecia "bagunçado".
 8. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração encontrado
 9. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
    — perguntar sobre a `- Copy.jpeg` antes, é backup pessoal do Dennis
-10. Acesso via Claude Code Remote do celular — sem ambiente configurado; ideia de hospedar Laura +
-    banco num servidor Proxmox em casa (Eric administra) registrada, não iniciada
+10. **Executar a migração pro container Proxmox** — repositório 100% preparado em 2026-07-10
+    (código portátil, `deploy/`, `docs/DEPLOY.md`, script de migração de caminhos); container
+    109 "laura" já criado no node grow1 (Debian LXC, 2 vCPU/2 GB). Falta executar: features
+    FUSE+Nesting no CT (Eric), clone, `setup.sh`, rclone, transferir `.env`+`data/`, corte de
+    produção (parar o bot do Windows!). Roteiro completo e checklist em `docs/DEPLOY.md`.
+    Tailscale no container cobre o acesso remoto via Claude Code do celular (SSH + tmux)
 11. Persistir os 9 índices de `data/laura.db` em código — hoje só existem no banco vivo (nenhum
     `CREATE INDEX` em `bot.py`/scripts); um `init_db()` contra um banco novo não os recria
 12. Integrar `financeiro/relatorios.py` a `bot.py` — hoje as funções só rodam chamadas manualmente,

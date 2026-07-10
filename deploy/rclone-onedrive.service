@@ -1,0 +1,19 @@
+[Unit]
+Description=Montagem do OneDrive via rclone (usada pela Laura)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStartPre=/bin/mkdir -p /mnt/onedrive
+# Pressupoe um remote chamado "onedrive" ja configurado via: rclone config
+ExecStart=/usr/bin/rclone mount onedrive: /mnt/onedrive \
+    --vfs-cache-mode writes \
+    --vfs-cache-max-size 1G \
+    --dir-cache-time 30s
+ExecStop=/bin/fusermount -uz /mnt/onedrive
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

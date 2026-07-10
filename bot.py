@@ -36,6 +36,11 @@ DB_PATH   = Path("data/laura_test.db") if TEST_MODE else Path("data/laura.db")
 UPLOADS   = Path("data/test_uploads")  if TEST_MODE else Path("data/uploads")
 UPLOADS.mkdir(parents=True, exist_ok=True)
 
+# Raiz do OneDrive nesta máquina (ex: C:\Users\denni\OneDrive no Windows, /mnt/onedrive no
+# servidor Linux via rclone). Caminhos relativos em obras.pasta_onedrive são resolvidos
+# contra ela — ver _raiz_obra() e docs/DEPLOY.md.
+ONEDRIVE_PATH = os.environ.get("ONEDRIVE_PATH", "")
+
 claude = anthropic.Anthropic(api_key=CLAUDE_KEY)
 
 TIPOS = {
@@ -80,10 +85,6 @@ GGV_DESC = {
     "GGV02": "GGV02 — Matrícula 39.337, Quadra 05 Lote 06, JD das Nações, Carambeí-PR",
     "GGV03": "GGV03 — Matrícula 39.339, Quadra 05 Lote 08, JD das Nações, Carambeí-PR",
     "GGV00": "GGV00 — Despesas Gerais",
-}
-
-GGV_ONEDRIVE = {
-    "GGV03": Path(r"C:\Users\denni\OneDrive\00 Obras\2026-06 GGV03\04 Aquisição e Execução"),
 }
 
 CONDICOES = {
@@ -269,10 +270,26 @@ Em seguida, os dados extraídos conforme o tipo identificado acima.
 """
 
 def _raiz_obra(ggv: str) -> Optional[Path]:
-    """Pasta raiz da obra no OneDrive (ex: '00 Obras/2026-06 GGV03'). None se não configurada."""
+    """Pasta raiz da obra no OneDrive. None se não configurada (documentos caem em data/pfms).
+
+    obras.pasta_onedrive aceita duas formas:
+    - relativa ('00 Obras/2026-06 GGV03') — resolvida contra ONEDRIVE_PATH do .env;
+      é a forma portátil, funciona no Windows e no servidor Linux com o mesmo banco
+    - absoluta ('C:\\Users\\...') — usada como está; só faz sentido na máquina onde foi gravada
+    """
     obra = buscar_obra(ggv)
     raiz = obra.get("pasta_onedrive", "")
-    return Path(raiz) if raiz else None
+    if not raiz:
+        return None
+    if re.match(r"^[A-Za-z]:[\\/]", raiz) and os.name != "nt":
+        # Caminho Windows num host Linux: banco ainda não migrado
+        # (scripts/migrar_caminhos_obras.py) — cair em data/pfms é mais seguro que
+        # gravar num caminho que não existe.
+        return None
+    p = Path(raiz)
+    if p.is_absolute():
+        return p
+    return Path(ONEDRIVE_PATH) / p if ONEDRIVE_PATH else None
 
 def _pasta_pfm(ggv: str) -> Path:
     if TEST_MODE:
@@ -492,7 +509,7 @@ def _migrar_obras(con):
          "Rua Índia em frente ao nº139, JD das Nações - Carambeí-PR CEP 84.145-000",
          "Sabiá", "(42) 98439-9498",
          "Dennis Verschoor", "(42) 99127-1255",
-         r"C:\Users\denni\OneDrive\00 Obras\2026-06 GGV03\04 Aquisição e Execução", 1),
+         "00 Obras/2026-06 GGV03/04 Aquisição e Execução", 1),
     ]
     for d in dados:
         con.execute("""

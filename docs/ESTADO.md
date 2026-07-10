@@ -1,79 +1,44 @@
 # Estado do Projeto Laura
 
-> Atualizado em: 2026-07-08, segundo encerramento do dia (rodada 2 — "Nenhum destes" do PIX
-> descarta o documento; categoria editável após o pedido gerado; categoria "Serviço público"
-> separada de "Serviços"; bot em produção, PID 41696. Rodada 1 — sessão da fatura Copel:
-> 5 correções de pagamento, edição e extração)
-> Sessão: **Revisão de pedido agora recalcula saldo/status contra as parcelas já pagas
-> (`_recalcular_status_pagamento()`, convergida com `_cb_pix_pagar`); edição de itens não
-> corrompe mais o registro quando a formatação da Claude varia; PROMPT de fatura captura
-> todas as linhas de cobrança, extrai Vencimento e não inventa Chave PIX; tela de resumo
-> alerta ⚠️ quando soma dos itens diverge do Valor total; edição de itens recusa texto com a
-> mensagem de instrução do próprio bot colada junto (caso real do celular)**
+> Atualizado em: 2026-07-10 (sessão de infraestrutura — repositório preparado pro deploy no
+> container Proxmox do Eric; a migração em si ainda não foi executada)
+> Sessão: **Portabilidade Linux completa — `_raiz_obra()` resolve caminho relativo contra
+> `ONEDRIVE_PATH` (.env), dict morto `GGV_ONEDRIVE` removido, seed de obras sem caminho
+> Windows; `scripts/migrar_caminhos_obras.py` (dry-run por padrão, idempotente) converte o
+> banco; pasta `deploy/` nova (units systemd da Laura e do rclone + `setup.sh` com checagem
+> de Python ≥ 3.12); `docs/DEPLOY.md` com o roteiro completo e o checklist de corte de
+> produção; `.env.example` enxugado pra refletir só o que o código realmente lê**
 
-Dennis abriu a sessão reportando duas coisas do dia anterior: (1) o pedido GGV03-003r1 (na
-verdade GGV03-013, rev01) com desconto de R$ 0,56 ficou "sem saldo a pagar" errado — pago
-integralmente numa parcela única, mas status travado em "Aguardando pagamento"; (2) mandou uma
-fatura da Copel pra gerar pedido e "não conseguiu editar o item correto", e o registro da
-captura não foi apagado. A fatura real foi reenviada em modo teste (`LAURA_ENV=test`) pra
-diagnóstico ao vivo, que expôs cinco bugs — três deles descobertos só porque o documento real
-estava disponível.
+Contexto: Eric criou o container 109 "laura" no node `grow1` do Proxmox dele (Debian LXC
+community-scripts, unprivileged, 2 vCPU, 2 GB RAM, 20 GB disco) e o domínio
+`laura.deltad.com.br` está ativo (não usado pelo bot — polling não precisa de porta de
+entrada; fica reservado pra futura interface web). Recado do Eric: "agora só precisa dar um
+git clone no servidor" — esta sessão deixou o repositório à altura desse recado.
 
-**1. Revisão não recalculava saldo/status** (`_recalcular_status_pagamento()`, nova) — a
-correção de 2026-07-06 atualizava `lancamentos.valor` na revisão mas deliberadamente nunca
-tocava `status`/`valor_pago`; quando a revisão mudava o valor (desconto negociado depois do
-pagamento), ninguém reavaliava se `SUM(parcelas) >= valor` de novo. A nova função reconcilia
-`status`/`valor_pago` contra a soma real das parcelas — nunca inventa nem apaga parcela — e é
-usada tanto pela revisão quanto por `_cb_pix_pagar()` (lógica que antes vivia duplicada lá
-dentro). GGV03-013 corrigido no banco real: `a_pagar` → `pago`, R$ 22.732,00.
+O único acoplamento real com o Windows era o OneDrive: `obras.pasta_onedrive` guardava
+caminhos absolutos (`C:\Users\denni\...`), a env `ONEDRIVE_PATH` do `.env.example` nunca era
+lida pelo código, e havia dois hardcodes Windows em `bot.py` (um deles o dict `GGV_ONEDRIVE`,
+morto desde que a tabela `obras` o substituiu). Resolvido com a forma portátil: caminho
+relativo no banco + raiz por máquina no `.env` — o mesmo banco funciona no Windows e no
+servidor. Compatibilidade preservada: caminho absoluto continua funcionando como está (o
+banco de produção do Windows não foi tocado — a migração roda no servidor, sobre a cópia).
+Proteções novas: caminho relativo sem raiz definida, ou caminho Windows num host Linux (banco
+não migrado), caem em `data/pfms/` em vez de gravar em pasta inexistente.
 
-**2. Edição de itens corrompia o registro** (`_CAMPOS_APOS_ITENS_RE`, compartilhada) — o
-relato "não havia maneira de apagar as linhas capturadas, ele juntava a linha editada com as
-originais" (2026-07-07, celular): `_substituir_itens()` exigia `:` na mesma linha do cabeçalho
-"Itens"; quando a variação de formatação da Claude daquele dia não tinha isso, a função caía
-num fallback que só ACRESCENTAVA o bloco novo no fim do texto — e toda edição seguinte
-re-encontrava o próprio acréscimo, acumulando pra sempre (auto-reforçante; por isso no dia
-seguinte, com captura nova, "não tinha nada de errado"). Corrigido nas 4 funções que tinham
-cópias da mesma regra frágil (`_bloco_itens`/`_substituir_itens`/`_itens`/`_recalcular_itens`):
-cabeçalho tolerante (sem exigir `:`), fim de bloco por lista fechada dos campos que realmente
-vêm depois de Itens no template, e fallback que insere no lugar certo em vez de anexar às cegas.
+**Testado**: `py_compile` limpo; `_raiz_obra()` validada nos 5 cenários (absoluto no Windows,
+relativo+raiz, relativo sem raiz, caminho Windows em Linux, vazio); script de migração testado
+contra uma **cópia** do banco real — dry-run correto, aplicação correta (GGV00 e GGV03
+migradas, GGV01/02 vazias mantidas), re-execução idempotente. O banco de produção real não
+foi alterado. Bot do Windows segue rodando normalmente (nenhuma mudança de comportamento sem
+`ONEDRIVE_PATH` definida).
 
-**3. PROMPT de fatura, 3 ajustes** — a fatura Copel real expôs: (a) a IA capturou só 3 das 4
-linhas de cobrança (omitiu "Valor ref. conta do mês anterior", R$ 45,19, por não ter kWh como
-as demais) e como `_calcular_totais()` prioriza a soma dos itens, o pedido nasceria com
-R$ 44,67 em vez de R$ 89,86 — instrução explícita de listar TODAS as linhas de cobrança,
-mesmo fora do padrão; (b) Chave PIX extraída era o telefone do "Responsável pela Iluminação
-Pública - Município" — agora só extrai se claramente rotulada como PIX do fornecedor; (c)
-campo novo **Vencimento** no template `[orcamento]` — estava impresso em destaque na fatura
-("04/07/2026") mas só existia por digitação manual; `_resumo_gerar()` usa o extraído como
-fallback do digitado.
-
-**4. Alerta de divergência soma × total** (`_totais_divergem()`) — rede de segurança
-permanente (programa, não IA): a tela de resumo mostra "⚠️ Valor total do documento: R$ X —
-confira os itens" quando a soma dos itens não bate com o Valor total extraído
-independentemente. Antes, a soma errada era usada em silêncio — vale pra qualquer orçamento
-onde a extração perca uma linha, não só fatura.
-
-**5. Trava contra colar a mensagem do bot** — achado ao vivo em teste: no celular, a edição
-de itens voltou com o texto de instrução da própria Laura colado junto ("Itens atuais:...
-Novos itens: Use o formato...") e foi gravado dentro do campo Itens, inflando o total pra
-R$ 99,86. `receber_texto()` (ramo `edit_itens`) reconhece os marcadores e recusa com
-orientação, sem tocar no banco.
-
-**Testado**: `py_compile` limpo; correção 1 validada contra o GGV03-013 real (status virou
-`pago` no banco); correção 2 com os dois cenários (cabeçalho normal e quebrado) + edição
-dupla sem acúmulo; correção 4 com os dados reais da Copel (alerta com R$ 89,86 ÷ soma
-R$ 44,67; silêncio quando bate); correção 5 com o texto corrompido real vs. edição limpa.
-Doc de teste 123 restaurado ao estado original. **Bot reiniciado em produção** (PID 63580,
-instância única, sem erro).
-
-**Não concluído**: validar as correções 3-5 ao vivo com a fatura real de ponta a ponta
-(gerar o pedido de verdade em produção); o mistério do registro da Copel de 2026-07-07 que
-sumiu sem rastro (nem produção nem teste) ficou sem explicação — pode ter sido descartado
-por botão sem Dennis perceber.
-
-**Nota da sessão**: Dennis ativou o acesso promocional ao Claude Fable 5 via `/model`
-(válido até 2026-07-12, consome até 50% do limite semanal compartilhado).
+**Não concluído (por design — é a próxima fiada, no servidor)**: executar o `docs/DEPLOY.md`
+de ponta a ponta no container — features FUSE+Nesting no CT (Eric), clone, `setup.sh`,
+`rclone config`, transferir `.env`+`data/`, migrar caminhos, teste em `LAURA_ENV=test`, e o
+corte de produção (**parar o bot do Windows antes de subir o do servidor — instância
+única**). Atenção: se o template do CT for Debian 12 (Python 3.11), tem que recriar com
+Debian 13 — o `setup.sh` detecta e avisa. Acesso remoto de manutenção: Tailscale no
+container (SSH + tmux + Claude Code), sem nada a abrir no firewall do Eric.
 
 ---
 
@@ -82,6 +47,11 @@ por botão sem Dennis perceber.
 🟢 Verde
 
 - Fundação concluída.
+- **Deploy no Proxmox preparado (2026-07-10)** — código portátil Windows/Linux
+  (`ONEDRIVE_PATH` + caminho relativo em `obras.pasta_onedrive`), pasta `deploy/` (systemd +
+  rclone + `setup.sh`), roteiro completo em `docs/DEPLOY.md`. Container 109 "laura" já criado
+  no Proxmox do Eric; a migração em si ainda não foi executada — bot segue em produção no
+  Windows até o corte.
 - Ciclo documental completo: orçamento → PFM → A PAGAR → PIX → PAGO → NF-e vinculada (vínculo de
   NF-e agora independente do status de pagamento — ver Última Fiada Implementada).
 - **DOCX removido do fluxo principal** — PC 2.0 (PDF via HTML/Playwright) é o único formato gerado
@@ -175,6 +145,10 @@ por botão sem Dennis perceber.
 
 ## Versão Atual
 
+**v0.15.0** — Preparação do deploy Linux/Proxmox: caminhos de obra portáteis
+(`ONEDRIVE_PATH` + relativo no banco, com migração idempotente), pasta `deploy/` (systemd,
+rclone, setup) e `docs/DEPLOY.md` com o checklist de corte de produção
+
 **v0.14.0** — Lista de Compras: nome de arquivo padronizado (slug + data + Resumo) + campo
 Resumo editável; "Gerar" agora encerra a lista (histórico por obra) + picker "📝 Listas de
 Compras" (buscar por nome, reabrir pra editar) no Cockpit da Obra
@@ -252,6 +226,17 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 
 ## Última Fiada Implementada
 
+**Preparação do deploy no Proxmox — portabilidade Linux + `deploy/` + `DEPLOY.md`**
+*(2026-07-10)*
+
+Ver a crônica completa no topo deste documento (é a sessão mais recente). Em resumo:
+`_raiz_obra()` resolve caminho relativo contra `ONEDRIVE_PATH`; `GGV_ONEDRIVE` (dict morto)
+removido; `scripts/migrar_caminhos_obras.py`; units systemd (`deploy/laura.service`,
+`deploy/rclone-onedrive.service`) + `deploy/setup.sh`; roteiro e checklist de corte em
+`docs/DEPLOY.md`. Nada mudou no comportamento do bot em produção no Windows.
+
+---
+
 **Rodada 2 de 2026-07-08 — PIX descarta, categoria editável, Serviço público** *(mesmo dia)*
 
 Continuação ao vivo: Dennis testou o fluxo real da fatura Copel em produção e cada clique
@@ -288,7 +273,7 @@ pra Laura, ela faz o resto" — o produto não cria trabalho novo, absorve o que
 
 **Fatura Copel — 5 correções de pagamento, edição e extração** *(2026-07-08)*
 
-Ver a crônica completa no topo deste documento (é a sessão mais recente). Em resumo:
+Resumo da sessão (a fatura real, reenviada em modo teste, expôs cinco bugs ao vivo):
 `_recalcular_status_pagamento()` (revisão reconcilia saldo/status com as parcelas;
 GGV03-013 corrigido); `_CAMPOS_APOS_ITENS_RE` (edição de itens não corrompe mais o registro
 — era o bug intermitente de 2026-07-07); PROMPT de fatura (todas as linhas de cobrança,
