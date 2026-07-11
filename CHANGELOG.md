@@ -62,6 +62,38 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.16.0] — Marcador 🔵: verde só com ciclo fechado (NF-e/recibo) — 2026-07-11
+
+### Motivação
+
+Dennis, olhando o GGV03-016 (pago hoje, NF-e ainda não chegou) verde no Cockpit: "verde só
+se está tudo pronto com NF e recibo inclusive". O texto da Tela do Pedido já sabia ("Pago ·
+NF-e pendente"), mas o marcador não — e o Cockpit orienta decisão, não só exibe.
+
+### Adicionado
+
+- **Marcador 🔵 no Sistema de Status** (IDENTIDADE_DO_PRODUTO e GLOSSARIO revisados, aprovado
+  por Dennis): pago mas sem fechamento fiscal. 🟢 passa a ser reservado ao **ciclo fechado**
+  — pago **e** NF-e vinculada, ou fatura de taxa/imposto/serviço público, ou todas as
+  parcelas com recibo **assinado** (gerado não basta — é a assinatura que protege o RET).
+- `_fechamento_fiscal()` e `_emoji_pedido()` — fonte única do marcador, usadas pela lista de
+  pedidos do Cockpit da Obra (`_pedidos_obra` agora entrega o emoji pronto) e pela Tela do
+  Pedido; os 3 dicts de emoji duplicados foram removidos (Convergência antes de paralelismo).
+- Rótulo novo na Tela do Pedido: "Pago · recibo aguardando assinatura" (antes só existia
+  "Pago · NF-e pendente", mesmo pra fornecedor de recibo).
+
+### Corrigido
+
+- Colisão de nome descoberta no teste: já existia um `_EMOJI_STATUS` (revisão da Receita) —
+  o novo dict virou `_EMOJI_STATUS_PEDIDO`.
+
+### Resultado no Cockpit (dados reais)
+
+🔵 GGV03-002 e GGV03-016 (pagos, sem NF-e); 🟢 os 11 pagos com fechamento; 🟡 GGV03-003
+(parcial) e GGV03-010 (nada pago).
+
+---
+
 ## [0.15.1] — Modo de revisão preso + botões de arquivo do pedido — 2026-07-11
 
 ### Motivação

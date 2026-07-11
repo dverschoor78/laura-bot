@@ -79,12 +79,18 @@ existe, foi emitido, e está esperando o pagamento ser feito.
 ### Pago
 
 **Aprovado:** Pago
-**Marcador visual:** 🟢
+**Marcador visual:** 🟢 (ciclo fechado) ou 🔵 (falta fechamento fiscal)
 **Banidos:** quitado, liquidado
 
 **Por que:**
 "Pago" é a palavra mais simples e direta. "Quitado" é jargão financeiro formal demais para
 a interface. "Liquidado" é jargão bancário que o usuário não usa no dia a dia de obra.
+
+**Desde 2026-07-11**, o marcador verde é reservado ao ciclo fechado: pago **e** fechamento
+fiscal resolvido (NF-e vinculada, fatura de taxa/imposto/serviço público, ou todas as
+parcelas com recibo assinado). Pago sem fechamento usa 🔵, com rótulos "Pago · NF-e
+pendente" ou "Pago · recibo aguardando assinatura" — o pagamento aconteceu, mas ainda há
+uma ação pendente. Verde significa "nada a fazer aqui".
 
 ---
 

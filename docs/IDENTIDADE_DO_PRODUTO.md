@@ -276,7 +276,8 @@ Um único conjunto de marcadores visuais, usado de forma consistente em toda a e
 | Marcador | Significado | Código interno |
 |----------|-------------|----------------|
 | 🟡 | Aguardando pagamento | a_pagar |
-| 🟢 | Pago | pago |
+| 🟢 | Pago · ciclo fechado (NF-e, fatura ou recibos assinados) | pago + fechamento fiscal |
+| 🔵 | Pago · falta fechamento fiscal (NF-e ou recibo pendente) | pago sem fechamento (derivado) |
 | 🔴 | Requer atenção | pendente_revisao |
 | ⚫ | Substituído | substituido |
 | ⚪ | Sem registro financeiro | sem_lancamento |
@@ -284,6 +285,14 @@ Um único conjunto de marcadores visuais, usado de forma consistente em toda a e
 Estes são os únicos emojis com papel semântico fixo.
 Nenhum outro emoji tem papel semântico na interface.
 Emojis decorativos são proibidos.
+
+> Revisão 2026-07-11 (aprovada por Dennis): 🟢 deixou de significar apenas "pago" — passa a
+> ser reservado ao **ciclo fechado**: pago **e** com fechamento fiscal resolvido (NF-e
+> vinculada, fatura de taxa/imposto/serviço público, ou todas as parcelas com recibo
+> assinado — princípio da Fase 6: todo pagamento confirmado precisa de documento fiscal).
+> O estado intermediário "pago, aguardando NF-e/recibo" ganhou o marcador 🔵. Motivação:
+> o Cockpit orienta decisão — verde significa "nada a fazer aqui", e pagamento sem nota
+> ainda tem ação pendente (proteção do RET).
 
 ---
 

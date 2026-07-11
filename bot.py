@@ -2146,10 +2146,15 @@ def teclado_lista_obras(obras):
 
 def _pedidos_obra(ggv):
     with sqlite3.connect(DB_PATH) as con:
-        return con.execute(
-            "SELECT pfm_codigo, status, fornecedor, valor FROM lancamentos WHERE ggv=? ORDER BY pfm_codigo",
+        rows = con.execute(
+            "SELECT pfm_codigo, status, fornecedor, valor, categoria, doc_id_nfe "
+            "FROM lancamentos WHERE ggv=? ORDER BY pfm_codigo",
             (ggv,)
         ).fetchall()
+    return [
+        (pfm_codigo, status, fornecedor, valor, _emoji_pedido(status, pfm_codigo, categoria, doc_id_nfe))
+        for pfm_codigo, status, fornecedor, valor, categoria, doc_id_nfe in rows
+    ]
 
 def teclado_obra(codigo, pedidos=None):
     botoes = []
@@ -2162,23 +2167,19 @@ def teclado_obra(codigo, pedidos=None):
     return InlineKeyboardMarkup(botoes)
 
 def mostrar_lista_pedidos(codigo, pedidos):
-    _ST = {"a_pagar": "🟡", "pago": "🟢", "pendente_revisao": "🔴", "substituido": "⚫"}
     if not pedidos:
         return f"Nenhum pedido em {codigo}. Envie um orçamento para começar."
     linhas = [f"Qual pedido? · {codigo}\n"]
-    for pfm_codigo, status, fornecedor, valor in pedidos:
-        emoji    = _ST.get(status, "⚪")
+    for pfm_codigo, status, fornecedor, valor, emoji in pedidos:
         forn_cur = (fornecedor or "—")[:20]
         val_str  = f"R$ {_fmt_brl(valor)}" if valor else "—"
         linhas.append(f"{emoji} {pfm_codigo}  {forn_cur} · {val_str}")
     return "\n".join(linhas)
 
 def teclado_lista_pedidos(codigo, pedidos):
-    _ST = {"a_pagar": "🟡", "pago": "🟢", "pendente_revisao": "🔴", "substituido": "⚫"}
     botoes = []
     row = []
-    for pfm_codigo, status, *_ in pedidos:
-        emoji = _ST.get(status, "⚪")
+    for pfm_codigo, status, fornecedor, valor, emoji in pedidos:
         row.append(InlineKeyboardButton(f"{emoji} {pfm_codigo}", callback_data=f"pedido_abrir:{pfm_codigo}"))
         if len(row) == 2:
             botoes.append(row)
@@ -2427,14 +2428,52 @@ def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
 # não emitem NF-e separada) — não exibir "NF-e pendente" nem exigir vínculo de NF-e
 CATEGORIAS_SEM_NFE_OBRIGATORIA = {"taxa", "imposto", "servico_publico"}
 
+def _fechamento_fiscal(pfm_codigo, categoria, doc_id_nfe):
+    """(ok, pendencia) do fechamento fiscal — Fase 6: todo pagamento confirmado precisa de
+    NF-e ou recibo. ok=True com NF-e vinculada, categoria cuja fatura é o próprio fechamento,
+    ou todas as parcelas com recibo assinado. pendencia: "nfe" ou "assinatura"."""
+    if doc_id_nfe:
+        return True, None
+    if categoria in CATEGORIAS_SEM_NFE_OBRIGATORIA:
+        return True, None
+    with sqlite3.connect(DB_PATH) as con:
+        total, assinadas, com_recibo = con.execute(
+            "SELECT COUNT(*), "
+            "SUM(CASE WHEN status='assinado' THEN 1 ELSE 0 END), "
+            "SUM(CASE WHEN doc_id_recibo IS NOT NULL OR doc_id_recibo_assinado IS NOT NULL THEN 1 ELSE 0 END) "
+            "FROM parcelas_pagamento WHERE pfm_codigo=?", (pfm_codigo,)
+        ).fetchone()
+    assinadas, com_recibo = assinadas or 0, com_recibo or 0
+    if total > 0 and assinadas == total:
+        return True, None
+    return False, ("assinatura" if com_recibo > 0 else "nfe")
+
+_EMOJI_STATUS_PEDIDO = {"a_pagar": "🟡", "pago": "🟢", "pendente_revisao": "🔴", "substituido": "⚫",
+                        "sem_lancamento": "⚪"}
+
+def _emoji_pedido(status, pfm_codigo=None, categoria=None, doc_id_nfe=None):
+    """Marcador do Sistema de Status. 🟢 é reservado ao ciclo fechado — pago E fechamento
+    fiscal resolvido (NF-e, fatura de taxa/serviço público, ou recibos assinados); pago sem
+    fechamento vira 🔵. Única fonte do emoji de pedido — não recriar dicts locais."""
+    if status == "pago" and pfm_codigo:
+        ok, _ = _fechamento_fiscal(pfm_codigo, categoria, doc_id_nfe)
+        if not ok:
+            return "🔵"
+    return _EMOJI_STATUS_PEDIDO.get(status, "⚪")
+
 def _status_pago_label(pedido: "Pedido") -> str:
-    if pedido.nfe_numero:
-        return f"Pago · NF-e {pedido.nfe_numero}"
     if pedido.categoria in CATEGORIAS_SEM_NFE_OBRIGATORIA:
         return "Pago"
-    if not pedido.doc_id_nfe:
-        return "Pago · NF-e pendente"
-    return "Pago · NF-e"
+    if pedido.nfe_numero:
+        return f"Pago · NF-e {pedido.nfe_numero}"
+    if pedido.doc_id_nfe:
+        return "Pago · NF-e"
+    ok, pendencia = _fechamento_fiscal(pedido.codigo, pedido.categoria, pedido.doc_id_nfe)
+    if ok:
+        return "Pago"  # recibos assinados em todas as parcelas
+    if pendencia == "assinatura":
+        return "Pago · recibo aguardando assinatura"
+    return "Pago · NF-e pendente"
 
 def _status_a_pagar_label(pedido: "Pedido") -> str:
     if pedido.total_pago and pedido.total_pago > 0.009:
@@ -2443,13 +2482,6 @@ def _status_a_pagar_label(pedido: "Pedido") -> str:
 
 def mostrar_pedido(pedido: Pedido) -> str:
     """Formata o Pedido como mensagem Telegram. Sem IO — apenas formatação."""
-    _STATUS_EMOJI = {
-        StatusPedido.A_PAGAR:          "🟡",
-        StatusPedido.PAGO:             "🟢",
-        StatusPedido.PENDENTE_REVISAO: "🔴",
-        StatusPedido.SUBSTITUIDO:      "⚫",
-        StatusPedido.SEM_LANCAMENTO:   "⚪",
-    }
     _STATUS_SHORT = {
         StatusPedido.A_PAGAR:          _status_a_pagar_label(pedido),
         StatusPedido.PAGO:             _status_pago_label(pedido),
@@ -2459,7 +2491,7 @@ def mostrar_pedido(pedido: Pedido) -> str:
     }
     SEP = "\n──────────────────────────────\n"
 
-    emoji  = _STATUS_EMOJI.get(pedido.status, "")
+    emoji  = _emoji_pedido(pedido.status.value, pedido.codigo, pedido.categoria, pedido.doc_id_nfe)
     status = _STATUS_SHORT.get(pedido.status, str(pedido.status))
     cabecalho = f"{emoji} #{pedido.codigo} — {status}\n\n{pedido.fornecedor}"
 

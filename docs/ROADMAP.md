@@ -1,9 +1,13 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-11 (**2 bugs de produção corrigidos**: botões 🧾 NF-e/comprovante/
-> recibo do cockpit quebrados desde a ADR-004 (`NameError` — variável `acao` não definida na
-> função extraída) e `modo_revisao` preso em `ctx.user_data` transformando um "Gerar Pedido"
-> posterior em revisão do pedido errado — GGV03-003 sobrescrito pelo orçamento Vedalit,
+> Atualizado em: 2026-07-11 (**marcador 🔵 no Sistema de Status** — 🟢 reservado ao ciclo
+> fechado (pago + NF-e/fatura/recibos assinados), pago sem fechamento vira 🔵;
+> `_fechamento_fiscal()`/`_emoji_pedido()` fonte única, 3 dicts duplicados removidos;
+> IDENTIDADE e GLOSSARIO revisados; mesma sessão, **2 bugs de produção corrigidos**: botões
+> 🧾 NF-e/comprovante/recibo do cockpit quebrados desde a ADR-004 (`NameError` — variável
+> `acao` não definida na função extraída) e `modo_revisao` preso em `ctx.user_data`
+> transformando um "Gerar Pedido" posterior em revisão do pedido errado — GGV03-003
+> sobrescrito pelo orçamento Vedalit,
 > lançamento restaurado no banco; NF-e da B&C revinculada ao pedido certo GGV03-011;
 > histórico anterior 2026-07-08 — segunda rodada do dia: **"Nenhum destes" do PIX descarta o
 > documento** (mesmo bug da NF-e de 2026-07-06; botão renomeado pra "✖ Nenhum destes —

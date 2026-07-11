@@ -1,10 +1,15 @@
 # Estado do Projeto Laura
 
-> Atualizado em: 2026-07-11 (sessão de correção — 2 bugs reais de produção: botões de
-> arquivo do cockpit quebrados desde a ADR-004 (`NameError` em `_cb_pfm_nfe`) e `modo_revisao`
-> preso na sessão transformando o "Gerar Pedido" de hoje numa revisão acidental do GGV03-003;
-> lançamento GGV03-003 (DeltaD/gestão R$ 30.000) restaurado, NF-e 000.205.013 da B&C
-> revinculada ao pedido certo GGV03-011, doc 58 (Vedalit) resetado pra gerar de novo.
+> Atualizado em: 2026-07-11 (mesma sessão, segunda fiada — **marcador 🔵 no Sistema de
+> Status**, aprovado por Dennis: 🟢 reservado ao ciclo fechado (pago + NF-e/fatura/recibos
+> assinados), pago sem fechamento fiscal vira 🔵 "Pago · NF-e pendente"/"recibo aguardando
+> assinatura"; `_fechamento_fiscal()`/`_emoji_pedido()` como fonte única, 3 dicts duplicados
+> removidos; IDENTIDADE_DO_PRODUTO e GLOSSARIO revisados. Primeira fiada do dia: 2 bugs
+> reais de produção — botões de arquivo do cockpit quebrados desde a ADR-004 (`NameError`
+> em `_cb_pfm_nfe`) e `modo_revisao` preso na sessão transformando o "Gerar Pedido" de hoje
+> numa revisão acidental do GGV03-003; lançamento GGV03-003 (DeltaD/gestão R$ 30.000)
+> restaurado, NF-e 000.205.013 da B&C revinculada ao pedido certo GGV03-011, doc 58
+> (Vedalit) descartado e regerado por Dennis como GGV03-016 — validado ao vivo.
 > Sessão anterior, 2026-07-10: infraestrutura — repositório preparado pro deploy no
 > container Proxmox do Eric; a migração em si ainda não foi executada)
 > Sessão: **Portabilidade Linux completa — `_raiz_obra()` resolve caminho relativo contra
@@ -150,6 +155,10 @@ container (SSH + tmux + Claude Code), sem nada a abrir no firewall do Eric.
 
 ## Versão Atual
 
+**v0.16.0** — Marcador 🔵 no Sistema de Status: 🟢 reservado ao ciclo fechado (pago +
+NF-e/fatura/recibos assinados); pago sem fechamento fiscal mostra 🔵 no Cockpit da Obra e
+na Tela do Pedido; `_fechamento_fiscal()`/`_emoji_pedido()` como fonte única do marcador
+
 **v0.15.1** — Correção: botões 🧾 NF-e/comprovante/recibo do cockpit (NameError desde a
 ADR-004) e `modo_revisao` preso na sessão (revisão acidental do GGV03-003 pelo pedido novo);
 GGV03-003 restaurado, NF-e da B&C revinculada ao GGV03-011
@@ -235,8 +244,31 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 
 ## Última Fiada Implementada
 
+**Marcador 🔵 — verde só com ciclo fechado (NF-e/recibo)** *(2026-07-11, segunda fiada do dia)*
+
+Dennis viu o GGV03-016 (pago hoje, NF-e da B&C ainda não chegou) verde no Cockpit e pediu:
+"verde só se está tudo pronto com NF e recibo inclusive". Sessão de Produto — IDENTIDADE e
+GLOSSARIO relidos, duas decisões validadas com mockup antes do código (marcador novo 🔵 vs
+reusar 🔴; recibo precisa estar **assinado** pra contar como fechamento — decisões dele).
+
+Implementado: `_fechamento_fiscal(pfm_codigo, categoria, doc_id_nfe)` → (ok, pendência) —
+NF-e vinculada, categoria de fatura própria (taxa/imposto/serviço público) ou todas as
+parcelas com recibo assinado; `_emoji_pedido()` como **fonte única** do marcador (os 3 dicts
+de emoji duplicados — lista e teclado do Cockpit da Obra, Tela do Pedido — foram removidos;
+"Convergência antes de paralelismo"). Rótulo novo "Pago · recibo aguardando assinatura".
+Sistema de Status da IDENTIDADE_DO_PRODUTO ganhou a linha 🔵 com nota de revisão datada;
+GLOSSARIO atualizado no verbete "Pago".
+
+**Colisão de nome achada no teste**: já existia `_EMOJI_STATUS` (status da revisão de
+fornecedor via Receita) definido depois do meu — todos os pedidos saíam ⚪. Renomeado pra
+`_EMOJI_STATUS_PEDIDO`. Testado contra o banco real de produção: 🔵 GGV03-002/016 (pagos sem
+NF-e), 🟢 os 11 com fechamento, 🟡 003 (parcial) e 010 (nada pago). Bot reiniciado (instância
+única). **Pendente**: Dennis validar visualmente no Telegram.
+
+---
+
 **Modo de revisão preso + botões de arquivo do cockpit — 2 bugs de programa + restauração
-do GGV03-003** *(2026-07-11)*
+do GGV03-003** *(2026-07-11, primeira fiada do dia)*
 
 Dennis reportou dois incidentes: (1) ontem não conseguiu baixar a NF-e da B&C pelo botão do
 cockpit (e a vinculou por engano ao GGV03-003, que era o DeltaD/gestão); (2) hoje o pedido
