@@ -2842,6 +2842,7 @@ async def _executar_revisao_pfm(query, ctx, doc_id, pfm_codigo_base):
         caption=f"📄 {rev_codigo}"
     )
     ctx.user_data.pop("modo_revisao", None)
+    ctx.user_data.pop("modo_revisao_doc", None)
     await ctx.bot.send_message(
         chat_id=DONO_ID,
         text=f"✅ {rev_codigo} gerado. Lançamento financeiro mantido.",
@@ -5273,6 +5274,13 @@ async def _cb_ver_itens(query, ctx, partes):
 async def _cb_pfm(query, ctx, partes):
     _, doc_id, ggv = partes
     pfm_codigo_revisao = ctx.user_data.get("modo_revisao")
+    # Revisão só vale pro mesmo documento que a armou — um "Revisar" abandonado ontem não
+    # pode transformar o pedido novo de hoje numa revisão do pedido antigo (caso real:
+    # GGV03-003 sobrescrito pelo orçamento Vedalit em 2026-07-11)
+    if pfm_codigo_revisao and ctx.user_data.get("modo_revisao_doc") != int(doc_id):
+        ctx.user_data.pop("modo_revisao", None)
+        ctx.user_data.pop("modo_revisao_doc", None)
+        pfm_codigo_revisao = None
     if pfm_codigo_revisao:
         await _executar_revisao_pfm(query, ctx, int(doc_id), pfm_codigo_revisao)
     else:
@@ -5343,9 +5351,10 @@ async def _cb_cat_upd(query, ctx, partes):
 
 async def _cb_pfm_revisar(query, ctx, partes):
     _, doc_id, pfm_codigo = partes
-    ctx.user_data["doc_id"]       = int(doc_id)
-    ctx.user_data["tipo"]         = "orcamento"
-    ctx.user_data["modo_revisao"] = pfm_codigo
+    ctx.user_data["doc_id"]           = int(doc_id)
+    ctx.user_data["tipo"]             = "orcamento"
+    ctx.user_data["modo_revisao"]     = pfm_codigo
+    ctx.user_data["modo_revisao_doc"] = int(doc_id)
     texto_resumo, markup = _resumo_gerar(int(doc_id))
     try:
         await query.edit_message_text(texto_resumo, reply_markup=markup, parse_mode="HTML")
@@ -5385,7 +5394,7 @@ async def _cb_pfm_orc(query, ctx, partes):
 
 
 async def _cb_pfm_nfe(query, ctx, partes):
-    _, doc_id_arquivo, pfm_codigo = partes
+    acao, doc_id_arquivo, pfm_codigo = partes
     with sqlite3.connect(DB_PATH) as con:
         row = con.execute("SELECT caminho FROM documentos WHERE id=?", (int(doc_id_arquivo),)).fetchone()
     caminho = row[0] if row else None

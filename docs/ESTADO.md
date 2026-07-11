@@ -1,6 +1,11 @@
 # Estado do Projeto Laura
 
-> Atualizado em: 2026-07-10 (sessão de infraestrutura — repositório preparado pro deploy no
+> Atualizado em: 2026-07-11 (sessão de correção — 2 bugs reais de produção: botões de
+> arquivo do cockpit quebrados desde a ADR-004 (`NameError` em `_cb_pfm_nfe`) e `modo_revisao`
+> preso na sessão transformando o "Gerar Pedido" de hoje numa revisão acidental do GGV03-003;
+> lançamento GGV03-003 (DeltaD/gestão R$ 30.000) restaurado, NF-e 000.205.013 da B&C
+> revinculada ao pedido certo GGV03-011, doc 58 (Vedalit) resetado pra gerar de novo.
+> Sessão anterior, 2026-07-10: infraestrutura — repositório preparado pro deploy no
 > container Proxmox do Eric; a migração em si ainda não foi executada)
 > Sessão: **Portabilidade Linux completa — `_raiz_obra()` resolve caminho relativo contra
 > `ONEDRIVE_PATH` (.env), dict morto `GGV_ONEDRIVE` removido, seed de obras sem caminho
@@ -145,6 +150,10 @@ container (SSH + tmux + Claude Code), sem nada a abrir no firewall do Eric.
 
 ## Versão Atual
 
+**v0.15.1** — Correção: botões 🧾 NF-e/comprovante/recibo do cockpit (NameError desde a
+ADR-004) e `modo_revisao` preso na sessão (revisão acidental do GGV03-003 pelo pedido novo);
+GGV03-003 restaurado, NF-e da B&C revinculada ao GGV03-011
+
 **v0.15.0** — Preparação do deploy Linux/Proxmox: caminhos de obra portáteis
 (`ONEDRIVE_PATH` + relativo no banco, com migração idempotente), pasta `deploy/` (systemd,
 rclone, setup) e `docs/DEPLOY.md` com o checklist de corte de produção
@@ -225,6 +234,41 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 ---
 
 ## Última Fiada Implementada
+
+**Modo de revisão preso + botões de arquivo do cockpit — 2 bugs de programa + restauração
+do GGV03-003** *(2026-07-11)*
+
+Dennis reportou dois incidentes: (1) ontem não conseguiu baixar a NF-e da B&C pelo botão do
+cockpit (e a vinculou por engano ao GGV03-003, que era o DeltaD/gestão); (2) hoje o pedido
+novo da B&C (Vedalit 18L) "gerou sem numeração".
+
+**Causa raiz 1 (botão)**: `_cb_pfm_nfe()` usava a variável `acao`, que existia no
+`responder_botao()` monolítico mas nunca foi definida na função extraída pela ADR-004 —
+`NameError` em todo clique de 🧾 NF-e/comprovante/recibo desde 2026-07-02, engolido pelo
+try/except genérico. Corrigido: `acao, doc_id_arquivo, pfm_codigo = partes`.
+
+**Causa raiz 2 (numeração)**: "Revisar" arma `ctx.user_data["modo_revisao"]` e só limpava ao
+concluir a revisão — abandonar o fluxo deixava o modo armado pra sempre (o bot rodava desde
+08/07 sem restart). O "Gerar Pedido" de hoje viu o modo pendurado e gerou o doc 58 como
+**GGV03-003-R01 com os dados do documento novo**: PDF sem numeração nova, e o caminho de
+revisão de `gerar_pfm()` sobrescreveu o lançamento GGV03-003 (fornecedor→B&C,
+valor→R$ 397,50, status→pago porque R$ 5.000 já pagos ≥ 397,50, itens→Vedalit). Corrigido:
+`modo_revisao_doc` guarda o `doc_id` que armou o modo; `_cb_pfm()` só executa revisão se for
+o mesmo documento, senão descarta o modo e segue o fluxo normal. Mesma família do incidente
+de 2026-07-02 — callback/estado antigo agindo sem reverificar o estado atual.
+
+**Dados restaurados no banco de produção** (verificados antes e depois): GGV03-003 de volta
+(VERSCHOOR CONSTRUCOES CIVIS LTDA, R$ 30.000, `a_pagar`, R$ 5.000 pago, 2 parcelas intactas,
+itens de gestão reconstruídos via `_itens()` do doc original 13, NF-e desvinculada); NF-e
+doc 57 vinculada ao **GGV03-011** (B&C, R$ 389,00 — valor bate exato com a NF) e arquivada
+com nome certo; 3 arquivos errados do OneDrive removidos; doc 58 resetado.
+
+**Testado**: `py_compile` limpo; estado do banco conferido campo a campo após a restauração;
+bot reiniciado em produção (instância única). **Pendente de validação ao vivo pelo Dennis**:
+baixar a NF-e pelo botão do GGV03-011, gerar o pedido Vedalit de novo (deve sair GGV03-016)
+e conferir o GGV03-003 no cockpit.
+
+---
 
 **Preparação do deploy no Proxmox — portabilidade Linux + `deploy/` + `DEPLOY.md`**
 *(2026-07-10)*

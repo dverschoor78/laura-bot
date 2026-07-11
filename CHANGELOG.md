@@ -62,6 +62,40 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.15.1] — Modo de revisão preso + botões de arquivo do pedido — 2026-07-11
+
+### Motivação
+
+Dois incidentes reais em produção: a NF-e da B&C não baixava pelo botão do cockpit, e o
+pedido novo da B&C (Vedalit 18L) saiu "sem numeração" — na verdade tinha virado uma revisão
+acidental do GGV03-003 (DeltaD/gestão, R$ 30.000 parcelado), sobrescrevendo fornecedor,
+valor, status e itens do lançamento.
+
+### Corrigido
+
+- **Botões 🧾 NF-e / comprovante / recibo do cockpit quebrados desde a ADR-004 (2026-07-02)** —
+  `_cb_pfm_nfe()` usava a variável `acao`, que existia no `responder_botao()` antigo mas não
+  na função extraída: todo clique dava `NameError`, engolido pelo try/except genérico.
+- **"Revisar" abandonado transformava o próximo "Gerar Pedido" em revisão do pedido errado** —
+  `modo_revisao` ficava armado em `ctx.user_data` pra sempre (só era limpo ao concluir a
+  revisão). Agora guarda também o `doc_id` que o armou (`modo_revisao_doc`) e o "Gerar" só
+  executa revisão se for o mesmo documento; senão descarta o modo e gera pedido novo.
+  Mesma família do incidente de 2026-07-02 (botão antigo apagando documento de pedido pago):
+  ação atrás de callback/estado de sessão precisa reverificar o estado atual antes de agir.
+
+### Dados restaurados (produção)
+
+- **GGV03-003** de volta ao original: VERSCHOOR CONSTRUCOES CIVIS LTDA, R$ 30.000,
+  `a_pagar` (R$ 5.000 pago em 2 parcelas intactas), itens de gestão restaurados a partir do
+  documento original (doc 13), NF-e desvinculada.
+- **NF-e 000.205.013 (B&C, R$ 389,00)** vinculada ao pedido certo — GGV03-011 — e arquivada
+  no OneDrive com o nome correto; os 3 arquivos errados removidos (NF com nome GGV03-003 e
+  os 2 PDFs "GGV03-003 Vedalit").
+- **Doc 58 (orçamento Vedalit)** resetado (`rev_numero`, `caminho_pfm`) — pronto pra gerar o
+  pedido de verdade pelo Telegram (deve sair GGV03-016).
+
+---
+
 ## [0.15.0] — Preparação do deploy Linux/Proxmox — 2026-07-10
 
 ### Motivação

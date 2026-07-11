@@ -1,6 +1,11 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-08 (segunda rodada do dia: **"Nenhum destes" do PIX descarta o
+> Atualizado em: 2026-07-11 (**2 bugs de produção corrigidos**: botões 🧾 NF-e/comprovante/
+> recibo do cockpit quebrados desde a ADR-004 (`NameError` — variável `acao` não definida na
+> função extraída) e `modo_revisao` preso em `ctx.user_data` transformando um "Gerar Pedido"
+> posterior em revisão do pedido errado — GGV03-003 sobrescrito pelo orçamento Vedalit,
+> lançamento restaurado no banco; NF-e da B&C revinculada ao pedido certo GGV03-011;
+> histórico anterior 2026-07-08 — segunda rodada do dia: **"Nenhum destes" do PIX descarta o
 > documento** (mesmo bug da NF-e de 2026-07-06; botão renomeado pra "✖ Nenhum destes —
 > descartar arquivo" nos dois fluxos); **Categoria da compra editável após o pedido gerado**
 > (botão "🏷 Categoria da compra" no Corrigir dados, grade única `cat_sel`/`cat_upd`);
