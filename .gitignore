@@ -6,11 +6,7 @@
 # ============================================================
 # Banco de dados — contém dados reais
 # ============================================================
-data/laura.db
-data/laura.db-shm
-data/laura.db-wal
-data/*.db
-data_temp/*
+data*
 
 # ============================================================
 # Arquivos financeiros — NUNCA no Git
@@ -49,7 +45,7 @@ dist/
 .pytest_cache/
 .coverage
 htmlcov/
-debbuging_prints/*
+debbuging_prints*
 
 # ============================================================
 # IDEs
