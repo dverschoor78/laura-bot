@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import json
 import unicodedata
 import shutil
@@ -31,10 +32,11 @@ load_dotenv()
 TOKEN       = os.environ["TELEGRAM_BOT_TOKEN"]
 DONO_ID     = int(os.environ["TELEGRAM_USER_ID"])
 CLAUDE_KEY  = os.environ["CLAUDE_API_KEY"]
-TEST_MODE = os.environ.get("LAURA_ENV", "prod") == "test"
+TEST_MODE = os.environ.get("LAURA_ENV", "prod") == "test" or (len(sys.argv) > 1 and sys.argv[1] == "--test")
 DB_PATH   = Path("data/laura_test.db") if TEST_MODE else Path("data/laura.db")
 UPLOADS   = Path("data/test_uploads")  if TEST_MODE else Path("data/uploads")
 UPLOADS.mkdir(parents=True, exist_ok=True)
+print(DB_PATH)
 
 # Raiz do OneDrive nesta máquina (ex: C:\Users\denni\OneDrive no Windows, /mnt/onedrive no
 # servidor Linux via rclone). Caminhos relativos em obras.pasta_onedrive são resolvidos
