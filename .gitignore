@@ -10,6 +10,7 @@ data/laura.db
 data/laura.db-shm
 data/laura.db-wal
 data/*.db
+data_temp/*
 
 # ============================================================
 # Arquivos financeiros — NUNCA no Git
