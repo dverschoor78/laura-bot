@@ -48,9 +48,7 @@ dist/
 .pytest_cache/
 .coverage
 htmlcov/
-tests/fixtures/*.pdf
-tests/fixtures/*.jpg
-tests/fixtures/*.png
+debbuging_prints/*
 
 # ============================================================
 # IDEs
