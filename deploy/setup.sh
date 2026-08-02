@@ -21,6 +21,7 @@ timedatectl set-timezone America/Sao_Paulo || true
 
 # 3. Ambiente Python isolado + dependências
 cd "$(dirname "$0")/.."
+echo "$(dirname "$0")/.."
 python3 -m venv .venv
 .venv/bin/pip install --upgrade pip
 .venv/bin/pip install -r requirements.txt
