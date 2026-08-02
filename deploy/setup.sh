@@ -23,7 +23,7 @@ timedatectl set-timezone America/Sao_Paulo || true
 cd "$(dirname "$0")/.."
 python3 -m venv .venv
 .venv/bin/pip install --upgrade pip
-.venv/bin/pip install -r ../requirements.txt
+.venv/bin/pip install -r requirements.txt
 .venv/bin/playwright install --with-deps chromium
 
 # 4. Pastas de runtime
