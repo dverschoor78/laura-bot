@@ -6,7 +6,6 @@ Wants=network-online.target
 [Service]
 Type=notify
 ExecStartPre=/bin/mkdir -p /mnt/onedrive
-# Pressupoe um remote chamado "onedrive" ja configurado via: rclone config
 ExecStart=/usr/bin/rclone mount onedrive: /mnt/onedrive \
     --vfs-cache-mode writes \
     --vfs-cache-max-size 1G \

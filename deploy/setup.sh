@@ -16,7 +16,7 @@ echo "Python $PYVER OK"
 
 timedatectl set-timezone America/Sao_Paulo || true
 
-cd /opt/laura/
+cd /opt/laura-bot/
 
 python3 -m venv .venv
 
@@ -28,7 +28,7 @@ playwright install --with-deps chromium
 
 mkdir -p data logs
 
-cp -s deploy/laura.service deploy/rclone-onedrive.service /etc/systemd/system/
+cp -s deploy/laura-bot.service deploy/rclone-onedrive.service /etc/systemd/system/
 systemctl daemon-reload
 
 echo

@@ -1,16 +1,14 @@
 [Unit]
 Description=Laura - bot Telegram de compras (VII)
-# Sobe depois da rede e da montagem do OneDrive
 After=network-online.target rclone-onedrive.service
 Wants=network-online.target rclone-onedrive.service
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/laura
-ExecStart=/opt/laura/.venv/bin/python bot.py
+WorkingDirectory=/opt/laura-bot
+ExecStart=/opt/laura-bot/.venv/bin/python bot.py
 Restart=on-failure
 RestartSec=10
-# Nunca duas instancias: systemd ja garante uma por unit, e o deploy oficial e so por aqui
 
 [Install]
 WantedBy=multi-user.target
