@@ -28,7 +28,7 @@ playwright install --with-deps chromium
 
 mkdir -p data logs
 
-cp -s deploy/laura-bot.service deploy/rclone-onedrive.service /etc/systemd/system/
+cp -s /opt/laura-bot/deploy/laura-bot.service /opt/laura-bot/deploy/rclone-onedrive.service /etc/systemd/system/
 systemctl daemon-reload
 
 echo
