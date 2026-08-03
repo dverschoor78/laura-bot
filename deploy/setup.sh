@@ -11,7 +11,6 @@ apt-get install -y python3 python3-venv git rclone fuse3
 PYVER=$(python3 -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')
 if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)'; then
     echo "ERRO: Python $PYVER encontrado, mas a Laura exige >= 3.12."
-    echo "Solução: recriar o container com template Debian 13 (trixie) ou Ubuntu 24.04."
     exit 1
 fi
 echo "Python $PYVER OK"
@@ -21,15 +20,18 @@ timedatectl set-timezone America/Sao_Paulo || true
 
 # 3. Ambiente Python isolado + dependências
 python3 -m venv .venv
-.venv/bin/pip install --upgrade pip
-.venv/bin/pip install -r requirements.txt
-.venv/bin/playwright install --with-deps chromium
+
+.venv/bin/activate
+
+pip install --upgrade pip
+pip install -r requirements.txt
+playwright install --with-deps chromium
 
 # 4. Pastas de runtime
 mkdir -p data logs
 
 # 5. Units do systemd (não habilita ainda — faltam .env, banco e rclone config)
-cp deploy/laura.service deploy/rclone-onedrive.service /etc/systemd/system/
+cp -s deploy/laura.service deploy/rclone-onedrive.service /etc/systemd/system/
 systemctl daemon-reload
 
 echo
