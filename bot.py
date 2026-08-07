@@ -62,8 +62,6 @@ TIPOS = {
     "lista_materiais":  ("📝", "Lista de materiais"),
     "nao_relacionado":  ("🗑", "Não é da obra"),
 }
-GGVS = ["GGV00", "GGV01", "GGV02", "GGV03"]
-
 MESES = ["janeiro","fevereiro","março","abril","maio","junho",
          "julho","agosto","setembro","outubro","novembro","dezembro"]
 
@@ -188,7 +186,15 @@ class Pedido:
     # Histórico — populado por preparar_visualizacao_pedido()
     historico: list = field(default_factory=list)
 
-PROMPT = """
+def _prompt_classificacao():
+    """Monta o PASSO 2 (lista de obras) e os valores aceitos de GGV a partir do banco —
+    obra de teste dedicada (GGV_TESTE_ONEDRIVE) nunca entra aqui, pra IA nunca sugerir
+    documento real pra ela. Antes essa lista era hardcoded e nunca acompanhava obra nova
+    (achado testando GGV99, 2026-08-07)."""
+    obras = [(c, d) for c, d in _listar_obras() if c != GGV_TESTE_ONEDRIVE]
+    bloco_obras = "\n".join(f"{c} — {d or 'sem descrição cadastrada'}" for c, d in obras)
+    codigos_validos = ", ".join(c for c, _ in obras) + ", nao_identificado"
+    return f"""
 Você recebeu um arquivo enviado para um sistema de gestão de obras de construção civil.
 
 PASSO 1 — Classifique o documento:
@@ -202,10 +208,7 @@ PASSO 1 — Classifique o documento:
 [nao_relacionado]  — qualquer outro documento não relacionado a obras
 
 PASSO 2 — Identifique o empreendimento (GGV):
-GGV01 — Matrícula 39.333, Quadra 05 Lote 02
-GGV02 — Matrícula 39.337, Quadra 05 Lote 06
-GGV03 — Matrícula 39.339, Quadra 05 Lote 08
-GGV00 — despesas gerais compartilhadas
+{bloco_obras}
 nao_identificado — se não conseguir determinar
 
 PASSO 3 — Extraia os dados em português conforme o tipo:
@@ -274,7 +277,7 @@ TIPO:orcamento
 GGV:GGV03
 
 Valores aceitos para TIPO: orcamento, comprovante_pix, nota_fiscal, extrato_mp, nao_relacionado
-Valores aceitos para GGV: GGV00, GGV01, GGV02, GGV03, nao_identificado
+Valores aceitos para GGV: {codigos_validos}
 
 Em seguida, os dados extraídos conforme o tipo identificado acima.
 """
@@ -4959,7 +4962,7 @@ async def _cb_sel_tipo_inicial(query, ctx, partes):
             "role": "user",
             "content": [
                 {"type": tipo_conteudo, "source": {"type": "base64", "media_type": mime_inf, "data": dados_b64}},
-                {"type": "text", "text": PROMPT}
+                {"type": "text", "text": _prompt_classificacao()}
             ]
         }]
     )
@@ -5147,7 +5150,8 @@ async def _cb_pix_cancelar(query, ctx, partes):
 
 async def _cb_sel_ggv(query, ctx, partes):
     _, doc_id, tipo, ggv = partes
-    botoes = [[InlineKeyboardButton(g, callback_data=f"set_ggv:{doc_id}:{tipo}:{g}")] for g in GGVS]
+    botoes = [[InlineKeyboardButton(codigo, callback_data=f"set_ggv:{doc_id}:{tipo}:{codigo}")]
+              for codigo, _ in _listar_obras()]
     botoes.append([InlineKeyboardButton("❓ Não identificado",
                                         callback_data=f"set_ggv:{doc_id}:{tipo}:nao_identificado")])
     botoes.append([InlineKeyboardButton("◀️ Voltar",
