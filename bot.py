@@ -680,6 +680,10 @@ _COLUNAS_OBRA = {"descricao", "endereco_entrega", "encarregado_nome", "encarrega
                  "responsavel_nome", "responsavel_fone", "pasta_onedrive", "ativa"}
 
 def atualizar_obra(codigo, **kwargs):
+    if codigo == "GGV01" and "pasta_onedrive" in kwargs:
+        # Regra do projeto: a pasta antiga de GGV01 nunca é escrita pela Laura — trava
+        # técnica pra uma regra que até 2026-08-07 só existia como combinado humano.
+        raise ValueError("GGV01 nunca tem pasta_onedrive gravada — regra do projeto.")
     colunas_invalidas = set(kwargs) - _COLUNAS_OBRA
     if colunas_invalidas:
         raise ValueError(f"Coluna(s) não permitida(s) em atualizar_obra: {colunas_invalidas}")
@@ -696,6 +700,31 @@ def criar_obra(codigo, descricao=""):
             (codigo.upper(), descricao)
         )
         return cur.rowcount == 1
+
+def _pasta_padrao_obra(codigo: str) -> str:
+    """Caminho relativo padrão de uma obra nova, seguindo a convenção real do projeto
+    (ex: '00 Obras/2026-06 GGV03' — mesmo formato usado nas obras já existentes)."""
+    return f"00 Obras/{datetime.now().strftime('%Y-%m')} {codigo}"
+
+def _provisionar_pasta_obra(codigo: str) -> Optional[str]:
+    """Grava pasta_onedrive com o caminho padrão e cria o esqueleto de subpastas na hora
+    (04 Compras, 04 Compras/00 Orçamentos, 01 Controle financeiro, 05 Entrega) — em vez de
+    esperar o primeiro documento ser arquivado, como acontecia até 2026-08-07. Só roda pra
+    obra recém-criada (GGV04 em diante); nunca reconfigura GGV00-03. GGV01 nunca é tocada.
+    Falha de disco/mount (ex: rclone fora do ar) não interrompe a criação da obra — só fica
+    sem a pasta provisionada agora, corrigível depois. Retorna o caminho gravado, ou None se
+    não provisionou (GGV01 ou falha de disco)."""
+    if codigo == "GGV01":
+        return None
+    caminho = _pasta_padrao_obra(codigo)
+    atualizar_obra(codigo, pasta_onedrive=caminho)
+    try:
+        _pasta_orcamentos(codigo)
+        _pasta_controle_financeiro(codigo)
+        _pasta_entrega(codigo)
+    except OSError:
+        return None
+    return caminho
 
 def ja_existe(hash_arquivo):
     if TEST_MODE:
@@ -2240,7 +2269,6 @@ def teclado_obra_campos(codigo):
         [InlineKeyboardButton("Encarregado (fone)",    callback_data=f"obra_campo:{codigo}:encarregado_fone")],
         [InlineKeyboardButton("Responsável (nome)",    callback_data=f"obra_campo:{codigo}:responsavel_nome")],
         [InlineKeyboardButton("Responsável (fone)",    callback_data=f"obra_campo:{codigo}:responsavel_fone")],
-        [InlineKeyboardButton("📁 Pasta OneDrive",     callback_data=f"obra_campo:{codigo}:pasta_onedrive")],
         [InlineKeyboardButton("◀️ Voltar",             callback_data=f"obra_ver:{codigo}")],
     ])
 
@@ -4687,7 +4715,16 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not criada:
             await update.message.reply_text(f"Obra {codigo} já existe.")
         else:
-            await update.message.reply_text(f"Obra {codigo} criada. Complete os dados abaixo.")
+            pasta = _provisionar_pasta_obra(codigo)
+            if pasta:
+                await update.message.reply_text(
+                    f"Obra {codigo} criada. Pasta no OneDrive: {pasta}. Complete os dados abaixo."
+                )
+            else:
+                await update.message.reply_text(
+                    f"Obra {codigo} criada. Não consegui criar a pasta no OneDrive agora "
+                    "— confira o mount depois. Complete os dados abaixo."
+                )
         obra = buscar_obra(codigo)
         await update.message.reply_text(mostrar_cockpit_obra(obra), reply_markup=teclado_obra(codigo, _pedidos_obra(codigo)))
 
