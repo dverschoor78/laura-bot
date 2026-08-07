@@ -1,5 +1,27 @@
 # Estado do Projeto Laura
 
+> Atualizado em: 2026-08-07 — **migração pro servidor (Proxmox/Eric) em andamento**: serviço
+> `laura-bot.service` já rodando lá, Eric montou o OneDrive via rclone. Corte de produção
+> ainda pendente de validação: banco de produção (`laura.db`) do servidor ainda não passou
+> por `scripts/migrar_caminhos_obras.py` — GGV00/GGV03 seguem com `pasta_onedrive` absoluto
+> Windows, então em Linux `_raiz_obra()` retorna `None` pra elas (protetivo, mas significa
+> que nada delas está caindo no OneDrive real ainda, só no fallback local). **Fiada pequena:
+> obra de teste dedicada pro OneDrive** — nova constante `GGV_TESTE_ONEDRIVE = "GGV99"`;
+> `_pasta_pfm()`/`_pasta_controle_financeiro()`/`_pasta_entrega()` agora liberam o caminho
+> real do OneDrive (via `_raiz_obra()`) só pra essa obra, mesmo com `LAURA_ENV=test` —
+> qualquer outra obra continua 100% isolada em `data/test_pfms/` durante teste, como sempre
+> foi. Objetivo: validar o mount do rclone do Eric sem tocar `laura.db` nem nenhuma pasta
+> real. Testado isoladamente (mock de `buscar_obra`/`ONEDRIVE_PATH`, sem banco real):
+> GGV03 permanece em `test_pfms` mesmo com `pasta_onedrive` configurada; GGV99 resolve o
+> caminho real. **Pendente**: criar a obra GGV99 de fato no servidor (`/nova_obra`, banco de
+> teste), configurar `pasta_onedrive` dela (sugestão: `00 Obras/9999 GGV99-TESTE`), gerar um
+> PFM de teste e confirmar visualmente que o PDF aparece no OneDrive. Produção do servidor
+> foi pausada (`systemctl stop laura-bot`) só pra rodar o teste sem conflito de token
+> (mesmo `TELEGRAM_BOT_TOKEN` em prod/teste — considerar um bot dedicado de teste no futuro).
+> Achado: nome real do arquivo do serviço é `deploy/laura-bot.service`, não `laura.service`
+> como `ARQUITETURA.md`/entradas antigas deste documento registram — corrigir quando mexer
+> nesses docs de novo.
+
 > Atualizado em: 2026-07-11 (mesma sessão, segunda fiada — **marcador 🔵 no Sistema de
 > Status**, aprovado por Dennis: 🟢 reservado ao ciclo fechado (pago + NF-e/fatura/recibos
 > assinados), pago sem fechamento fiscal vira 🔵 "Pago · NF-e pendente"/"recibo aguardando

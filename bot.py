@@ -43,6 +43,14 @@ print(DB_PATH)
 # contra ela — ver _raiz_obra() e docs/DEPLOY.md.
 ONEDRIVE_PATH = os.environ.get("ONEDRIVE_PATH", "")
 
+# Única obra que pode gravar no OneDrive real mesmo em LAURA_ENV=test — existe pra validar
+# o mount (rclone) sem misturar teste com nenhuma obra de produção. Qualquer outra obra
+# continua 100% isolada em data/test_pfms durante o teste, mesmo que tenha pasta_onedrive
+# configurada (2026-08-07).
+GGV_TESTE_ONEDRIVE = "GGV99"
+
+print(ONEDRIVE_PATH)
+
 claude = anthropic.Anthropic(api_key=CLAUDE_KEY)
 
 TIPOS = {
@@ -293,12 +301,16 @@ def _raiz_obra(ggv: str) -> Optional[Path]:
         return p
     return Path(ONEDRIVE_PATH) / p if ONEDRIVE_PATH else None
 
+def _pasta_base_fallback() -> Path:
+    """Pasta local usada quando a obra não tem pasta_onedrive resolvível — nunca sincronizada."""
+    return Path("data/test_pfms") if TEST_MODE else Path("data/pfms")
+
 def _pasta_pfm(ggv: str) -> Path:
-    if TEST_MODE:
-        pasta = Path("data/test_pfms")
+    if TEST_MODE and ggv != GGV_TESTE_ONEDRIVE:
+        pasta = _pasta_base_fallback()
     else:
         raiz  = _raiz_obra(ggv)
-        pasta = (raiz / "04 Compras") if raiz else Path("data/pfms")
+        pasta = (raiz / "04 Compras") if raiz else _pasta_base_fallback()
     pasta.mkdir(parents=True, exist_ok=True)
     return pasta
 
@@ -308,20 +320,20 @@ def _pasta_orcamentos(ggv: str) -> Path:
     return pasta
 
 def _pasta_controle_financeiro(ggv: str) -> Path:
-    if TEST_MODE:
-        pasta = Path("data/test_pfms") / "01 Controle financeiro"
+    if TEST_MODE and ggv != GGV_TESTE_ONEDRIVE:
+        pasta = _pasta_base_fallback() / "01 Controle financeiro"
     else:
         raiz  = _raiz_obra(ggv)
-        pasta = (raiz / "01 Controle financeiro") if raiz else Path("data/pfms") / "01 Controle financeiro"
+        pasta = (raiz / "01 Controle financeiro") if raiz else _pasta_base_fallback() / "01 Controle financeiro"
     pasta.mkdir(parents=True, exist_ok=True)
     return pasta
 
 def _pasta_entrega(ggv: str) -> Path:
-    if TEST_MODE:
-        pasta = Path("data/test_pfms") / "05 Entrega"
+    if TEST_MODE and ggv != GGV_TESTE_ONEDRIVE:
+        pasta = _pasta_base_fallback() / "05 Entrega"
     else:
         raiz  = _raiz_obra(ggv)
-        pasta = (raiz / "05 Entrega") if raiz else Path("data/pfms") / "05 Entrega"
+        pasta = (raiz / "05 Entrega") if raiz else _pasta_base_fallback() / "05 Entrega"
     pasta.mkdir(parents=True, exist_ok=True)
     return pasta
 
