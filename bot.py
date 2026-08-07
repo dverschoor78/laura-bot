@@ -2240,6 +2240,7 @@ def teclado_obra_campos(codigo):
         [InlineKeyboardButton("Encarregado (fone)",    callback_data=f"obra_campo:{codigo}:encarregado_fone")],
         [InlineKeyboardButton("Responsável (nome)",    callback_data=f"obra_campo:{codigo}:responsavel_nome")],
         [InlineKeyboardButton("Responsável (fone)",    callback_data=f"obra_campo:{codigo}:responsavel_fone")],
+        [InlineKeyboardButton("📁 Pasta OneDrive",     callback_data=f"obra_campo:{codigo}:pasta_onedrive")],
         [InlineKeyboardButton("◀️ Voltar",             callback_data=f"obra_ver:{codigo}")],
     ])
 
