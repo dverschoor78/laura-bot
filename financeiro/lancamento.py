@@ -16,6 +16,7 @@ Visões (Fase 5b):
 """
 import sqlite3
 from enum import Enum
+from typing import Optional
 
 
 class CategoriaLancamento(str, Enum):
@@ -151,6 +152,20 @@ def vincular_nfe(pfm_codigo: str, doc_id_nfe: int, db_path: str) -> bool:
             (doc_id_nfe, pfm_codigo)
         )
         return cur.rowcount == 1
+
+
+def trocar_nfe(pfm_codigo: str, novo_doc_id_nfe: int, db_path: str) -> Optional[int]:
+    """Substitui a NF-e vinculada a um lançamento por outra — corrige um arquivo errado,
+    diferente de vincular_nfe() (que só age quando ainda não existe vínculo nenhum, de
+    propósito, pra nunca sobrescrever por engano). Retorna o doc_id da NF-e antiga (pra quem
+    chamar poder limpar o arquivo/registro dela), ou None se o pedido não existe."""
+    with sqlite3.connect(db_path) as con:
+        row = con.execute("SELECT doc_id_nfe FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)).fetchone()
+        if row is None:
+            return None
+        doc_id_antigo = row[0]
+        con.execute("UPDATE lancamentos SET doc_id_nfe=? WHERE pfm_codigo=?", (novo_doc_id_nfe, pfm_codigo))
+    return doc_id_antigo
 
 
 def buscar_pedidos_sem_nfe(ggv: str, db_path: str) -> list:

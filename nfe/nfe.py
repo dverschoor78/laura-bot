@@ -83,3 +83,21 @@ def teclado_candidatos_nfe(doc_id: int, candidatos: list):
     botoes.append([InlineKeyboardButton("✖ Nenhum destes — descartar arquivo",
                                         callback_data=f"nfe_cancelar:{doc_id}")])
     return InlineKeyboardMarkup(botoes)
+
+def mostrar_troca_nfe(pfm_codigo: str, dados: dict) -> str:
+    """Tela de confirmação ao trocar a NF-e de um pedido já conhecido — diferente de
+    mostrar_nfe(), que ainda precisa perguntar a qual pedido vincular."""
+    linhas = [f"Trocar a NF-e do Pedido #{pfm_codigo}?\n"]
+    if dados["emitente"] != "A PREENCHER":
+        linhas.append(f"{dados['emitente']} — {dados['valor_fmt']}")
+    else:
+        linhas.append(dados["valor_fmt"])
+    if dados["numero"] != "A PREENCHER": linhas.append(f"NF {dados['numero']}")
+    if dados["data"]   != "A PREENCHER": linhas.append(dados["data"])
+    return "\n".join(linhas)
+
+def teclado_confirmar_troca_nfe(doc_id_novo: int, pfm_codigo: str):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Confirmar troca", callback_data=f"nfe_trocar_confirmar:{doc_id_novo}:{pfm_codigo}")],
+        [InlineKeyboardButton("← Cancelar",         callback_data=f"pfm_voltar:{pfm_codigo}")],
+    ])

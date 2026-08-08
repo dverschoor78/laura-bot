@@ -9,10 +9,12 @@ O matching de candidatos (buscar_candidatos_nfe) e a vinculação em si
 a camada de parsing/exibição que ainda estava solta em bot.py.
 
 Uso em bot.py:
-  from nfe import parse_nfe, mostrar_nfe, teclado_candidatos_nfe
+  from nfe import parse_nfe, mostrar_nfe, teclado_candidatos_nfe, mostrar_troca_nfe, teclado_confirmar_troca_nfe
 
 Este módulo não depende de bot.py nem de variáveis de ambiente.
 """
-from .nfe import parse_nfe, mostrar_nfe, teclado_candidatos_nfe
+from .nfe import (parse_nfe, mostrar_nfe, teclado_candidatos_nfe,
+                  mostrar_troca_nfe, teclado_confirmar_troca_nfe)
 
-__all__ = ["parse_nfe", "mostrar_nfe", "teclado_candidatos_nfe"]
+__all__ = ["parse_nfe", "mostrar_nfe", "teclado_candidatos_nfe",
+           "mostrar_troca_nfe", "teclado_confirmar_troca_nfe"]

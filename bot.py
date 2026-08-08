@@ -20,9 +20,9 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotComm
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 from financeiro.lancamento import (init_db_financeiro, sugerir_categoria, CategoriaLancamento,
-                                   vincular_nfe, buscar_candidatos_nfe)
+                                   vincular_nfe, trocar_nfe, buscar_candidatos_nfe)
 from financeiro.consultas import procurar_item
-from nfe import parse_nfe, mostrar_nfe, teclado_candidatos_nfe
+from nfe import parse_nfe, mostrar_nfe, teclado_candidatos_nfe, mostrar_troca_nfe, teclado_confirmar_troca_nfe
 from compras import (init_db_compras, criar_ou_buscar_lista_aberta, buscar_lista,
                       atualizar_lista, encerrar_lista, listar_listas_obra,
                       sugerir_itens, adicionar_item, remover_item, listar_itens,
@@ -455,6 +455,21 @@ def _arquivar_documento(pfm_codigo: str, sufixo: str, caminho_original, data_str
 def _arquivar_doc_financeiro(pfm_codigo: str, sufixo: str, caminho_original, data_str: str):
     """Copia comprovante/NF-e para '01 Controle financeiro', nome padronizado."""
     _arquivar_documento(pfm_codigo, sufixo, caminho_original, data_str, _pasta_controle_financeiro)
+
+def _remover_arquivo_financeiro_antigo(pfm_codigo: str, marcador: str):
+    """Remove da pasta '01 Controle financeiro' da obra qualquer arquivo já arquivado que
+    contenha `pfm_codigo` e `marcador` no nome (ex: marcador="NFe"). Casa por padrão de nome,
+    não por registro no banco — _arquivar_documento() nunca grava de volta o caminho pra onde
+    copiou, então essa é a única forma de reencontrar um arquivo já arquivado. Usado ao trocar
+    um documento vinculado errado (ex: NF-e errada em GGV02-020, 2026-08-08): sem isso, o
+    arquivo errado ficava esquecido no OneDrive pra sempre depois da troca."""
+    ggv = pfm_codigo.split("-")[0]
+    pasta = _pasta_controle_financeiro(ggv)
+    for arquivo in pasta.glob(f"*{pfm_codigo}*{marcador}*"):
+        try:
+            arquivo.unlink()
+        except OSError:
+            pass
 
 def _total_pago(pfm_codigo: str) -> float:
     with sqlite3.connect(DB_PATH) as con:
@@ -4481,6 +4496,35 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if ctx.user_data.get("aguardando") == "nfe_trocar":
+        ctx.user_data["aguardando"] = None
+        pfm_codigo = ctx.user_data.pop("nfe_trocar_pfm_codigo", None)
+        if not pfm_codigo:
+            await update.message.reply_text("Contexto perdido. Tente novamente pelo pedido.")
+            return
+        await update.message.reply_text("Analisando...")
+        tipo_conteudo = "document" if mime == "application/pdf" else "image"
+        dados_b64 = base64.standard_b64encode(conteudo).decode()
+        resposta = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=4096,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": tipo_conteudo, "source": {"type": "base64", "media_type": mime, "data": dados_b64}},
+                    {"type": "text", "text": _prompt_classificacao()}
+                ]
+            }]
+        )
+        _, _, corpo = parse_resposta(resposta.content[0].text)
+        atualizar(doc_id, tipo="nota_fiscal", dados_claude=corpo)
+        dados_nfe = parse_nfe(corpo)
+        await update.message.reply_text(
+            mostrar_troca_nfe(pfm_codigo, dados_nfe),
+            reply_markup=teclado_confirmar_troca_nfe(doc_id, pfm_codigo)
+        )
+        return
+
     await update.message.reply_text(
         "O que é este documento?",
         reply_markup=teclado_tipo_inicial(doc_id)
@@ -5481,12 +5525,12 @@ async def _cb_pfm_orc(query, ctx, partes):
         await ctx.bot.send_document(chat_id=query.message.chat_id, document=dados, filename=path.name)
 
 
-async def _cb_pfm_nfe(query, ctx, partes):
-    acao, doc_id_arquivo, pfm_codigo = partes
+async def _enviar_arquivo_vinculado(query, ctx, doc_id_arquivo, label):
+    """Reenvia pro Telegram um arquivo já vinculado a um pedido — comprovante, recibo, ou a
+    NF-e ao escolher '👀 Ver arquivo' no submenu. `label` só entra na mensagem de erro."""
     with sqlite3.connect(DB_PATH) as con:
         row = con.execute("SELECT caminho FROM documentos WHERE id=?", (int(doc_id_arquivo),)).fetchone()
     caminho = row[0] if row else None
-    label = {"pfm_nfe": "NF-e", "pfm_comp": "comprovante", "pfm_recibo": "recibo"}.get(acao, acao)
     if not caminho or not Path(caminho).exists():
         await query.answer(f"Arquivo de {label} não encontrado.", show_alert=True)
         return
@@ -5498,6 +5542,52 @@ async def _cb_pfm_nfe(query, ctx, partes):
         await ctx.bot.send_photo(chat_id=query.message.chat_id, photo=dados)
     else:
         await ctx.bot.send_document(chat_id=query.message.chat_id, document=dados, filename=path.name)
+
+
+async def _cb_pfm_nfe(query, ctx, partes):
+    """Comprovante e recibo continuam reenviando o arquivo direto, como sempre. NF-e abre um
+    submenu — ela é a única com um jeito de corrigir arquivo errado sem sair do Telegram
+    (2026-08-08, gatilho: nota fiscal errada anexada em GGV02-020)."""
+    acao, doc_id_arquivo, pfm_codigo = partes
+    label = {"pfm_nfe": "NF-e", "pfm_comp": "comprovante", "pfm_recibo": "recibo"}.get(acao, acao)
+    if acao != "pfm_nfe":
+        await _enviar_arquivo_vinculado(query, ctx, doc_id_arquivo, label)
+        return
+    await query.answer()
+    await query.edit_message_reply_markup(InlineKeyboardMarkup([
+        [InlineKeyboardButton("👀 Ver arquivo",    callback_data=f"pfm_nfe_ver:{doc_id_arquivo}:{pfm_codigo}")],
+        [InlineKeyboardButton("🔄 Trocar arquivo", callback_data=f"pfm_nfe_trocar:{doc_id_arquivo}:{pfm_codigo}")],
+        [InlineKeyboardButton("← Voltar",          callback_data=f"pfm_voltar:{pfm_codigo}")],
+    ]))
+
+
+async def _cb_pfm_nfe_ver(query, ctx, partes):
+    _, doc_id_arquivo, pfm_codigo = partes
+    await _enviar_arquivo_vinculado(query, ctx, doc_id_arquivo, "NF-e")
+
+
+async def _cb_pfm_nfe_trocar(query, ctx, partes):
+    _, doc_id_arquivo, pfm_codigo = partes
+    await query.answer()
+    ctx.user_data["aguardando"] = "nfe_trocar"
+    ctx.user_data["nfe_trocar_pfm_codigo"] = pfm_codigo
+    await query.edit_message_text(f"Envie o PDF ou foto da NF-e correta do Pedido #{pfm_codigo}.")
+
+
+async def _cb_pfm_voltar(query, ctx, partes):
+    """Reabre o cockpit do pedido — sair de um submenu (ex: troca de NF-e) sem completar."""
+    pfm_codigo = partes[1]
+    pedido = buscar_pedido(pfm_codigo)
+    if not pedido:
+        await query.edit_message_text("Pedido não encontrado.")
+        return
+    preparar_visualizacao_pedido(pedido)
+    await query.edit_message_text(
+        mostrar_pedido(pedido),
+        reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante,
+                                    pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status,
+                                    pedido.categoria, pedido.qtd_parcelas)
+    )
 
 
 async def _cb_pfm_entregue(query, ctx, partes):
@@ -5751,6 +5841,29 @@ async def _cb_nfe_cancelar(query, ctx, partes):
     )
 
 
+async def _cb_nfe_trocar_confirmar(query, ctx, partes):
+    """Efetiva a troca de NF-e de um pedido: substitui o vínculo no banco, remove do OneDrive
+    o arquivo errado (antes de arquivar o novo — senão o padrão de nome do novo bateria com
+    a busca do antigo e os dois seriam apagados), arquiva o novo no lugar certo, descarta o
+    registro antigo. 2026-08-08, gatilho: NF-e errada em GGV02-020."""
+    _, doc_id_novo, pfm_codigo = partes
+    doc_id_antigo = trocar_nfe(pfm_codigo, int(doc_id_novo), DB_PATH)
+    _remover_arquivo_financeiro_antigo(pfm_codigo, "NFe")
+    with sqlite3.connect(DB_PATH) as con:
+        row_nfe = con.execute(
+            "SELECT caminho, dados_claude FROM documentos WHERE id=?", (int(doc_id_novo),)
+        ).fetchone()
+    if row_nfe:
+        caminho_nfe, dados_nfe = row_nfe
+        numero_nfe = _campo(dados_nfe, "Número da NF")
+        data_nfe   = _campo(dados_nfe, "Data de emissão")
+        sufixo_nfe = f"NFe {numero_nfe}" if numero_nfe != "A PREENCHER" else "NFe"
+        _arquivar_doc_financeiro(pfm_codigo, sufixo_nfe, caminho_nfe, data_nfe)
+    if doc_id_antigo:
+        _descartar_documento(doc_id_antigo, force=True)
+    await query.edit_message_text(f"🟢 NF-e do Pedido #{pfm_codigo} trocada.")
+
+
 async def _cb_parcelas_ver(query, ctx, partes):
     pfm_codigo = partes[1]
     pedido = buscar_pedido(pfm_codigo)
@@ -5992,6 +6105,9 @@ _CB_DISPATCH = {
     "pfm_nfe": _cb_pfm_nfe,
     "pfm_comp": _cb_pfm_nfe,
     "pfm_recibo": _cb_pfm_nfe,
+    "pfm_nfe_ver": _cb_pfm_nfe_ver,
+    "pfm_nfe_trocar": _cb_pfm_nfe_trocar,
+    "pfm_voltar": _cb_pfm_voltar,
     "pfm_entregue": _cb_pfm_entregue,
     "entrega_sel": _cb_entrega_sel,
     "entrega_obs": _cb_entrega_obs,
@@ -6009,6 +6125,7 @@ _CB_DISPATCH = {
     "entrega_voltar": _cb_entrega_voltar,
     "nfe_confirmar": _cb_nfe_confirmar,
     "nfe_cancelar": _cb_nfe_cancelar,
+    "nfe_trocar_confirmar": _cb_nfe_trocar_confirmar,
     "parcelas_ver": _cb_parcelas_ver,
     "recibo_parcela_iniciar": _cb_recibo_parcela_iniciar,
     "recibo_parcela_motivo": _cb_recibo_parcela_motivo,
