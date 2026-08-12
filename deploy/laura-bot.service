@@ -7,7 +7,7 @@ Wants=network-online.target rclone-onedrive.service
 Type=simple
 WorkingDirectory=/opt/laura-bot
 ExecStart=/opt/laura-bot/.venv/bin/python bot.py
-Restart=on-failure
+Restart=always
 RestartSec=10
 
 [Install]

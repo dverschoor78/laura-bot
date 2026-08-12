@@ -11,7 +11,7 @@ ExecStart=/usr/bin/rclone mount onedrive: /mnt/onedrive \
     --vfs-cache-max-size 1G \
     --dir-cache-time 30s
 ExecStop=/bin/fusermount -uz /mnt/onedrive
-Restart=on-failure
+Restart=always
 RestartSec=10
 
 [Install]
