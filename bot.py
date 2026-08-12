@@ -2326,6 +2326,12 @@ def teclado_tipo_inicial(doc_id):
         [InlineKeyboardButton("✖ Cancelar",               callback_data=f"cancelar:{doc_id}")],
     ])
 
+def teclado_arquivo_duplicado(doc_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🗑 Descartar e liberar reenvio", callback_data=f"cancelar:{doc_id}")],
+        [InlineKeyboardButton("✖ Manter como está",             callback_data=f"doc_manter:{doc_id}")],
+    ])
+
 def teclado_condicao(doc_id, tipo, ggv):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💰 PIX à vista",                   callback_data=f"pgto:{doc_id}:{ggv}:pix_avista")],
@@ -4414,8 +4420,32 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if TEST_MODE:
         hash_arquivo += f"_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
 
-    if ja_existe(hash_arquivo):
-        await update.message.reply_text("Este arquivo já foi recebido.")
+    doc_duplicado = ja_existe(hash_arquivo)
+    if doc_duplicado:
+        doc_id_dup = doc_duplicado[0]
+        with sqlite3.connect(DB_PATH) as con:
+            tipo_dup, ggv_dup, pfm_numero_dup = con.execute(
+                "SELECT tipo, ggv, pfm_numero FROM documentos WHERE id=?", (doc_id_dup,)
+            ).fetchone()
+        # Já virou pedido de verdade — não há nada a decidir, só mostrar onde foi parar
+        # (mesmo padrão de _cb_cancelar ao encontrar um documento já usado).
+        if pfm_numero_dup:
+            pfm_codigo_dup = f"{ggv_dup}-{pfm_numero_dup:03d}"
+            pedido = buscar_pedido(pfm_codigo_dup)
+            if pedido:
+                preparar_visualizacao_pedido(pedido)
+                await update.message.reply_text(
+                    f"Este arquivo já virou o Pedido #{pfm_codigo_dup}.",
+                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo_dup, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status, pedido.categoria, pedido.qtd_parcelas)
+                )
+                return
+        emoji, label_tipo = TIPOS.get(tipo_dup, ("📄", "Arquivo ainda não classificado"))
+        label_ggv = f" · Obra {ggv_dup}" if ggv_dup and ggv_dup != "nao_identificado" else ""
+        await update.message.reply_text(
+            f"{emoji} {label_tipo}{label_ggv}\n\n"
+            "Este arquivo já foi recebido e ainda não virou pedido. O que você quer fazer?",
+            reply_markup=teclado_arquivo_duplicado(doc_id_dup)
+        )
         return
 
     if mime is None:
@@ -4930,6 +4960,10 @@ async def _cb_cancelar(query, ctx, partes):
             )
         else:
             await query.answer("Esse documento já virou um pedido — não dá mais pra cancelar por aqui.", show_alert=True)
+
+
+async def _cb_doc_manter(query, ctx, partes):
+    await query.edit_message_text("Mantido — nada foi alterado.")
 
 
 async def _cb_sel_tipo(query, ctx, partes):
@@ -6079,6 +6113,7 @@ async def _cb_menu_nova_obra(query, ctx, partes):
 _CB_DISPATCH = {
     "ok": _cb_ok,
     "cancelar": _cb_cancelar,
+    "doc_manter": _cb_doc_manter,
     "sel_tipo": _cb_sel_tipo,
     "set_tipo": _cb_set_tipo,
     "sel_tipo_inicial": _cb_sel_tipo_inicial,
