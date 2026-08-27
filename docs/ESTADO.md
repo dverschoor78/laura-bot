@@ -1,27 +1,21 @@
 # Estado do Projeto Laura
 
-> Atualizado em: 2026-08-27 — **correção manual do comprovante PIX implementada, NÃO
-> deployada**. Gatilho: comprovante do GGV03-025, Dennis apontou que a Laura pode ler
-> valor/data errado e não havia nenhum jeito de corrigir manualmente (só o orçamento tinha
-> "✏️ Corrigir dados"). Implementado em `bot.py`, testado localmente (script isolado, sqlite
-> temporário — não ao vivo no Telegram): botão "✏️ Corrigir dados" na tela de candidatos do
-> comprovante (disponível mesmo com zero candidatos — parou de descartar o arquivo
-> automaticamente nesse caso, decisão do usuário agora); botão "✏️ Corrigir parcela N" em
-> "Ver parcelas" pra parcela já registrada (bloqueado quando `status=assinado` — recibo
-> assinado por fora exige estorno/nova parcela, não edição in-place). Detalhe completo:
+> Atualizado em: 2026-08-27 — **correção manual do comprovante PIX — implementada, deployada
+> e validada em produção**. Gatilho: comprovante do **GGV03-026** (registrado antes como
+> "025" por engano — Dennis corrigiu depois do teste ao vivo) lido errado pela Laura, sem
+> nenhum jeito de corrigir manualmente (só o orçamento tinha "✏️ Corrigir dados"). Implementado
+> em `bot.py`: botão "✏️ Corrigir dados" na tela de candidatos do comprovante (disponível
+> mesmo com zero candidatos — parou de descartar o arquivo automaticamente nesse caso,
+> decisão do usuário agora); botão "✏️ Corrigir parcela N" em "Ver parcelas" pra parcela já
+> registrada (bloqueado quando `status=assinado`). Detalhe completo:
 > [[project_pix_comprovante_correcao]] (memória).
 >
-> **Bloqueado**: acesso SSH ao servidor Proxmox parou de funcionar da rede atual do Dennis
-> (nem `192.168.1.71` nem `.72` respondem — rota trava no mesmo hop intermediário pros dois).
-> Sem isso não dá pra `git pull` + restart no servidor pra validar ao vivo. Dennis decidiu
-> aguardar o Eric antes de tentar outra rota (Tailscale ou LAN). Ver
-> [[project_deploy_proxmox]].
->
-> **Pendências explícitas pra próxima sessão** (Dennis pediu pra guardar): revisar o pedido
-> **GGV03-025** em si (o caso real que disparou esta fiada — ainda não confirmado o que
-> exatamente a Laura leu errado nele) e **testar ao vivo no Telegram** as alterações desta
-> fiada assim que o servidor estiver acessível de novo. Código local não commitado nem
-> pushado — combinado, só depois de testar.
+> Acesso SSH ao servidor (que tinha parado de funcionar) voltou assim que Dennis reconectou
+> o cabo Ethernet fisicamente — achado no caminho: `192.168.1.71` não é a Laura, é outra
+> máquina (`bitcoin-node`); o servidor certo é `192.168.1.72`, hostname `laura` (ver
+> [[project_deploy_proxmox]]). Commit `1f75118` pushado, deployado via `git pull` + restart
+> do `laura-bot.service`, **testado ao vivo pelo Dennis no GGV03-026 — confirmado
+> funcionando**.
 
 > Atualizado em: 2026-08-07 — **migração pro servidor (Proxmox/Eric) em andamento**: serviço
 > `laura-bot.service` já rodando lá, Eric montou o OneDrive via rclone. Corte de produção
