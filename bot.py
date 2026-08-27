@@ -2310,9 +2310,27 @@ def teclado_candidatos_pix(doc_id_comp: int, candidatos: list):
             f"Pedido #{c['pfm_codigo']}",
             callback_data=f"pix_confirmar:{doc_id_comp}:{c['pfm_codigo']}"
         )])
+    # Corrigir dados fica disponível mesmo sem nenhum candidato — a Laura pode ter lido o
+    # valor/data errado, e sem isso o único caminho era descartar o arquivo sem chance de
+    # corrigir a leitura (2026-08-27, gatilho: GGV03-025).
+    botoes.append([InlineKeyboardButton("✏️ Corrigir dados",
+                                        callback_data=f"pix_edit:{doc_id_comp}")])
     botoes.append([InlineKeyboardButton("✖ Nenhum destes — descartar arquivo",
                                         callback_data=f"pix_cancelar:{doc_id_comp}")])
     return InlineKeyboardMarkup(botoes)
+
+
+def _tela_comprovante(doc_id_comp: int):
+    """Reconstrói a tela de candidatos do comprovante a partir do dado atual em `documentos`
+    — usada na classificação inicial e ao reabrir depois de '✏️ Corrigir dados', sempre lendo
+    o dados_claude mais recente (nunca um valor extraído em memória que já pode ter mudado)."""
+    dados_claude = _dados_doc(doc_id_comp)
+    if not dados_claude:
+        return "Documento não encontrado.", None
+    dados = parse_comprovante(dados_claude)
+    candidatos = buscar_candidatos_pix(dados["valor_v"], dados["favorecido"], dados["cnpj"])
+    texto = mostrar_comprovante_candidatos(dados, candidatos)
+    return texto, teclado_candidatos_pix(doc_id_comp, candidatos)
 
 def teclado_tipo_inicial(doc_id):
     return InlineKeyboardMarkup([
@@ -2678,6 +2696,12 @@ def teclado_parcelas(pfm_codigo):
             doc_ver = doc_id_rec_ass or doc_id_rec
             botoes.append([InlineKeyboardButton(
                 f"✅ Ver recibo assinado — parcela {i}", callback_data=f"pfm_recibo:{doc_ver}:{pfm_codigo}"
+            )])
+        # Parcela assinada não é editável por aqui — recibo já assinado por fora é documento
+        # fiscal; corrigir precisa de estorno/nova parcela, não edição in-place (2026-08-27).
+        if status != "assinado":
+            botoes.append([InlineKeyboardButton(
+                f"✏️ Corrigir parcela {i}", callback_data=f"parcela_editar:{pid}"
             )])
     botoes.append([InlineKeyboardButton("← Voltar", callback_data=f"pedido_abrir:{pfm_codigo}")])
     return InlineKeyboardMarkup(botoes)
@@ -4764,6 +4788,51 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ctx.user_data["aguardando"] = None
             await update.message.reply_text("Documento não encontrado.")
 
+    elif aguardando and aguardando.startswith("pix_edit_"):
+        campo = aguardando[len("pix_edit_"):]
+        ctx.user_data["aguardando"] = None
+        dados_atuais = _dados_doc(doc_id)
+        if not dados_atuais:
+            await update.message.reply_text("Documento não encontrado.")
+            return
+        novos_dados = _substituir_campo(dados_atuais, _PIX_CAMPO_NOMES[campo], texto)
+        atualizar(doc_id, dados_claude=novos_dados)
+        texto_resultado, markup = _tela_comprovante(doc_id)
+        await update.message.reply_text(texto_resultado, reply_markup=markup)
+
+    elif aguardando in ("parcela_edit_valor", "parcela_edit_data"):
+        campo = aguardando[len("parcela_edit_"):]
+        parcela_id = ctx.user_data.pop("parcela_edit_id", None)
+        ctx.user_data["aguardando"] = None
+        parcela = _buscar_parcela(parcela_id) if parcela_id else None
+        if not parcela:
+            await update.message.reply_text("Parcela não encontrada.")
+            return
+        _, pfm_codigo, _, _, _, _, status = parcela
+        if status == "assinado":
+            await update.message.reply_text(
+                "Parcela com recibo assinado não pode ser corrigida aqui — registre um "
+                "estorno ou uma nova parcela."
+            )
+            return
+        if campo == "valor":
+            try:
+                novo_valor = _parse_brl(re.sub(r"[^\d,.]", "", texto))
+            except Exception:
+                await update.message.reply_text("Valor inválido. Digite novamente (ex: R$ 1.500,00):")
+                ctx.user_data.update({"aguardando": "parcela_edit_valor", "parcela_edit_id": parcela_id})
+                return
+            with sqlite3.connect(DB_PATH) as con:
+                con.execute("UPDATE parcelas_pagamento SET valor=? WHERE id=?", (novo_valor, parcela_id))
+        else:
+            with sqlite3.connect(DB_PATH) as con:
+                con.execute("UPDATE parcelas_pagamento SET data_pagamento=? WHERE id=?", (texto, parcela_id))
+        with sqlite3.connect(DB_PATH) as con:
+            row_valor = con.execute("SELECT valor FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)).fetchone()
+        _recalcular_status_pagamento(pfm_codigo, row_valor[0] if row_valor else 0)
+        pedido = buscar_pedido(pfm_codigo)
+        await update.message.reply_text(_texto_parcelas(pedido), reply_markup=teclado_parcelas(pfm_codigo))
+
     elif aguardando == "endereco_entrega":
         atualizar(doc_id, endereco_entrega=texto)
         ctx.user_data["aguardando"] = None
@@ -4930,10 +4999,8 @@ async def _cb_ok(query, ctx, partes):
         texto, markup = _resumo_gerar(int(doc_id))
         await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
     elif tipo == "comprovante_pix":
-        dados_claude = _dados_doc(int(doc_id))
-        dados        = parse_comprovante(dados_claude)
-        candidatos   = buscar_candidatos_pix(dados["valor_v"], dados["favorecido"], dados["cnpj"])
-        await query.edit_message_text(mostrar_comprovante_candidatos(dados, candidatos))
+        texto_resultado, markup = _tela_comprovante(int(doc_id))
+        await query.edit_message_text(texto_resultado, reply_markup=markup)
     else:
         emoji, label = TIPOS.get(tipo, ("📄", tipo))
         await query.edit_message_text(f"Confirmado: {label}")
@@ -5068,17 +5135,11 @@ async def _cb_sel_tipo_inicial(query, ctx, partes):
                 "Cada comprovante pode ser usado apenas uma vez."
             )
         else:
-            candidatos = buscar_candidatos_pix(dados["valor_v"], dados["favorecido"], dados["cnpj"])
-            texto_resultado = mostrar_comprovante_candidatos(dados, candidatos)
-            if not candidatos:
-                _descartar_documento(int(doc_id))
-                texto_resultado += "\n\nArquivo descartado — pode reenviar depois de corrigir o pedido."
-                await query.edit_message_text(texto_resultado)
-            else:
-                await query.edit_message_text(
-                    texto_resultado,
-                    reply_markup=teclado_candidatos_pix(int(doc_id), candidatos)
-                )
+            # Não descarta mais automaticamente quando não acha candidato — pode ser leitura
+            # errada da Laura (valor/data), não ausência real de pedido em aberto. O usuário
+            # decide: corrigir os dados ou descartar de propósito (botões em _tela_comprovante).
+            texto_resultado, markup = _tela_comprovante(int(doc_id))
+            await query.edit_message_text(texto_resultado, reply_markup=markup)
     elif tipo == "nota_fiscal":
         dados_nfe = parse_nfe(corpo)
         candidatos = buscar_candidatos_nfe(dados_nfe["cnpj"], dados_nfe["valor_v"], DB_PATH)
@@ -5224,6 +5285,47 @@ async def _cb_pix_cancelar(query, ctx, partes):
         )
     else:
         await query.edit_message_text("Cancelado.")
+
+
+# Nome do campo no texto bruto do Claude (parse_comprovante/_campo) por chave de callback —
+# mesmo padrão de _cb_edit_campo (orçamento), convergindo no mecanismo já existente
+# (_substituir_campo) em vez de inventar um jeito novo de editar comprovante.
+_PIX_CAMPO_NOMES = {
+    "valor":      "Valor",
+    "data":       "Data do pagamento",
+    "favorecido": "Favorecido",
+    "cnpj":       "CNPJ/CPF do favorecido",
+}
+_PIX_CAMPO_LABELS = {
+    "valor":      "valor (ex: R$ 1.500,00)",
+    "data":       "data do pagamento (ex: 25/08/2026)",
+    "favorecido": "nome do favorecido",
+    "cnpj":       "CNPJ ou CPF do favorecido",
+}
+
+
+async def _cb_pix_voltar(query, ctx, partes):
+    _, doc_id_comp = partes
+    texto, markup = _tela_comprovante(int(doc_id_comp))
+    await query.edit_message_text(texto, reply_markup=markup)
+
+
+async def _cb_pix_edit(query, ctx, partes):
+    _, doc_id_comp = partes
+    await query.edit_message_reply_markup(InlineKeyboardMarkup([
+        [InlineKeyboardButton("💲 Valor",              callback_data=f"pix_edit_campo:{doc_id_comp}:valor")],
+        [InlineKeyboardButton("📅 Data do pagamento",  callback_data=f"pix_edit_campo:{doc_id_comp}:data")],
+        [InlineKeyboardButton("👤 Favorecido",         callback_data=f"pix_edit_campo:{doc_id_comp}:favorecido")],
+        [InlineKeyboardButton("🔢 CNPJ/CPF",           callback_data=f"pix_edit_campo:{doc_id_comp}:cnpj")],
+        [InlineKeyboardButton("◀️ Voltar",             callback_data=f"pix_voltar:{doc_id_comp}")],
+    ]))
+
+
+async def _cb_pix_edit_campo(query, ctx, partes):
+    _, doc_id_comp, campo = partes
+    ctx.user_data.update({"doc_id": int(doc_id_comp), "aguardando": f"pix_edit_{campo}"})
+    atual = _campo(_dados_doc(int(doc_id_comp)), _PIX_CAMPO_NOMES[campo])
+    await query.edit_message_text(f"Atual: {atual}\n\nNovo {_PIX_CAMPO_LABELS[campo]}:")
 
 
 async def _cb_sel_ggv(query, ctx, partes):
@@ -5910,6 +6012,47 @@ async def _cb_parcelas_ver(query, ctx, partes):
     )
 
 
+async def _cb_parcela_editar(query, ctx, partes):
+    _, parcela_id = partes
+    parcela = _buscar_parcela(int(parcela_id))
+    if not parcela:
+        await query.answer("Parcela não encontrada.", show_alert=True)
+        return
+    _, pfm_codigo, _, _, _, _, status = parcela
+    if status == "assinado":
+        await query.answer(
+            "Parcela com recibo assinado não pode ser corrigida aqui — registre um estorno "
+            "ou uma nova parcela.", show_alert=True
+        )
+        return
+    await query.edit_message_reply_markup(InlineKeyboardMarkup([
+        [InlineKeyboardButton("💲 Valor", callback_data=f"parcela_edit_campo:{parcela_id}:valor")],
+        [InlineKeyboardButton("📅 Data",  callback_data=f"parcela_edit_campo:{parcela_id}:data")],
+        [InlineKeyboardButton("◀️ Voltar", callback_data=f"parcelas_ver:{pfm_codigo}")],
+    ]))
+
+
+async def _cb_parcela_edit_campo(query, ctx, partes):
+    _, parcela_id, campo = partes
+    parcela = _buscar_parcela(int(parcela_id))
+    if not parcela:
+        await query.answer("Parcela não encontrada.", show_alert=True)
+        return
+    _, _, valor, data, _, _, status = parcela
+    if status == "assinado":
+        await query.answer(
+            "Parcela com recibo assinado não pode ser corrigida aqui — registre um estorno "
+            "ou uma nova parcela.", show_alert=True
+        )
+        return
+    ctx.user_data.update({"aguardando": f"parcela_edit_{campo}", "parcela_edit_id": int(parcela_id)})
+    if campo == "valor":
+        atual, label = f"R$ {_fmt_brl(valor)}", "novo valor (ex: R$ 1.500,00)"
+    else:
+        atual, label = (data or "Não informada"), "nova data (ex: 25/08/2026)"
+    await query.edit_message_text(f"Atual: {atual}\n\nDigite o {label}:")
+
+
 async def _cb_recibo_parcela_iniciar(query, ctx, partes):
     parcela_id = int(partes[1])
     parcela = _buscar_parcela(parcela_id)
@@ -6120,6 +6263,9 @@ _CB_DISPATCH = {
     "pix_confirmar": _cb_pix_confirmar,
     "pix_pagar": _cb_pix_pagar,
     "pix_cancelar": _cb_pix_cancelar,
+    "pix_edit": _cb_pix_edit,
+    "pix_edit_campo": _cb_pix_edit_campo,
+    "pix_voltar": _cb_pix_voltar,
     "sel_ggv": _cb_sel_ggv,
     "set_ggv": _cb_set_ggv,
     "pgto": _cb_pgto,
@@ -6162,6 +6308,8 @@ _CB_DISPATCH = {
     "nfe_cancelar": _cb_nfe_cancelar,
     "nfe_trocar_confirmar": _cb_nfe_trocar_confirmar,
     "parcelas_ver": _cb_parcelas_ver,
+    "parcela_editar": _cb_parcela_editar,
+    "parcela_edit_campo": _cb_parcela_edit_campo,
     "recibo_parcela_iniciar": _cb_recibo_parcela_iniciar,
     "recibo_parcela_motivo": _cb_recibo_parcela_motivo,
     "recibo_assinado_iniciar": _cb_recibo_assinado_iniciar,

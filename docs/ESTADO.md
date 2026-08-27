@@ -1,5 +1,28 @@
 # Estado do Projeto Laura
 
+> Atualizado em: 2026-08-27 — **correção manual do comprovante PIX implementada, NÃO
+> deployada**. Gatilho: comprovante do GGV03-025, Dennis apontou que a Laura pode ler
+> valor/data errado e não havia nenhum jeito de corrigir manualmente (só o orçamento tinha
+> "✏️ Corrigir dados"). Implementado em `bot.py`, testado localmente (script isolado, sqlite
+> temporário — não ao vivo no Telegram): botão "✏️ Corrigir dados" na tela de candidatos do
+> comprovante (disponível mesmo com zero candidatos — parou de descartar o arquivo
+> automaticamente nesse caso, decisão do usuário agora); botão "✏️ Corrigir parcela N" em
+> "Ver parcelas" pra parcela já registrada (bloqueado quando `status=assinado` — recibo
+> assinado por fora exige estorno/nova parcela, não edição in-place). Detalhe completo:
+> [[project_pix_comprovante_correcao]] (memória).
+>
+> **Bloqueado**: acesso SSH ao servidor Proxmox parou de funcionar da rede atual do Dennis
+> (nem `192.168.1.71` nem `.72` respondem — rota trava no mesmo hop intermediário pros dois).
+> Sem isso não dá pra `git pull` + restart no servidor pra validar ao vivo. Dennis decidiu
+> aguardar o Eric antes de tentar outra rota (Tailscale ou LAN). Ver
+> [[project_deploy_proxmox]].
+>
+> **Pendências explícitas pra próxima sessão** (Dennis pediu pra guardar): revisar o pedido
+> **GGV03-025** em si (o caso real que disparou esta fiada — ainda não confirmado o que
+> exatamente a Laura leu errado nele) e **testar ao vivo no Telegram** as alterações desta
+> fiada assim que o servidor estiver acessível de novo. Código local não commitado nem
+> pushado — combinado, só depois de testar.
+
 > Atualizado em: 2026-08-07 — **migração pro servidor (Proxmox/Eric) em andamento**: serviço
 > `laura-bot.service` já rodando lá, Eric montou o OneDrive via rclone. Corte de produção
 > ainda pendente de validação: banco de produção (`laura.db`) do servidor ainda não passou

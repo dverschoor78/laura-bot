@@ -1,5 +1,16 @@
 # Roadmap do Projeto Laura
 
+## Pendências imediatas (2026-08-27)
+
+- **Revisar o pedido GGV03-025** — comprovante que disparou a fiada de correção manual do
+  comprovante PIX; ainda não confirmado o que exatamente a Laura leu errado nele.
+- **Testar ao vivo no Telegram** a correção manual do comprovante PIX e da parcela
+  (implementada e testada localmente, não deployada — ver ESTADO.md e
+  [[project_pix_comprovante_correcao]]) assim que o acesso ao servidor voltar (ver
+  [[project_deploy_proxmox]] — SSH quebrado, aguardando o Eric).
+
+---
+
 > Atualizado em: 2026-07-11 (**marcador 🔵 no Sistema de Status** — 🟢 reservado ao ciclo
 > fechado (pago + NF-e/fatura/recibos assinados), pago sem fechamento vira 🔵;
 > `_fechamento_fiscal()`/`_emoji_pedido()` fonte única, 3 dicts duplicados removidos;
