@@ -60,17 +60,18 @@ def mostrar_nfe(dados: dict, candidatos: list) -> str:
     if not candidatos:
         linhas.append("Nenhum pedido pago sem NF-e encontrado.")
         return "\n".join(linhas)
+    def _rotulo_valor(c):
+        valor_fmt = f"R$ {_fmt_brl(c['valor_lanc'])}" if c["valor_lanc"] else "—"
+        return f"{valor_fmt} restante" if c.get("parcial") else valor_fmt
     fortes = [c for c in candidatos if c["score"] > 0]
     if fortes:
         linhas.append("A qual pedido vincular esta NF-e?\n")
         for c in fortes:
-            valor_fmt = f"R$ {_fmt_brl(c['valor_lanc'])}" if c["valor_lanc"] else "—"
-            linhas.append(f"🟢 #{c['pfm_codigo']} · {c['fornecedor']} · {valor_fmt}")
+            linhas.append(f"🟢 #{c['pfm_codigo']} · {c['fornecedor']} · {_rotulo_valor(c)}")
     else:
         linhas.append("Escolha o pedido manualmente:\n")
         for c in candidatos:
-            valor_fmt = f"R$ {_fmt_brl(c['valor_lanc'])}" if c["valor_lanc"] else "—"
-            linhas.append(f"🟢 #{c['pfm_codigo']} · {c['fornecedor']} · {valor_fmt}")
+            linhas.append(f"🟢 #{c['pfm_codigo']} · {c['fornecedor']} · {_rotulo_valor(c)}")
     return "\n".join(linhas)
 
 def teclado_candidatos_nfe(doc_id: int, candidatos: list):

@@ -765,9 +765,16 @@ Cada um deve ser endereçado na fiada correspondente — não deixar para depois
 Desconto negociado, frete separado ou arredondamento podem gerar diferença.
 Laura deve alertar e permitir aceitar com observação ou bloquear o vínculo.
 
-**2. Entregas parciais — múltiplas NF por pedido**
+**2. Entregas parciais — múltiplas NF por pedido** ✓ *(resolvido 2026-08-28)*
 Um pedido pode ter três entregas e três NF-e diferentes.
 O modelo atual é 1 pedido → 1 NF. Precisa suportar N NF por pedido antes de fechar o status.
+Gatilho real: GGV03-025 (Operador Nacional do Registro, R$166,78, dois serviços de cartório
+de registro de imóveis, duas NF-e). Implementado: tabela `notas_fiscais_pedido` (N por
+pedido); `lancamentos.doc_id_nfe` preservado como "primeira NF-e" só por compatibilidade;
+fechamento fiscal exige que a soma das NF-e cubra o valor total quando há 2+ (com exatamente
+1, mantém o comportamento histórico — nunca exigiu bater valor, pra não regredir nenhum
+pedido já fechado); tela "Ver notas fiscais" no cockpit (mesmo padrão de "Ver parcelas").
+Detalhe completo: `docs/ESTADO.md`.
 
 **3. Fluxo inverso — entrega antes do PIX**
 Material chega com crédito no fornecedor; NF-e chega antes do pagamento.

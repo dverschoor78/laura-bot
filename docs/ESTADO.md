@@ -1,5 +1,41 @@
 # Estado do Projeto Laura
 
+> Atualizado em: 2026-08-28 — **N NF-e por pedido — implementado, testado, aguardando deploy
+> e validação em produção**. Gatilho: Dennis reportou o **GGV03-025** (Operador Nacional do
+> Registro, R$166,78) referente a dois serviços de cartório de registro de imóveis, com
+> **duas NF-e** pro mesmo pedido — situação que a Laura não previa (Caso 2 do ROADMAP Fase 6,
+> identificado em 2026-06-30 e nunca implementado até bater na prática). Mockup em texto
+> validado com Dennis antes do código, como sempre: convergiu com o modelo já existente de
+> pagamento parcelado (N parcelas por pedido) em vez de um mecanismo novo.
+>
+> Implementado: tabela `notas_fiscais_pedido` (`financeiro/lancamento.py`) — N NF-e por
+> pedido, com backfill idempotente de todo pedido que já tinha `lancamentos.doc_id_nfe` no
+> modelo antigo (esse campo é mantido, agora só como "primeira NF-e", por compatibilidade).
+> `vincular_nfe()` deixou de bloquear quando já existe NF-e — sempre acrescenta.
+> `buscar_candidatos_nfe()` passou a considerar pedidos com NF-e parcial (soma < valor total)
+> como candidatos elegíveis pra próxima nota, comparando o valor da nota recebida contra o
+> **restante**, não o total. `_fechamento_fiscal()`: com exatamente 1 NF-e, mantém o
+> comportamento histórico (fecha sempre, nunca exigiu bater valor — decisão explícita pra não
+> regredir nenhum pedido já fechado); com 2+, exige que a soma cubra o valor total (decisão do
+> Dennis). Cockpit ganhou a tela "Ver notas fiscais" (mesmo padrão de "Ver parcelas") quando o
+> pedido tem 2+ NF-e; com 1, mantém o botão único de sempre.
+>
+> **Escopo desta fiada, por decisão explícita**: corrigir uma NF-e errada quando o pedido já
+> tem 2+ é só remover + reenviar (sem "trocar" por item ainda — o "🔄 Trocar arquivo" original
+> continua existindo, mas só pro caso de 1 NF-e só). Relatórios em `financeiro/relatorios.py`/
+> `consultas.py` continuam lendo `doc_id_nfe` como booleano "tem NF-e" — correto pro caso
+> comum, impreciso pro caso de 2+ (não ajustado, fora do escopo pedido).
+>
+> **Testado** (sem tocar produção): `py_compile` limpo; suíte isolada contra sqlite temporário
+> cobrindo os 5 casos centrais (NF-e única preserva compatibilidade, NF-e parcial aparece
+> como candidata com valor restante correto, soma completa fecha o pedido, remover promove a
+> próxima, reenvio do mesmo arquivo é idempotente); migração/backfill rodada contra uma
+> **cópia** do `data/laura.db` local (14 pedidos reais com NF-e, todos migrados 1:1,
+> idempotente em execuções repetidas) — cópia local está desatualizada (31/07, antes da
+> migração pro servidor), só serviu pra validar a forma dos dados reais, não o estado atual.
+> **Pendente**: deploy no servidor (`git pull` + restart do `laura-bot.service`) e registrar
+> as duas NF-e reais do GGV03-025 ao vivo pelo Telegram.
+
 > Atualizado em: 2026-08-27 — **correção manual do comprovante PIX — implementada, deployada
 > e validada em produção**. Gatilho: comprovante do **GGV03-026** (registrado antes como
 > "025" por engano — Dennis corrigiu depois do teste ao vivo) lido errado pela Laura, sem
@@ -194,6 +230,11 @@ container (SSH + tmux + Claude Code), sem nada a abrir no firewall do Eric.
 
 ## Versão Atual
 
+**v0.17.0** — N NF-e por pedido (Caso 2 do ROADMAP Fase 6): tabela `notas_fiscais_pedido`,
+`lancamentos.doc_id_nfe` preservado como "primeira NF-e" por compatibilidade; fechamento
+fiscal exige soma completa com 2+ NF-e (1 NF-e mantém o comportamento histórico); cockpit
+ganha "Ver notas fiscais" quando há mais de uma — gatilho: GGV03-025/ONR, duas NF-e
+
 **v0.16.0** — Marcador 🔵 no Sistema de Status: 🟢 reservado ao ciclo fechado (pago +
 NF-e/fatura/recibos assinados); pago sem fechamento fiscal mostra 🔵 no Cockpit da Obra e
 na Tela do Pedido; `_fechamento_fiscal()`/`_emoji_pedido()` como fonte única do marcador
@@ -247,8 +288,10 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 - Confirmação de pagamento com botões por candidato
 - Marcação de lançamento como PAGO com gravação de valor, data e identificador
 - Proteção contra duplo pagamento e reutilização do mesmo comprovante
-- Recebimento e vinculação de NF-e a qualquer pedido sem NF-e (independente do status de
-  pagamento — nota pode ser emitida antes de o pedido estar totalmente pago)
+- Recebimento e vinculação de NF-e a qualquer pedido, independente do status de pagamento
+  (nota pode ser emitida antes de o pedido estar totalmente pago) — um pedido pode ter mais
+  de uma NF-e (ex: dois serviços na mesma fatura), fechamento fiscal exige que a soma cubra o
+  valor total quando há 2 ou mais; tela "Ver notas fiscais" no cockpit nesse caso
 - Revisão do Pedido de Compra com geração de arquivo rev01, rev02...
 - Cockpit do pedido com número da NF-e, botões de comprovante e nota
 - Registro de entrega: foto, /entrega, botão no cockpit, observação com sugestões
@@ -282,6 +325,74 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 ---
 
 ## Última Fiada Implementada
+
+**N NF-e por pedido — Caso 2 do ROADMAP Fase 6** *(2026-08-28)*
+
+Dennis reportou o GGV03-025 (Operador Nacional do Registro, R$166,78) referente a dois
+serviços de cartório de registro de imóveis, com duas NF-e pro mesmo pedido — situação que a
+Laura não previa. Já estava mapeado: Caso 2 da lista "Casos a tratar durante a implementação
+da Fase 6" (`ROADMAP.md`, identificado em 2026-06-30, nunca implementado — "o modelo atual é
+1 pedido → 1 NF").
+
+Duas decisões tomadas com o Dennis antes do código (`AskUserQuestion`): (1) o GGV03-025 fica
+sem fechar (🔵, não 🟢) até a fiada estar pronta, em vez de vincular só 1 NF-e e arquivar a
+outra por fora do banco; (2) construir o suporte a N NF-e agora, não só registrar o caso e
+adiar de novo — os dois sinais (Caso 2 do ROADMAP + o próprio caso real) já bastavam.
+
+**Convergência, não mecanismo novo**: o desenho mirra o pagamento parcelado (N parcelas por
+pedido, cada uma com seu ciclo) em vez de inventar um padrão próprio pra NF-e.
+
+**Modelo de dados** (`financeiro/lancamento.py`): tabela nova `notas_fiscais_pedido`
+(`pfm_codigo`, `doc_id`, `valor`, `numero`, `UNIQUE(pfm_codigo, doc_id)`) — fonte de verdade
+de quantas/quais NF-e um pedido tem. `init_db_notas_fiscais()` cria a tabela e faz backfill
+idempotente de todo pedido que já tinha `lancamentos.doc_id_nfe` no modelo antigo; essa
+coluna continua existindo e sendo escrita (agora só com a **primeira** NF-e do pedido), só
+por compatibilidade com código que ainda lê o campo isolado (ex: o botão único do cockpit
+quando há exatamente uma nota).
+
+**Funções que mudaram de comportamento**: `vincular_nfe()` deixou de bloquear quando o pedido
+já tem NF-e — sempre acrescenta (`INSERT OR IGNORE`, idempotente pro mesmo arquivo reenviado).
+`trocar_nfe()` (correção de arquivo errado) segue existindo, só faz sentido no caso de 1 NF-e
+só. `buscar_candidatos_nfe()` passou a incluir pedidos com NF-e parcial (soma < valor total)
+como elegíveis pra próxima nota — o valor mostrado/comparado nesse caso é o **restante**
+(`valor_total - soma_nfe`), não o total do pedido, senão a 2ª NF-e de R$83,39 nunca bateria
+contra o total de R$166,78 do GGV03-025.
+
+**Regra de fechamento fiscal** (`_fechamento_fiscal()`, decisão do Dennis via
+`AskUserQuestion`): com **exatamente 1** NF-e, mantém o comportamento histórico — fecha
+sempre, nunca exigiu bater com o valor (decisão explícita pra não regredir nenhum pedido já
+fechado hoje, já que o vínculo antigo nunca comparou valor). Com **2 ou mais**, exige que a
+soma cubra o valor total do pedido — só aí o ciclo fecha (🟢); enquanto a soma não bate, mostra
+🔵 e o rótulo "Pago · NF-e parcial (R$X de R$Y)".
+
+**Cockpit**: pedido com 2+ NF-e troca o botão único "🧾 NF-e" por "🧾 Ver N notas fiscais",
+abrindo a tela "Ver notas fiscais" (`_texto_notas_fiscais`/`teclado_notas_fiscais`, mesmo
+padrão de "Ver parcelas") — lista cada nota com "👀 Ver"/"🗑 Remover" por item. Remover
+desvincula sem apagar o documento (pode ser reenviado/rematcheado depois); se a removida era
+a "primeira" (`doc_id_nfe`), promove a próxima automaticamente. Com exatamente 1 NF-e, o
+cockpit continua idêntico a antes (botão único, submenu Ver/Trocar) — zero mudança visual
+pro caso comum.
+
+**Escopo explicitamente fora desta fiada**: corrigir uma NF-e errada quando já há 2+ é só
+remover + reenviar (sem "trocar" item a item ainda). `financeiro/relatorios.py` e
+`consultas.py` continuam lendo `doc_id_nfe` como booleano "tem NF-e" — correto pro caso comum
+(qualquer NF-e vinculada ainda marca `doc_id_nfe`), impreciso pro caso de 2+ (não reflete se a
+soma realmente fecha) — não ajustado, são scripts de relatório manual, fora do pedido.
+
+**Testado** (nada tocou produção): `py_compile` limpo em `bot.py`/`financeiro/lancamento.py`/
+`nfe/nfe.py`; suíte isolada contra sqlite temporário cobrindo NF-e única (compatibilidade),
+NF-e parcial como candidata com valor restante correto, soma completa fechando o pedido,
+remover promovendo a próxima, reenvio do mesmo arquivo sendo idempotente; `_fechamento_fiscal`/
+`_emoji_pedido`/`_status_pago_label`/`teclado_pedido` testados isoladamente via import seguro
+de `bot.py` (guard `__main__`, `LAURA_ENV=test`); migração/backfill rodada contra uma **cópia**
+de `data/laura.db` local — 14 pedidos reais com NF-e, todos migrados 1 para 1, idempotente em
+execuções repetidas (cópia local é de 31/07, anterior à migração pro servidor — só validou a
+forma dos dados reais, não substitui teste contra o banco de produção atual).
+
+**Pendente**: deploy no servidor (`git pull` + restart do `laura-bot.service`) e registrar as
+duas NF-e reais do GGV03-025 ao vivo pelo Telegram — validação ponta a ponta com Dennis.
+
+---
 
 **Marcador 🔵 — verde só com ciclo fechado (NF-e/recibo)** *(2026-07-11, segunda fiada do dia)*
 

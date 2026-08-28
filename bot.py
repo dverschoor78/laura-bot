@@ -19,8 +19,9 @@ from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
-from financeiro.lancamento import (init_db_financeiro, sugerir_categoria, CategoriaLancamento,
-                                   vincular_nfe, trocar_nfe, buscar_candidatos_nfe)
+from financeiro.lancamento import (init_db_financeiro, init_db_notas_fiscais, sugerir_categoria,
+                                   CategoriaLancamento, vincular_nfe, trocar_nfe, buscar_candidatos_nfe,
+                                   listar_notas_fiscais, remover_nota_fiscal, soma_notas_fiscais)
 from financeiro.consultas import procurar_item
 from nfe import parse_nfe, mostrar_nfe, teclado_candidatos_nfe, mostrar_troca_nfe, teclado_confirmar_troca_nfe
 from compras import (init_db_compras, criar_ou_buscar_lista_aberta, buscar_lista,
@@ -169,6 +170,9 @@ class Pedido:
     doc_id_nfe:            Optional[int] = None
     nfe_numero:            Optional[str] = None
     nfe_data:              Optional[str] = None
+    qtd_nfe:               int = 0
+    total_nfe:             float = 0.0
+    notas_fiscais:         list = field(default_factory=list)
     doc_id_comprovante:    Optional[int] = None
     identificador_comprovante: Optional[str] = None
     qtd_fotos_entrega:     int = 0
@@ -678,6 +682,7 @@ def init_db():
             except Exception:
                 pass
     init_db_financeiro(DB_PATH)
+    init_db_notas_fiscais(DB_PATH)
     init_db_compras(DB_PATH)
 
 def buscar_obra(codigo):
@@ -2208,13 +2213,16 @@ def teclado_lista_obras(obras):
 def _pedidos_obra(ggv):
     with sqlite3.connect(DB_PATH) as con:
         rows = con.execute(
-            "SELECT pfm_codigo, status, fornecedor, valor, categoria, doc_id_nfe "
-            "FROM lancamentos WHERE ggv=? ORDER BY pfm_codigo",
+            "SELECT l.pfm_codigo, l.status, l.fornecedor, l.valor, l.categoria, "
+            "(SELECT COUNT(*) FROM notas_fiscais_pedido n WHERE n.pfm_codigo=l.pfm_codigo), "
+            "(SELECT COALESCE(SUM(valor),0) FROM notas_fiscais_pedido n WHERE n.pfm_codigo=l.pfm_codigo) "
+            "FROM lancamentos l WHERE l.ggv=? ORDER BY l.pfm_codigo",
             (ggv,)
         ).fetchall()
     return [
-        (pfm_codigo, status, fornecedor, valor, _emoji_pedido(status, pfm_codigo, categoria, doc_id_nfe))
-        for pfm_codigo, status, fornecedor, valor, categoria, doc_id_nfe in rows
+        (pfm_codigo, status, fornecedor, valor,
+         _emoji_pedido(status, pfm_codigo, categoria, valor, qtd_nfe, total_nfe))
+        for pfm_codigo, status, fornecedor, valor, categoria, qtd_nfe, total_nfe in rows
     ]
 
 def teclado_obra(codigo, pedidos=None):
@@ -2427,6 +2435,12 @@ def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
         total_pago_v = con.execute(
             "SELECT COALESCE(SUM(valor),0) FROM parcelas_pagamento WHERE pfm_codigo=?", (pfm_codigo,)
         ).fetchone()[0]
+        qtd_nfe = con.execute(
+            "SELECT COUNT(*) FROM notas_fiscais_pedido WHERE pfm_codigo=?", (pfm_codigo,)
+        ).fetchone()[0]
+        total_nfe_v = con.execute(
+            "SELECT COALESCE(SUM(valor),0) FROM notas_fiscais_pedido WHERE pfm_codigo=?", (pfm_codigo,)
+        ).fetchone()[0]
 
     forn_lanc = data_prev_ent = venc = status_raw = lanc_criado = data_pgto = None
     doc_id_nfe = doc_id_comp = ident_comp = obs_ent = entregue_em = categoria_lanc = None
@@ -2465,6 +2479,8 @@ def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
         categoria                 = categoria_lanc,
         qtd_parcelas              = qtd_parcelas,
         total_pago                = total_pago_v,
+        qtd_nfe                   = qtd_nfe,
+        total_nfe                 = total_nfe_v,
         caminho_orcamento         = caminho,
         observacoes               = (lambda o: None if _campo_vazio(o) else o)(_obs(dados).strip()),
     )
@@ -2488,6 +2504,24 @@ def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
             data_raw = _campo(row[0], "Data de emissão")
             pedido.nfe_data = data_raw[:5] if data_raw != "A PREENCHER" else None
 
+    # Detalhe de cada NF-e (Caso 2 do ROADMAP — pedido pode ter mais de uma), usado pela
+    # tela "Ver notas fiscais" e pelo histórico quando qtd_nfe >= 2.
+    if pedido.qtd_nfe >= 2:
+        for nfe_id, doc_id_nfe, valor_nfe, numero_nfe, criado_em in listar_notas_fiscais(pedido.codigo, DB_PATH):
+            with sqlite3.connect(DB_PATH) as con:
+                row = con.execute("SELECT dados_claude FROM documentos WHERE id=?", (doc_id_nfe,)).fetchone()
+            data_nfe = None
+            if row:
+                if not numero_nfe:
+                    numero_campo = _campo(row[0], "Número da NF")
+                    numero_nfe = numero_campo if numero_campo != "A PREENCHER" else None
+                data_raw = _campo(row[0], "Data de emissão")
+                data_nfe = data_raw[:5] if data_raw != "A PREENCHER" else None
+            pedido.notas_fiscais.append({
+                "id": nfe_id, "doc_id": doc_id_nfe, "valor": valor_nfe,
+                "numero": numero_nfe, "data": data_nfe,
+            })
+
     historico = []
     if pedido.lanc_criado_em:
         historico.append((_fmt_data_curta(pedido.lanc_criado_em), "Pedido criado"))
@@ -2498,9 +2532,13 @@ def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
             cod = pedido.identificador_comprovante[:12]
             pago_label = f"Pago · {cod}"
         historico.append((data_fmt, pago_label))
-    if pedido.doc_id_nfe:
+    if pedido.qtd_nfe == 1 and pedido.doc_id_nfe:
         nfe_label = f"NF-e {pedido.nfe_numero}" if pedido.nfe_numero else "NF-e"
         historico.append((pedido.nfe_data or "", nfe_label))
+    elif pedido.qtd_nfe >= 2:
+        for nota in pedido.notas_fiscais:
+            nfe_label = f"NF-e {nota['numero']}" if nota["numero"] else "NF-e"
+            historico.append((nota["data"] or "", nfe_label))
     if pedido.obs_entrega:
         ent_data = _fmt_data_curta(pedido.entregue_em) if pedido.entregue_em else ""
         ent_label = "Entregue" if pedido.obs_entrega == "Entrega completa" else f"Entregue — {pedido.obs_entrega}"
@@ -2513,14 +2551,20 @@ def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
 # não emitem NF-e separada) — não exibir "NF-e pendente" nem exigir vínculo de NF-e
 CATEGORIAS_SEM_NFE_OBRIGATORIA = {"taxa", "imposto", "servico_publico"}
 
-def _fechamento_fiscal(pfm_codigo, categoria, doc_id_nfe):
+def _fechamento_fiscal(pfm_codigo, categoria, valor_total=None, qtd_nfe=0, total_nfe=0.0):
     """(ok, pendencia) do fechamento fiscal — Fase 6: todo pagamento confirmado precisa de
-    NF-e ou recibo. ok=True com NF-e vinculada, categoria cuja fatura é o próprio fechamento,
-    ou todas as parcelas com recibo assinado. pendencia: "nfe" ou "assinatura"."""
-    if doc_id_nfe:
-        return True, None
+    NF-e ou recibo. ok=True com categoria cuja fatura é o próprio fechamento, exatamente uma
+    NF-e vinculada (comportamento histórico — nunca exigiu bater com o valor), duas ou mais
+    NF-e cuja soma cobre o valor total (Caso 2 do ROADMAP: pedido com mais de uma NF-e, ex.
+    GGV03-025/ONR), ou todas as parcelas com recibo assinado. pendencia: "nfe" ou "assinatura"."""
     if categoria in CATEGORIAS_SEM_NFE_OBRIGATORIA:
         return True, None
+    if qtd_nfe == 1:
+        return True, None
+    if qtd_nfe >= 2:
+        if valor_total and total_nfe >= valor_total - 0.01:
+            return True, None
+        return False, "nfe"  # soma das NF-e ainda não cobre o valor total — falta mais uma
     with sqlite3.connect(DB_PATH) as con:
         total, assinadas, com_recibo = con.execute(
             "SELECT COUNT(*), "
@@ -2536,12 +2580,12 @@ def _fechamento_fiscal(pfm_codigo, categoria, doc_id_nfe):
 _EMOJI_STATUS_PEDIDO = {"a_pagar": "🟡", "pago": "🟢", "pendente_revisao": "🔴", "substituido": "⚫",
                         "sem_lancamento": "⚪"}
 
-def _emoji_pedido(status, pfm_codigo=None, categoria=None, doc_id_nfe=None):
+def _emoji_pedido(status, pfm_codigo=None, categoria=None, valor_total=None, qtd_nfe=0, total_nfe=0.0):
     """Marcador do Sistema de Status. 🟢 é reservado ao ciclo fechado — pago E fechamento
     fiscal resolvido (NF-e, fatura de taxa/serviço público, ou recibos assinados); pago sem
     fechamento vira 🔵. Única fonte do emoji de pedido — não recriar dicts locais."""
     if status == "pago" and pfm_codigo:
-        ok, _ = _fechamento_fiscal(pfm_codigo, categoria, doc_id_nfe)
+        ok, _ = _fechamento_fiscal(pfm_codigo, categoria, valor_total, qtd_nfe, total_nfe)
         if not ok:
             return "🔵"
     return _EMOJI_STATUS_PEDIDO.get(status, "⚪")
@@ -2549,11 +2593,17 @@ def _emoji_pedido(status, pfm_codigo=None, categoria=None, doc_id_nfe=None):
 def _status_pago_label(pedido: "Pedido") -> str:
     if pedido.categoria in CATEGORIAS_SEM_NFE_OBRIGATORIA:
         return "Pago"
-    if pedido.nfe_numero:
-        return f"Pago · NF-e {pedido.nfe_numero}"
-    if pedido.doc_id_nfe:
-        return "Pago · NF-e"
-    ok, pendencia = _fechamento_fiscal(pedido.codigo, pedido.categoria, pedido.doc_id_nfe)
+    if pedido.qtd_nfe == 1:
+        return f"Pago · NF-e {pedido.nfe_numero}" if pedido.nfe_numero else "Pago · NF-e"
+    if pedido.qtd_nfe >= 2:
+        ok, _ = _fechamento_fiscal(pedido.codigo, pedido.categoria, pedido.valor_negociado,
+                                    pedido.qtd_nfe, pedido.total_nfe)
+        if ok:
+            return f"Pago · {pedido.qtd_nfe} NF-e"
+        return (f"Pago · NF-e parcial (R$ {_fmt_brl(pedido.total_nfe)} de "
+                f"R$ {_fmt_brl(pedido.valor_negociado)})")
+    ok, pendencia = _fechamento_fiscal(pedido.codigo, pedido.categoria, pedido.valor_negociado,
+                                        pedido.qtd_nfe, pedido.total_nfe)
     if ok:
         return "Pago"  # recibos assinados em todas as parcelas
     if pendencia == "assinatura":
@@ -2576,7 +2626,8 @@ def mostrar_pedido(pedido: Pedido) -> str:
     }
     SEP = "\n──────────────────────────────\n"
 
-    emoji  = _emoji_pedido(pedido.status.value, pedido.codigo, pedido.categoria, pedido.doc_id_nfe)
+    emoji  = _emoji_pedido(pedido.status.value, pedido.codigo, pedido.categoria,
+                           pedido.valor_negociado, pedido.qtd_nfe, pedido.total_nfe)
     status = _STATUS_SHORT.get(pedido.status, str(pedido.status))
     cabecalho = f"{emoji} #{pedido.codigo} — {status}\n\n{pedido.fornecedor}"
 
@@ -2605,9 +2656,12 @@ def mostrar_pedido(pedido: Pedido) -> str:
         arq.append("📄 Pedido de Compra")
     if pedido.doc_id_comprovante:
         arq.append("💰 Comprov. pagamento")
-    if pedido.doc_id_nfe:
+    if pedido.qtd_nfe == 1:
         nfe_label = f"🧾 NF-e {pedido.nfe_numero}" if pedido.nfe_numero else "🧾 NF-e"
         arq.append(nfe_label)
+    elif pedido.qtd_nfe >= 2:
+        arq.append(f"🧾 {pedido.qtd_nfe} notas fiscais (R$ {_fmt_brl(pedido.total_nfe)} de "
+                   f"R$ {_fmt_brl(pedido.valor_negociado)})")
     if pedido.qtd_fotos_entrega:
         arq.append(f"📦 {_rotulo_qtd_arquivos(pedido.qtd_fotos_entrega)} da entrega")
     arquivos = "\n".join(arq) if arq else "Nenhum arquivo disponível"
@@ -2624,7 +2678,7 @@ def mostrar_pedido(pedido: Pedido) -> str:
 
 def teclado_pedido(doc_id, pfm_codigo, doc_id_nfe=None, doc_id_comprovante=None,
                    qtd_fotos_entrega=0, obs_entrega=None, status=None, categoria=None,
-                   qtd_parcelas=0):
+                   qtd_parcelas=0, qtd_nfe=0):
     ggv = pfm_codigo.rsplit("-", 1)[0]
     botoes = [
         [InlineKeyboardButton("Revisar",      callback_data=f"pfm_revisar:{doc_id}:{pfm_codigo}")],
@@ -2633,7 +2687,10 @@ def teclado_pedido(doc_id, pfm_codigo, doc_id_nfe=None, doc_id_comprovante=None,
     ]
     if doc_id_comprovante:
         botoes.append([InlineKeyboardButton("💰 Comprovante", callback_data=f"pfm_comp:{doc_id_comprovante}:{pfm_codigo}")])
-    if doc_id_nfe:
+    if qtd_nfe >= 2:
+        botoes.append([InlineKeyboardButton(f"🧾 Ver {qtd_nfe} notas fiscais",
+                                            callback_data=f"notas_fiscais_ver:{pfm_codigo}")])
+    elif doc_id_nfe:
         botoes.append([InlineKeyboardButton("🧾 NF-e", callback_data=f"pfm_nfe:{doc_id_nfe}:{pfm_codigo}")])
     if qtd_parcelas:
         botoes.append([InlineKeyboardButton(
@@ -2706,6 +2763,35 @@ def teclado_parcelas(pfm_codigo):
     botoes.append([InlineKeyboardButton("← Voltar", callback_data=f"pedido_abrir:{pfm_codigo}")])
     return InlineKeyboardMarkup(botoes)
 
+def _texto_notas_fiscais(pedido) -> str:
+    """Tela "Ver notas fiscais" — só usada quando o pedido tem 2+ NF-e (Caso 2 do ROADMAP);
+    com uma só, o cockpit segue mostrando o botão único de sempre. Espelha _texto_parcelas."""
+    notas = listar_notas_fiscais(pedido.codigo, DB_PATH)
+    linhas = [f"#{pedido.codigo} — {pedido.fornecedor}", ""]
+    linhas.append(f"Notas fiscais: R$ {_fmt_brl(pedido.total_nfe)} de R$ {_fmt_brl(pedido.valor_negociado)}")
+    faltam = pedido.valor_negociado - pedido.total_nfe
+    if faltam > 0.01:
+        linhas.append(f"Faltam: R$ {_fmt_brl(faltam)}")
+    linhas.append("")
+    for i, (nfe_id, doc_id_nfe, valor, numero, criado_em) in enumerate(notas, start=1):
+        valor_fmt = f"R$ {_fmt_brl(valor)}" if valor else "—"
+        num_fmt = f"NF {numero}" if numero else "NF-e"
+        linhas.append(f"{i}. {num_fmt} — {valor_fmt}")
+    return "\n".join(linhas)
+
+def teclado_notas_fiscais(pfm_codigo):
+    notas = listar_notas_fiscais(pfm_codigo, DB_PATH)
+    botoes = []
+    for i, (nfe_id, doc_id_nfe, valor, numero, criado_em) in enumerate(notas, start=1):
+        botoes.append([InlineKeyboardButton(
+            f"👀 Ver NF {i}", callback_data=f"pfm_nfe_ver:{doc_id_nfe}:{pfm_codigo}"
+        )])
+        botoes.append([InlineKeyboardButton(
+            f"🗑 Remover NF {i}", callback_data=f"nfe_remover:{nfe_id}:{pfm_codigo}"
+        )])
+    botoes.append([InlineKeyboardButton("← Voltar", callback_data=f"pedido_abrir:{pfm_codigo}")])
+    return InlineKeyboardMarkup(botoes)
+
 def buscar_pedidos_sem_entrega():
     with sqlite3.connect(DB_PATH) as con:
         return con.execute(
@@ -2767,7 +2853,7 @@ def _tela_apos_entrega(pfm_codigo):
         mostrar_pedido(pedido),
         teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe,
                        pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega,
-                       pedido.status, pedido.categoria, pedido.qtd_parcelas)
+                       pedido.status, pedido.categoria, pedido.qtd_parcelas, qtd_nfe=pedido.qtd_nfe)
     )
 
 def _adicionar_foto_entrega(pfm_codigo, doc_id_foto, legenda):
@@ -4460,7 +4546,7 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 preparar_visualizacao_pedido(pedido)
                 await update.message.reply_text(
                     f"Este arquivo já virou o Pedido #{pfm_codigo_dup}.",
-                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo_dup, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status, pedido.categoria, pedido.qtd_parcelas)
+                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo_dup, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status, pedido.categoria, pedido.qtd_parcelas, qtd_nfe=pedido.qtd_nfe)
                 )
                 return
         emoji, label_tipo = TIPOS.get(tipo_dup, ("📄", "Arquivo ainda não classificado"))
@@ -4624,7 +4710,7 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 preparar_visualizacao_pedido(pedido)
                 await update.message.reply_text(
                     mostrar_pedido(pedido),
-                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status, pedido.categoria, pedido.qtd_parcelas)
+                    reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status, pedido.categoria, pedido.qtd_parcelas, qtd_nfe=pedido.qtd_nfe)
                 )
             else:
                 await update.message.reply_text(f"Pedido {pfm_codigo} não encontrado.")
@@ -5023,7 +5109,7 @@ async def _cb_cancelar(query, ctx, partes):
             preparar_visualizacao_pedido(pedido)
             await query.edit_message_text(
                 mostrar_pedido(pedido),
-                reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo_atual, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status, pedido.categoria, pedido.qtd_parcelas)
+                reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo_atual, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status, pedido.categoria, pedido.qtd_parcelas, qtd_nfe=pedido.qtd_nfe)
             )
         else:
             await query.answer("Esse documento já virou um pedido — não dá mais pra cancelar por aqui.", show_alert=True)
@@ -5722,7 +5808,7 @@ async def _cb_pfm_voltar(query, ctx, partes):
         mostrar_pedido(pedido),
         reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante,
                                     pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status,
-                                    pedido.categoria, pedido.qtd_parcelas)
+                                    pedido.categoria, pedido.qtd_parcelas, qtd_nfe=pedido.qtd_nfe)
     )
 
 
@@ -5933,40 +6019,55 @@ async def _cb_entrega_voltar(query, ctx, partes):
 
 
 async def _cb_nfe_confirmar(query, ctx, partes):
+    """Vincula a NF-e ao pedido escolhido — nunca substitui uma já vinculada, sempre
+    acrescenta (Caso 2 do ROADMAP: pedido pode ter mais de uma NF-e, ex. GGV03-025/ONR)."""
     _, doc_id_nfe, pfm_codigo = partes
-    ok = vincular_nfe(pfm_codigo, int(doc_id_nfe), DB_PATH)
-    if ok:
-        with sqlite3.connect(DB_PATH) as con:
-            row_nfe = con.execute(
-                "SELECT caminho, dados_claude FROM documentos WHERE id=?", (int(doc_id_nfe),)
-            ).fetchone()
-        if row_nfe:
-            caminho_nfe, dados_nfe = row_nfe
-            numero_nfe = _campo(dados_nfe, "Número da NF")
-            data_nfe   = _campo(dados_nfe, "Data de emissão")
-            sufixo_nfe = f"NFe {numero_nfe}" if numero_nfe != "A PREENCHER" else "NFe"
-            _arquivar_doc_financeiro(pfm_codigo, sufixo_nfe, caminho_nfe, data_nfe)
-        with sqlite3.connect(DB_PATH) as con:
-            row_lanc = con.execute(
-                "SELECT status, valor FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)
-            ).fetchone()
-        status_lanc, valor_lanc = row_lanc if row_lanc else (None, None)
-        if status_lanc == "pago":
-            texto = f"🟢 #{pfm_codigo} — NF-e vinculada. Ciclo fechado."
-        else:
-            total_pago = _total_pago(pfm_codigo)
-            faltam = (valor_lanc or 0) - total_pago
-            texto = (
-                f"🟡 #{pfm_codigo} — NF-e vinculada. Pagamento em andamento: "
-                f"R$ {_fmt_brl(total_pago)} de R$ {_fmt_brl(valor_lanc or 0)} pago "
-                f"(faltam R$ {_fmt_brl(faltam)}). Ciclo fecha quando o pagamento for concluído."
-            )
-        await query.edit_message_text(texto)
-    else:
+    doc_id_nfe = int(doc_id_nfe)
+    with sqlite3.connect(DB_PATH) as con:
+        row_nfe = con.execute(
+            "SELECT caminho, dados_claude FROM documentos WHERE id=?", (doc_id_nfe,)
+        ).fetchone()
+    dados_nfe = parse_nfe(row_nfe[1]) if row_nfe else {}
+    numero_nfe = dados_nfe.get("numero")
+    numero_nfe = None if numero_nfe in (None, "A PREENCHER") else numero_nfe
+    data_nfe = dados_nfe.get("data")
+    data_nfe = None if data_nfe in (None, "A PREENCHER") else data_nfe
+    valor_nfe = dados_nfe.get("valor_v")
+    ok = vincular_nfe(pfm_codigo, doc_id_nfe, DB_PATH, valor=valor_nfe, numero=numero_nfe)
+    if not ok:
         await query.edit_message_text(
-            f"Não foi possível vincular a NF-e ao Pedido #{pfm_codigo}.\n"
-            "O pedido pode já ter uma NF-e vinculada."
+            f"Este arquivo já está vinculado ao Pedido #{pfm_codigo}."
         )
+        return
+    if row_nfe:
+        caminho_nfe, _ = row_nfe
+        sufixo_nfe = f"NFe {numero_nfe}" if numero_nfe else "NFe"
+        _arquivar_doc_financeiro(pfm_codigo, sufixo_nfe, caminho_nfe, data_nfe)
+    with sqlite3.connect(DB_PATH) as con:
+        row_lanc = con.execute(
+            "SELECT status, valor, categoria FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)
+        ).fetchone()
+    status_lanc, valor_lanc, categoria_lanc = row_lanc if row_lanc else (None, None, None)
+    total_nfe = soma_notas_fiscais(pfm_codigo, DB_PATH)
+    qtd_nfe   = len(listar_notas_fiscais(pfm_codigo, DB_PATH))
+    fecha_fiscal, _ = _fechamento_fiscal(pfm_codigo, categoria_lanc, valor_lanc, qtd_nfe, total_nfe)
+    if status_lanc == "pago" and fecha_fiscal:
+        texto = f"🟢 #{pfm_codigo} — NF-e vinculada. Ciclo fechado."
+    elif status_lanc == "pago":
+        texto = (
+            f"🟡 #{pfm_codigo} — NF-e vinculada ({qtd_nfe}ª nota). "
+            f"R$ {_fmt_brl(total_nfe)} de R$ {_fmt_brl(valor_lanc or 0)} em nota fiscal — "
+            "falta mais uma pra fechar o ciclo."
+        )
+    else:
+        total_pago = _total_pago(pfm_codigo)
+        faltam = (valor_lanc or 0) - total_pago
+        texto = (
+            f"🟡 #{pfm_codigo} — NF-e vinculada. Pagamento em andamento: "
+            f"R$ {_fmt_brl(total_pago)} de R$ {_fmt_brl(valor_lanc or 0)} pago "
+            f"(faltam R$ {_fmt_brl(faltam)}). Ciclo fecha quando o pagamento for concluído."
+        )
+    await query.edit_message_text(texto)
 
 
 async def _cb_nfe_cancelar(query, ctx, partes):
@@ -6010,6 +6111,47 @@ async def _cb_parcelas_ver(query, ctx, partes):
         _texto_parcelas(pedido),
         reply_markup=teclado_parcelas(pfm_codigo)
     )
+
+
+async def _cb_notas_fiscais_ver(query, ctx, partes):
+    pfm_codigo = partes[1]
+    pedido = buscar_pedido(pfm_codigo)
+    if not pedido:
+        await query.answer(f"Pedido {pfm_codigo} não encontrado.", show_alert=True)
+        return
+    preparar_visualizacao_pedido(pedido)
+    await query.edit_message_text(
+        _texto_notas_fiscais(pedido),
+        reply_markup=teclado_notas_fiscais(pfm_codigo)
+    )
+
+
+async def _cb_nfe_remover(query, ctx, partes):
+    """Desvincula uma NF-e específica do pedido (tela "Ver notas fiscais", Caso 2 do
+    ROADMAP) — não apaga o documento, só o vínculo; o arquivo continua em `documentos`,
+    reenviável como candidato de novo se for engano."""
+    _, nfe_id, pfm_codigo = partes
+    removida = remover_nota_fiscal(int(nfe_id), DB_PATH)
+    if not removida:
+        await query.answer("NF-e não encontrada.", show_alert=True)
+        return
+    pedido = buscar_pedido(pfm_codigo)
+    if not pedido:
+        await query.edit_message_text("NF-e removida. Pedido não encontrado.")
+        return
+    preparar_visualizacao_pedido(pedido)
+    if pedido.qtd_nfe >= 2:
+        await query.edit_message_text(
+            _texto_notas_fiscais(pedido),
+            reply_markup=teclado_notas_fiscais(pfm_codigo)
+        )
+    else:
+        await query.edit_message_text(
+            mostrar_pedido(pedido),
+            reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante,
+                                        pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status,
+                                        pedido.categoria, pedido.qtd_parcelas, qtd_nfe=pedido.qtd_nfe)
+        )
 
 
 async def _cb_parcela_editar(query, ctx, partes):
@@ -6140,7 +6282,7 @@ async def _cb_pedido_abrir(query, ctx, partes):
         preparar_visualizacao_pedido(pedido)
         await query.edit_message_text(
             mostrar_pedido(pedido),
-            reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status, pedido.categoria, pedido.qtd_parcelas)
+            reply_markup=teclado_pedido(pedido.doc_id, pfm_codigo, pedido.doc_id_nfe, pedido.doc_id_comprovante, pedido.qtd_fotos_entrega, pedido.obs_entrega, pedido.status, pedido.categoria, pedido.qtd_parcelas, qtd_nfe=pedido.qtd_nfe)
         )
     else:
         await query.answer(f"Pedido {pfm_codigo} não encontrado.", show_alert=True)
@@ -6308,6 +6450,8 @@ _CB_DISPATCH = {
     "nfe_cancelar": _cb_nfe_cancelar,
     "nfe_trocar_confirmar": _cb_nfe_trocar_confirmar,
     "parcelas_ver": _cb_parcelas_ver,
+    "notas_fiscais_ver": _cb_notas_fiscais_ver,
+    "nfe_remover": _cb_nfe_remover,
     "parcela_editar": _cb_parcela_editar,
     "parcela_edit_campo": _cb_parcela_edit_campo,
     "recibo_parcela_iniciar": _cb_recibo_parcela_iniciar,

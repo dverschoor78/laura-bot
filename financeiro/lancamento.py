@@ -141,31 +141,119 @@ def init_db_financeiro(db_path):
                 pass
 
 
-def vincular_nfe(pfm_codigo: str, doc_id_nfe: int, db_path: str) -> bool:
-    """Vincula uma NF-e a um lançamento, independente do status de pagamento — a nota pode ser
-    emitida a qualquer momento (entrega, pagamento parcial via parcelas, ou pagamento total já
-    seladas no pedido), não só quando o lançamento já está totalmente quitado. Retorna True se o
-    vínculo foi criado."""
+def init_db_notas_fiscais(db_path):
+    """Tabela notas_fiscais_pedido — N NF-e por pedido (Caso 2 do ROADMAP Fase 6, identificado
+    em 2026-06-30 e nunca implementado até bater na prática: GGV03-025/Operador Nacional do
+    Registro, dois serviços de cartório de registro de imóveis, duas NF-e pro mesmo pedido).
+    Fonte de verdade de quantas/quais notas um pedido tem; lancamentos.doc_id_nfe continua
+    apontando pra primeira, só por compatibilidade com código que lê esse campo isoladamente
+    (nunca a única fonte pra código novo). Backfill idempotente: todo pedido que já tinha
+    doc_id_nfe no modelo antigo ganha a linha correspondente aqui."""
+    with sqlite3.connect(db_path) as con:
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS notas_fiscais_pedido (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                pfm_codigo  TEXT NOT NULL,
+                doc_id      INTEGER NOT NULL,
+                valor       REAL,
+                numero      TEXT,
+                criado_em   TEXT DEFAULT (datetime('now','localtime')),
+                UNIQUE(pfm_codigo, doc_id)
+            )
+        """)
+        con.execute("""
+            INSERT OR IGNORE INTO notas_fiscais_pedido (pfm_codigo, doc_id)
+            SELECT pfm_codigo, doc_id_nfe FROM lancamentos WHERE doc_id_nfe IS NOT NULL
+        """)
+
+
+def vincular_nfe(pfm_codigo: str, doc_id_nfe: int, db_path: str,
+                  valor: Optional[float] = None, numero: Optional[str] = None) -> bool:
+    """Vincula uma NF-e ao pedido — nunca substitui uma já vinculada, sempre acrescenta
+    (Caso 2 do ROADMAP: um pedido pode ter mais de uma NF-e). Independente do status de
+    pagamento — a nota pode ser emitida a qualquer momento. Retorna True se este doc_id
+    passou a estar vinculado agora; False se já estava (mesmo arquivo reenviado)."""
     with sqlite3.connect(db_path) as con:
         cur = con.execute(
+            "INSERT OR IGNORE INTO notas_fiscais_pedido (pfm_codigo, doc_id, valor, numero) "
+            "VALUES (?,?,?,?)",
+            (pfm_codigo, doc_id_nfe, valor, numero)
+        )
+        if cur.rowcount == 0:
+            return False
+        # Compatibilidade: lancamentos.doc_id_nfe guarda a primeira NF-e do pedido, pra
+        # código que ainda lê esse campo isolado (ex: botão único do cockpit quando só há uma).
+        con.execute(
             "UPDATE lancamentos SET doc_id_nfe=? WHERE pfm_codigo=? AND doc_id_nfe IS NULL",
             (doc_id_nfe, pfm_codigo)
         )
-        return cur.rowcount == 1
+    return True
 
 
 def trocar_nfe(pfm_codigo: str, novo_doc_id_nfe: int, db_path: str) -> Optional[int]:
-    """Substitui a NF-e vinculada a um lançamento por outra — corrige um arquivo errado,
-    diferente de vincular_nfe() (que só age quando ainda não existe vínculo nenhum, de
-    propósito, pra nunca sobrescrever por engano). Retorna o doc_id da NF-e antiga (pra quem
-    chamar poder limpar o arquivo/registro dela), ou None se o pedido não existe."""
+    """Substitui a NF-e vinculada a um lançamento por outra — corrige um arquivo errado. Só
+    faz sentido no caso comum (uma NF-e só); quando o pedido tem duas ou mais, a correção é
+    por item na tela "Ver notas fiscais" (remover + reenviar). Retorna o doc_id da NF-e
+    antiga (pra quem chamar poder limpar o arquivo/registro dela), ou None se o pedido não
+    existe."""
     with sqlite3.connect(db_path) as con:
         row = con.execute("SELECT doc_id_nfe FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)).fetchone()
         if row is None:
             return None
         doc_id_antigo = row[0]
         con.execute("UPDATE lancamentos SET doc_id_nfe=? WHERE pfm_codigo=?", (novo_doc_id_nfe, pfm_codigo))
+        con.execute(
+            "UPDATE notas_fiscais_pedido SET doc_id=?, valor=NULL, numero=NULL "
+            "WHERE pfm_codigo=? AND doc_id=?",
+            (novo_doc_id_nfe, pfm_codigo, doc_id_antigo)
+        )
     return doc_id_antigo
+
+
+def listar_notas_fiscais(pfm_codigo: str, db_path: str) -> list:
+    """Todas as NF-e vinculadas a um pedido, mais antiga primeiro."""
+    with sqlite3.connect(db_path) as con:
+        return con.execute(
+            "SELECT id, doc_id, valor, numero, criado_em FROM notas_fiscais_pedido "
+            "WHERE pfm_codigo=? ORDER BY id",
+            (pfm_codigo,)
+        ).fetchall()
+
+
+def remover_nota_fiscal(nfe_id: int, db_path: str) -> Optional[tuple]:
+    """Desvincula uma NF-e específica do pedido — corrige um vínculo errado sem mexer nas
+    outras notas do mesmo pedido. Se era a NF-e apontada por lancamentos.doc_id_nfe, promove
+    a próxima (ou limpa, se não sobrar nenhuma). Retorna (pfm_codigo, doc_id) removidos, ou
+    None se a NF-e não existia."""
+    with sqlite3.connect(db_path) as con:
+        row = con.execute(
+            "SELECT pfm_codigo, doc_id FROM notas_fiscais_pedido WHERE id=?", (nfe_id,)
+        ).fetchone()
+        if not row:
+            return None
+        pfm_codigo, doc_id_removido = row
+        con.execute("DELETE FROM notas_fiscais_pedido WHERE id=?", (nfe_id,))
+        lanc = con.execute(
+            "SELECT doc_id_nfe FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)
+        ).fetchone()
+        if lanc and lanc[0] == doc_id_removido:
+            proxima = con.execute(
+                "SELECT doc_id FROM notas_fiscais_pedido WHERE pfm_codigo=? ORDER BY id LIMIT 1",
+                (pfm_codigo,)
+            ).fetchone()
+            con.execute(
+                "UPDATE lancamentos SET doc_id_nfe=? WHERE pfm_codigo=?",
+                (proxima[0] if proxima else None, pfm_codigo)
+            )
+    return row
+
+
+def soma_notas_fiscais(pfm_codigo: str, db_path: str) -> float:
+    with sqlite3.connect(db_path) as con:
+        row = con.execute(
+            "SELECT COALESCE(SUM(valor),0) FROM notas_fiscais_pedido WHERE pfm_codigo=?", (pfm_codigo,)
+        ).fetchone()
+    return row[0] or 0.0
 
 
 def buscar_pedidos_sem_nfe(ggv: str, db_path: str) -> list:
@@ -181,34 +269,45 @@ def buscar_pedidos_sem_nfe(ggv: str, db_path: str) -> list:
 
 
 def buscar_candidatos_nfe(cnpj: str, valor: float, db_path: str) -> list:
-    """Encontra pedidos sem NF-e vinculada, qualquer status de pagamento — a nota pode ser emitida
-    a qualquer momento, não só quando o pedido está totalmente pago.
+    """Encontra pedidos ainda elegíveis a receber esta NF-e, qualquer status de pagamento — a
+    nota pode ser emitida a qualquer momento, não só quando o pedido está totalmente pago.
+    Elegível: sem nenhuma NF-e ainda, ou já com NF-e mas a soma delas não cobre o valor total
+    do pedido (Caso 2 do ROADMAP — pedido com mais de uma NF-e, ex: GGV03-025/ONR).
 
     Retorna todos os pedidos elegíveis, ordenados por score:
     - CNPJ coincide (+5), valor próximo (<1% +3, <5% +1)
     - Score=0 significa sem sinal forte mas ainda elegível (fallback manual)
+    - `valor_lanc` do candidato é o que falta cobrir (valor total, ou o restante quando já
+      há NF-e parcial vinculada) — `parcial=True` sinaliza esse segundo caso pra exibição
     """
     with sqlite3.connect(db_path) as con:
         rows = con.execute(
-            """SELECT l.pfm_codigo, l.fornecedor, l.valor, f.cnpj
+            """SELECT l.pfm_codigo, l.fornecedor, l.valor, f.cnpj,
+                      COALESCE((SELECT SUM(n.valor) FROM notas_fiscais_pedido n
+                                WHERE n.pfm_codigo = l.pfm_codigo), 0) AS soma_nfe
                FROM lancamentos l
                LEFT JOIN fornecedores f ON LOWER(f.nome) = LOWER(l.fornecedor)
-               WHERE l.doc_id_nfe IS NULL""",
+               WHERE l.doc_id_nfe IS NULL
+                  OR l.valor IS NULL
+                  OR (SELECT COALESCE(SUM(n.valor), 0) FROM notas_fiscais_pedido n
+                      WHERE n.pfm_codigo = l.pfm_codigo) < l.valor - 0.01""",
         ).fetchall()
     candidatos = []
-    for pfm_codigo, fornecedor, valor_lanc, cnpj_forn in rows:
+    for pfm_codigo, fornecedor, valor_lanc, cnpj_forn, soma_nfe in rows:
+        parcial = bool(soma_nfe and soma_nfe > 0.009)
+        valor_restante = (valor_lanc - soma_nfe) if (valor_lanc and parcial) else valor_lanc
         score = 0
         if cnpj and cnpj_forn and cnpj.replace(".", "").replace("/", "").replace("-", "") == \
                 cnpj_forn.replace(".", "").replace("/", "").replace("-", ""):
             score += 5
-        if valor_lanc and valor:
-            diff = abs(float(valor_lanc) - float(valor)) / max(float(valor), 0.01)
+        if valor_restante and valor:
+            diff = abs(float(valor_restante) - float(valor)) / max(float(valor), 0.01)
             if diff < 0.01:
                 score += 3
             elif diff < 0.05:
                 score += 1
         candidatos.append({"pfm_codigo": pfm_codigo, "fornecedor": fornecedor,
-                            "valor_lanc": valor_lanc, "score": score})
+                            "valor_lanc": valor_restante, "score": score, "parcial": parcial})
     # Desempate por proximidade de valor — dentro do mesmo score (ex: todos com score 0),
     # o valor mais perto do informado na NF-e vem primeiro, em vez de ordem arbitrária do banco
     def _distancia(c):
