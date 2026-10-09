@@ -30,11 +30,22 @@ def _fmt_brl(v):
     s = f"{v:,.2f}"                                        # "6,292.93"
     return s.replace(",", "X").replace(".", ",").replace("X", ".")  # "6.292,93"
 
+def _parse_brl(s: str) -> float:
+    """Mesma regra de bot._parse_brl (Lição #4 de LICOES_EXTRACAO.md): sem vírgula, "." é
+    milhar só quando o último grupo tem 3 dígitos ("5.000" = 5000), senão é decimal
+    ("83.39" = 83,39). A limpeza antiga daqui tirava todo ponto e lia "83.39" como 8339."""
+    s = s.replace("R$", "").strip().replace(" ", "")
+    if "," in s:
+        return float(s.replace(".", "").replace(",", "."))
+    if "." in s and len(s.rsplit(".", 1)[1]) == 3:
+        return float(s.replace(".", ""))
+    return float(s)
+
 def parse_nfe(corpo: str) -> dict:
     """Extrai campos da NF-e do texto retornado pelo Claude."""
     valor_str = _campo(corpo, "Valor total")
     try:
-        valor_v = float(valor_str.replace("R$", "").replace(".", "").replace(",", ".").strip())
+        valor_v = _parse_brl(valor_str)
     except Exception:
         valor_v = None
     return {
@@ -58,7 +69,7 @@ def mostrar_nfe(dados: dict, candidatos: list) -> str:
     if dados["descricao"] != "A PREENCHER": linhas.append(dados["descricao"])
     linhas.append("")
     if not candidatos:
-        linhas.append("Nenhum pedido pago sem NF-e encontrado.")
+        linhas.append("Nenhum pedido em aberto corresponde a esta NF-e.")
         return "\n".join(linhas)
     def _rotulo_valor(c):
         valor_fmt = f"R$ {_fmt_brl(c['valor_lanc'])}" if c["valor_lanc"] else "—"
@@ -81,8 +92,13 @@ def teclado_candidatos_nfe(doc_id: int, candidatos: list):
             f"#{c['pfm_codigo']}",
             callback_data=f"nfe_confirmar:{doc_id}:{c['pfm_codigo']}"
         )])
-    botoes.append([InlineKeyboardButton("✖ Nenhum destes — descartar arquivo",
-                                        callback_data=f"nfe_cancelar:{doc_id}")])
+    # Corrigir dados mesmo sem candidato — a leitura errada pode ser o motivo (mesmo padrão do
+    # comprovante PIX, 2026-08-27; na NF-e, 2026-10-09)
+    botoes.append([InlineKeyboardButton("✏️ Corrigir dados", callback_data=f"nfe_edit:{doc_id}:-")])
+    botoes.append([InlineKeyboardButton(
+        "✖ Nenhum destes — descartar arquivo" if candidatos else "✖ Descartar arquivo",
+        callback_data=f"nfe_cancelar:{doc_id}"
+    )])
     return InlineKeyboardMarkup(botoes)
 
 def mostrar_troca_nfe(pfm_codigo: str, dados: dict) -> str:
@@ -100,5 +116,6 @@ def mostrar_troca_nfe(pfm_codigo: str, dados: dict) -> str:
 def teclado_confirmar_troca_nfe(doc_id_novo: int, pfm_codigo: str):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Confirmar troca", callback_data=f"nfe_trocar_confirmar:{doc_id_novo}:{pfm_codigo}")],
+        [InlineKeyboardButton("✏️ Corrigir dados",  callback_data=f"nfe_edit:{doc_id_novo}:{pfm_codigo}")],
         [InlineKeyboardButton("← Cancelar",         callback_data=f"pfm_voltar:{pfm_codigo}")],
     ])

@@ -190,12 +190,13 @@ def vincular_nfe(pfm_codigo: str, doc_id_nfe: int, db_path: str,
     return True
 
 
-def trocar_nfe(pfm_codigo: str, novo_doc_id_nfe: int, db_path: str) -> Optional[int]:
+def trocar_nfe(pfm_codigo: str, novo_doc_id_nfe: int, db_path: str,
+               valor: Optional[float] = None, numero: Optional[str] = None) -> Optional[int]:
     """Substitui a NF-e vinculada a um lançamento por outra — corrige um arquivo errado. Só
     faz sentido no caso comum (uma NF-e só); quando o pedido tem duas ou mais, a correção é
-    por item na tela "Ver notas fiscais" (remover + reenviar). Retorna o doc_id da NF-e
-    antiga (pra quem chamar poder limpar o arquivo/registro dela), ou None se o pedido não
-    existe."""
+    por item na tela "Ver notas fiscais" (remover + reenviar). Grava valor e número da nota
+    nova (antes de 2026-10-09 ficavam vazios). Retorna o doc_id da NF-e antiga (pra quem
+    chamar poder limpar o arquivo/registro dela), ou None se o pedido não existe."""
     with sqlite3.connect(db_path) as con:
         row = con.execute("SELECT doc_id_nfe FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)).fetchone()
         if row is None:
@@ -203,9 +204,9 @@ def trocar_nfe(pfm_codigo: str, novo_doc_id_nfe: int, db_path: str) -> Optional[
         doc_id_antigo = row[0]
         con.execute("UPDATE lancamentos SET doc_id_nfe=? WHERE pfm_codigo=?", (novo_doc_id_nfe, pfm_codigo))
         con.execute(
-            "UPDATE notas_fiscais_pedido SET doc_id=?, valor=NULL, numero=NULL "
+            "UPDATE notas_fiscais_pedido SET doc_id=?, valor=?, numero=? "
             "WHERE pfm_codigo=? AND doc_id=?",
-            (novo_doc_id_nfe, pfm_codigo, doc_id_antigo)
+            (novo_doc_id_nfe, valor, numero, pfm_codigo, doc_id_antigo)
         )
     return doc_id_antigo
 

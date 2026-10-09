@@ -77,8 +77,12 @@ Telegram ──────► bot.py ──────► Claude API (haiku-4-
   `documentos` pra sempre, bloqueando reenvio do mesmo arquivo (hash já "recebido"). Corrigido:
   `teclado_candidatos_nfe()` embute `doc_id` no callback `nfe_cancelar:{doc_id}`,
   `_cb_nfe_cancelar()` chama `_descartar_documento(doc_id)`, e `_cb_sel_tipo_inicial()` (ramo
-  `nota_fiscal`) descarta automaticamente quando `buscar_candidatos_nfe()` não acha nenhum
-  candidato — mesmo padrão já usado por `comprovante_pix`.
+  `nota_fiscal`) descartava automaticamente quando `buscar_candidatos_nfe()` não achava nenhum
+  candidato. **Desde 2026-10-09 (0.17.4)**, convergindo com o comprovante PIX: a tela da NF-e é
+  remontada por `_tela_nfe()` (chegada ou prévia da troca) a partir do dado salvo; "✏️ Corrigir
+  dados" (`_cb_nfe_edit`/`_cb_nfe_edit_campo`, ramo `nfe_edit_*` de `receber_texto`) regrava a
+  leitura com `_substituir_campo()`; sem candidato o arquivo fica, para corrigir ou descartar;
+  `parse_nfe()` lê o valor com a regra de `_parse_brl()` (Lição #4).
 - **`financeiro/consultas.py`** (2026-07-03) — 4 funções de leitura consolidada, sempre recebendo
   `db_path` explícito (ADR-002): `obter_pedido_completo()`, `obter_consolidado_obra()`,
   `listar_pedidos_pendentes()`, `procurar_item()`. Usadas por `scripts/consultar.py` (CLI) e por

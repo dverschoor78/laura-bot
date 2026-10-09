@@ -983,17 +983,12 @@ que `bot.py` parecia "bagunçado".
      documento que já virou pedido é bloqueado, com o caminho "excluir e reenviar"; botões
      antigos não releem nem trocam nada; a revisão grava sempre na pasta da obra do código
    - ("Excluir pedido deixa rastros", o item que estava aqui, foi resolvido em 0.17.2)
-3. **Corrigir dados da NF-e antes de vincular** *(pedido do Dennis, 2026-10-09)* — ao receber
-   uma NF-e, a Laura lê os campos e só deixa escolher o pedido ou descartar o arquivo; não há
-   como corrigir um campo lido errado, e às vezes a leitura erra. Convergir com o "✏️ Corrigir
-   dados" do comprovante PIX (2026-08-27: `_substituir_campo()` + lista de campos editáveis,
-   disponível mesmo sem candidato, busca de candidatos refeita depois da correção). Campos:
-   número, emitente, CNPJ/CPF, valor e data de emissão. Mesma lacuna na prévia do "Trocar
-   NF-e" (só Confirmar/Cancelar). Suspeito conhecido para valor errado: `parse_nfe()`
-   (`nfe/nfe.py`) limpa o valor na mão em vez de usar `_parse_brl()` (Lição #4 de
-   `LICOES_EXTRACAO.md`). A definir no plano: corrigir também NF-e já vinculada (valor e
-   número em `notas_fiscais_pedido`, que entram na soma do fechamento fiscal). Achado no
-   caminho: `trocar_nfe()` zera `valor` e `numero` da nota trocada em `notas_fiscais_pedido`
+3. ✓ **Corrigir dados da NF-e antes de vincular** *(pedido do Dennis — feito em 0.17.4,
+   2026-10-09)* — "✏️ Corrigir dados" na chegada da NF-e e na prévia da troca (mesmo mecanismo
+   do comprovante PIX); NF-e sem pedido correspondente não é mais descartada sozinha; troca
+   grava valor e número da nota nova; `parse_nfe()` com a regra da Lição #4. Fora, por decisão:
+   corrigir NF-e já vinculada (caminho existente: "Trocar NF-e" com correção na prévia, ou
+   remover e reenviar)
 4. **Decidir o arquivamento da GGV02** *(atualizado 2026-10-09)* — deixou de ser só decisão
    futura: a obra já tem 5 pedidos da Laura (desde 04/08). 001–004 estão em
    `00 Obras/2025-05 GGV02/04 Compras`, ao lado dos pedidos manuais GGV02-001 a 021 de antes
@@ -1114,7 +1109,8 @@ gatilho original (consultar preço de item já comprado sem ler o texto inteiro 
   Maior ponto de acoplamento cruzado do sistema hoje (parcelas, fornecedores, documentos, pedido).
   Motivo pelo qual `fornecedor/`/`comprovante/` não foram extraídos na ADR-004.
 
-- **Baixa — `_parse_nfe()` não reusa `_parse_brl()` já corrigido**
+- ~~**Baixa — `_parse_nfe()` não reusa `_parse_brl()` já corrigido**~~ *(corrigido em 0.17.4,
+  2026-10-09 — `parse_nfe()` usa a mesma regra; registro original abaixo)*
   Reimplementa limpeza de valor BRL na mão — reintroduz o bug da Lição #4 especificamente pra NF-e
   (valores sem centavos, ex: "R$ 10.99", seriam interpretados errado).
 

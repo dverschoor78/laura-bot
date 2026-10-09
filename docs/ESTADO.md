@@ -300,6 +300,10 @@ container (SSH + tmux + Claude Code), sem nada a abrir no firewall do Eric.
 
 ## Versão Atual
 
+**v0.17.4** — Correção da leitura da NF-e: "✏️ Corrigir dados" (valor, número, emitente,
+CNPJ/CPF, data) na chegada e na prévia da troca; NF-e sem pedido correspondente fica para
+corrigir ou descartar; troca grava valor e número; leitura do valor com a regra da Lição #4
+
 **v0.17.3** — Documento que já virou pedido não muda de obra nem de tipo: "🏗 GGV" e "📋 Tipo
 doc." mostram o caminho (excluir e reenviar); botões antigos do Telegram não releem nem trocam
 nada (abrem o pedido); revisão grava sempre na pasta da obra do código do pedido — em produção
@@ -377,6 +381,9 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
   valor total quando há 2 ou mais; tela "Ver notas fiscais" no cockpit nesse caso
 - Troca de NF-e vinculada errada pelo cockpit (Ver / Trocar, com prévia e confirmação) — a NF-e
   errada vai para a pasta `Old`, não é apagada
+- Correção da leitura da NF-e ("✏️ Corrigir dados": valor, número, emitente, CNPJ/CPF, data de
+  emissão) antes de vincular e na prévia da troca; NF-e sem pedido correspondente fica para
+  corrigir ou descartar, não é descartada sozinha
 - Exclusão de pedido (cadastro errado): apaga tudo dele na Laura e move os arquivos dele no
   OneDrive para `Old`; o código nunca é reaproveitado
 - Correção manual do comprovante PIX antes do vínculo (valor, data, favorecido, CNPJ/CPF) e
@@ -416,6 +423,36 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 ---
 
 ## Última Fiada Implementada
+
+**Correção da leitura da NF-e** *(2026-10-09, mesma sessão — pedido do Dennis)*
+
+Dennis: "ao subir uma NF, Claude lê e pede apenas para aprovar; precisa poder editar para
+ajustar os campos — às vezes puxa dados errados". Plano com o modelo das telas aprovado antes
+do código, convergindo com o "✏️ Corrigir dados" do comprovante PIX (2026-08-27).
+
+**Implementado**: `_tela_nfe(doc_id, pfm_codigo_troca=None)` (`bot.py`) — remonta a tela da NF-e
+a partir do dado salvo, na chegada (pedidos candidatos) ou na prévia da troca; mesmo padrão de
+`_tela_comprovante()`. "✏️ Corrigir dados" nas duas telas (`nfe/nfe.py`) → menu com Valor,
+Número da NF, Emitente, CNPJ/CPF e Data de emissão (`_cb_nfe_edit`/`_cb_nfe_edit_campo`) → o texto
+digitado regrava a leitura via `_substituir_campo()` (ramo `nfe_edit_*` em `receber_texto`) e a
+tela volta com os candidatos recalculados. Valor validado (ilegível → pede de novo) e gravado
+normalizado ("R$ 389,00"); "← Voltar" na pergunta cancela a edição (`_cb_nfe_voltar`).
+**Sem pedido correspondente, o arquivo não é mais descartado sozinho** (decisão do Dennis, mesmo
+do PIX): "Nenhum pedido em aberto corresponde a esta NF-e." com "✏️ Corrigir dados" / "✖
+Descartar arquivo" (a frase antiga, "Nenhum pedido pago sem NF-e", estava desatualizada desde
+julho). `trocar_nfe()` (`financeiro/lancamento.py`) passou a gravar valor e número da nota nova
+(antes zerava). `parse_nfe()` lê o valor com a regra de `_parse_brl()` — "R$ 83.39" virava 8339
+(recorrência da Lição #4, registrada em `LICOES_EXTRACAO.md`).
+
+**Testado** (nada tocou produção): handlers reais com consulta simulada e IA falsa devolvendo
+uma leitura errada de propósito (R$ 38.900,00 no lugar de R$ 389,00) — 28 verificações: leitura
+de 7 formatos de valor; correção pelos botões trazendo o pedido certo pro topo; valor ilegível
+pedindo de novo; "← Voltar" cancelando; vínculo gravando valor/número corrigidos e arquivo com o
+número corrigido; NF-e sem pedido não descartada; troca com correção na prévia gravando valor e
+número. Na **cópia do banco de produção**: as 25 NF-e reais já vinculadas dão o mesmo valor com
+a leitura nova. Regressão: bloqueio, exclusão e numeração passando.
+
+---
 
 **Pedido gerado não muda de obra nem de tipo** *(2026-10-09, mesma sessão)*
 
@@ -2021,8 +2058,8 @@ Ver Última Fiada Implementada. Restrição do Dennis respeitada: a numeração 
 - `_gerar_recibo()` toca 4 domínios numa função de 46 linhas — maior ponto de acoplamento cruzado
   do sistema hoje, mais entrelaçado que `entrega/`; motivo pelo qual `fornecedor/`/`comprovante/`
   não foram extraídos nesta rodada (ver ADR-004)
-- `_parse_nfe()` reimplementa limpeza de valor BRL na mão em vez de reusar `_parse_brl()` já
-  corrigido — reintroduz o bug da Lição #4 (`docs/LICOES_EXTRACAO.md`) especificamente pra NF-e
+- ~~`_parse_nfe()` reimplementa limpeza de valor BRL na mão~~ — corrigido em 0.17.4
+  (2026-10-09): `parse_nfe()` usa a regra de `_parse_brl()` (Lição #4)
 
 ---
 
@@ -2134,9 +2171,7 @@ da lista abaixo):
 - **Validar o contador de pedidos ao vivo** — em produção desde 2026-10-09; o próximo pedido
   real da GGV03 tem que sair GGV03-040
 - ✓ **Bloquear a troca de obra/tipo de pedido já gerado** — feito em 0.17.3 (2026-10-09)
-- **Corrigir dados da NF-e antes de vincular** (pedido do Dennis) — hoje a tela da NF-e só
-  deixa escolher o pedido ou descartar, e às vezes a leitura erra; ver ROADMAP, Próximas
-  Fiadas, item 3
+- ✓ **Corrigir dados da NF-e antes de vincular** (pedido do Dennis) — feito em 0.17.4
 - **GGV02** — decidir o arquivamento (item 6): já há pedido fora do OneDrive
 
 1. **Validar a Consultoria de Recompra ao vivo em produção** — implementada e testada com

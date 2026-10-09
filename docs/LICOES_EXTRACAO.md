@@ -84,6 +84,13 @@ vira um número errado plausível. Qualquer função de parsing de valor monetá
 precisa de teste explícito contra valores redondos em milhar sem centavos (ex: "R$ 1.500",
 "R$ 25.000"), não só contra valores com vírgula.
 
+**Recorrência (corrigida 2026-10-09):** `nfe/nfe.py::parse_nfe()` tinha a própria limpeza de
+valor — tirava todo ponto, então "R$ 83.39" (ponto decimal) virava 8339. O módulo `nfe/` copia
+utilitários de `bot.py` de propósito (pra não depender dele), mas essa cópia reinventou a regra
+em vez de copiá-la. Corrigido com a mesma regra de `_parse_brl()`; conferido contra as 25 NF-e
+reais já vinculadas em produção (mesmo valor em todas). Lição: cópia de utilitário copia a
+regra **já corrigida**, com os mesmos casos de teste — nunca uma versão "mais simples".
+
 ---
 
 ## 5. Data extraída sem zero à esquerda quebra parser de largura fixa

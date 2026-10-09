@@ -2432,6 +2432,21 @@ def _tela_comprovante(doc_id_comp: int):
     texto = mostrar_comprovante_candidatos(dados, candidatos)
     return texto, teclado_candidatos_pix(doc_id_comp, candidatos)
 
+
+def _tela_nfe(doc_id_nfe: int, pfm_codigo_troca: Optional[str] = None):
+    """Mesmo padrão de _tela_comprovante, pra NF-e (2026-10-09): reconstrói a tela a partir do
+    dado atual em `documentos` — na chegada (pedidos candidatos pra vincular) ou na troca de
+    NF-e de um pedido (prévia) — e ao reabrir depois de '✏️ Corrigir dados'."""
+    dados_claude = _dados_doc(doc_id_nfe)
+    if not dados_claude:
+        return "Documento não encontrado.", None
+    dados = parse_nfe(dados_claude)
+    if pfm_codigo_troca:
+        return (mostrar_troca_nfe(pfm_codigo_troca, dados),
+                teclado_confirmar_troca_nfe(doc_id_nfe, pfm_codigo_troca))
+    candidatos = buscar_candidatos_nfe(dados["cnpj"], dados["valor_v"], DB_PATH)
+    return mostrar_nfe(dados, candidatos), teclado_candidatos_nfe(doc_id_nfe, candidatos)
+
 def teclado_tipo_inicial(doc_id):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📋 Orçamento / Fatura",    callback_data=f"sel_tipo_inicial:{doc_id}:orcamento")],
@@ -4750,11 +4765,8 @@ async def receber_arquivo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         _, _, corpo = parse_resposta(resposta.content[0].text)
         atualizar(doc_id, tipo="nota_fiscal", dados_claude=corpo)
-        dados_nfe = parse_nfe(corpo)
-        await update.message.reply_text(
-            mostrar_troca_nfe(pfm_codigo, dados_nfe),
-            reply_markup=teclado_confirmar_troca_nfe(doc_id, pfm_codigo)
-        )
+        texto_troca, markup = _tela_nfe(doc_id, pfm_codigo)
+        await update.message.reply_text(texto_troca, reply_markup=markup)
         return
 
     await update.message.reply_text(
@@ -4977,6 +4989,27 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         atualizar(doc_id, dados_claude=novos_dados)
         texto_resultado, markup = _tela_comprovante(doc_id)
         await update.message.reply_text(texto_resultado, reply_markup=markup)
+
+    elif aguardando and aguardando.startswith("nfe_edit_"):
+        campo = aguardando[len("nfe_edit_"):]
+        origem = ctx.user_data.get("nfe_edit_origem", "-")
+        dados_atuais = _dados_doc(doc_id)
+        if not dados_atuais:
+            ctx.user_data["aguardando"] = None
+            await update.message.reply_text("Documento não encontrado.")
+            return
+        novo = texto
+        if campo == "valor":
+            try:
+                novo = f"R$ {_fmt_brl(_parse_brl(re.sub(r'[^\d,.]', '', texto)))}"
+            except ValueError:
+                await update.message.reply_text("Não entendi o valor. Envie assim: R$ 1.500,00")
+                return  # continua esperando o valor
+        ctx.user_data["aguardando"] = None
+        ctx.user_data.pop("nfe_edit_origem", None)
+        atualizar(doc_id, dados_claude=_substituir_campo(dados_atuais, _NFE_CAMPO_NOMES[campo], novo))
+        texto_nfe, markup = _tela_nfe(doc_id, None if origem == "-" else origem)
+        await update.message.reply_text(texto_nfe, reply_markup=markup)
 
     elif aguardando in ("parcela_edit_valor", "parcela_edit_data"):
         campo = aguardando[len("parcela_edit_"):]
@@ -5352,19 +5385,10 @@ async def _cb_sel_tipo_inicial(query, ctx, partes):
             texto_resultado, markup = _tela_comprovante(int(doc_id))
             await query.edit_message_text(texto_resultado, reply_markup=markup)
     elif tipo == "nota_fiscal":
-        dados_nfe = parse_nfe(corpo)
-        candidatos = buscar_candidatos_nfe(dados_nfe["cnpj"], dados_nfe["valor_v"], DB_PATH)
-        if not candidatos:
-            _descartar_documento(int(doc_id))
-            await query.edit_message_text(
-                mostrar_nfe(dados_nfe, candidatos) +
-                "\n\nArquivo descartado — pode reenviar depois de corrigir o pedido."
-            )
-        else:
-            await query.edit_message_text(
-                mostrar_nfe(dados_nfe, candidatos),
-                reply_markup=teclado_candidatos_nfe(int(doc_id), candidatos)
-            )
+        # Sem candidato não descarta mais sozinho (2026-10-09, mesmo do comprovante PIX): pode
+        # ser leitura errada — o usuário decide entre corrigir os dados e descartar.
+        texto_nfe, markup = _tela_nfe(int(doc_id))
+        await query.edit_message_text(texto_nfe, reply_markup=markup)
     elif tipo == "orcamento":
         texto, markup = _resumo_gerar(int(doc_id))
         await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
@@ -5537,6 +5561,56 @@ async def _cb_pix_edit_campo(query, ctx, partes):
     ctx.user_data.update({"doc_id": int(doc_id_comp), "aguardando": f"pix_edit_{campo}"})
     atual = _campo(_dados_doc(int(doc_id_comp)), _PIX_CAMPO_NOMES[campo])
     await query.edit_message_text(f"Atual: {atual}\n\nNovo {_PIX_CAMPO_LABELS[campo]}:")
+
+
+# Correção da leitura da NF-e (2026-10-09) — mesmo mecanismo do comprovante PIX
+# (_substituir_campo sobre o texto do Claude), com os campos que decidem o vínculo e o nome do
+# arquivo arquivado. `origem` nos callbacks: "-" na chegada da NF-e, ou o pedido da troca.
+_NFE_CAMPO_NOMES = {
+    "valor":    "Valor total",
+    "numero":   "Número da NF",
+    "emitente": "Nome do emitente",
+    "cnpj":     "CNPJ/CPF do emitente",
+    "data":     "Data de emissão",
+}
+_NFE_CAMPO_LABELS = {
+    "valor":    "valor (ex: R$ 1.500,00)",
+    "numero":   "número da NF",
+    "emitente": "nome do emitente",
+    "cnpj":     "CNPJ ou CPF do emitente",
+    "data":     "data de emissão (ex: 25/08/2026)",
+}
+_NFE_CAMPO_BOTOES = (("valor", "💲 Valor"), ("numero", "🔢 Número da NF"), ("emitente", "👤 Emitente"),
+                     ("cnpj", "🆔 CNPJ/CPF"), ("data", "📅 Data de emissão"))
+
+
+async def _cb_nfe_edit(query, ctx, partes):
+    _, doc_id_nfe, origem = partes
+    botoes = [[InlineKeyboardButton(rotulo, callback_data=f"nfe_edit_campo:{doc_id_nfe}:{origem}:{campo}")]
+              for campo, rotulo in _NFE_CAMPO_BOTOES]
+    botoes.append([InlineKeyboardButton("◀️ Voltar", callback_data=f"nfe_voltar:{doc_id_nfe}:{origem}")])
+    await query.edit_message_reply_markup(InlineKeyboardMarkup(botoes))
+
+
+async def _cb_nfe_edit_campo(query, ctx, partes):
+    _, doc_id_nfe, origem, campo = partes
+    ctx.user_data.update({"doc_id": int(doc_id_nfe), "aguardando": f"nfe_edit_{campo}",
+                          "nfe_edit_origem": origem})
+    atual = _campo(_dados_doc(int(doc_id_nfe)), _NFE_CAMPO_NOMES[campo])
+    await query.edit_message_text(
+        f"Atual: {atual}\n\nNovo {_NFE_CAMPO_LABELS[campo]}:",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("← Voltar", callback_data=f"nfe_voltar:{doc_id_nfe}:{origem}")
+        ]])
+    )
+
+
+async def _cb_nfe_voltar(query, ctx, partes):
+    _, doc_id_nfe, origem = partes
+    if str(ctx.user_data.get("aguardando") or "").startswith("nfe_edit_"):
+        ctx.user_data["aguardando"] = None  # desistiu de corrigir: texto seguinte não vira dado
+    texto, markup = _tela_nfe(int(doc_id_nfe), None if origem == "-" else origem)
+    await query.edit_message_text(texto, reply_markup=markup)
 
 
 async def _cb_sel_ggv(query, ctx, partes):
@@ -6220,18 +6294,18 @@ async def _cb_nfe_trocar_confirmar(query, ctx, partes):
     registro antigo. 2026-08-08, gatilho: NF-e errada em GGV02-020; desde 2026-10-09 o arquivo
     errado vai pra Old em vez de ser apagado."""
     _, doc_id_novo, pfm_codigo = partes
-    doc_id_antigo = trocar_nfe(pfm_codigo, int(doc_id_novo), DB_PATH)
-    movidos, _ = _mover_arquivos_do_pedido_para_old(pfm_codigo, marcador="NFe")
     with sqlite3.connect(DB_PATH) as con:
         row_nfe = con.execute(
             "SELECT caminho, dados_claude FROM documentos WHERE id=?", (int(doc_id_novo),)
         ).fetchone()
+    nova = parse_nfe(row_nfe[1]) if row_nfe else {}  # já com o que foi corrigido na prévia
+    numero_nfe = nova.get("numero") if nova.get("numero") not in (None, "A PREENCHER") else None
+    doc_id_antigo = trocar_nfe(pfm_codigo, int(doc_id_novo), DB_PATH,
+                               valor=nova.get("valor_v"), numero=numero_nfe)
+    movidos, _ = _mover_arquivos_do_pedido_para_old(pfm_codigo, marcador="NFe")
     if row_nfe:
-        caminho_nfe, dados_nfe = row_nfe
-        numero_nfe = _campo(dados_nfe, "Número da NF")
-        data_nfe   = _campo(dados_nfe, "Data de emissão")
-        sufixo_nfe = f"NFe {numero_nfe}" if numero_nfe != "A PREENCHER" else "NFe"
-        _arquivar_doc_financeiro(pfm_codigo, sufixo_nfe, caminho_nfe, data_nfe)
+        sufixo_nfe = f"NFe {numero_nfe}" if numero_nfe else "NFe"
+        _arquivar_doc_financeiro(pfm_codigo, sufixo_nfe, row_nfe[0], nova.get("data"))
     if doc_id_antigo:
         _descartar_documento(doc_id_antigo, force=True)
     aviso_old = " — a anterior foi para a pasta Old" if movidos else ""
@@ -6555,6 +6629,9 @@ _CB_DISPATCH = {
     "pix_edit": _cb_pix_edit,
     "pix_edit_campo": _cb_pix_edit_campo,
     "pix_voltar": _cb_pix_voltar,
+    "nfe_edit": _cb_nfe_edit,
+    "nfe_edit_campo": _cb_nfe_edit_campo,
+    "nfe_voltar": _cb_nfe_voltar,
     "sel_ggv": _cb_sel_ggv,
     "set_ggv": _cb_set_ggv,
     "pgto": _cb_pgto,

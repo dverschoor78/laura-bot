@@ -20,9 +20,7 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 2. **GGV01-001 — código usado duas vezes e PDF na pasta da GGV03** *(novo, 2026-10-09)* —
    ✓ resolvido em 2026-10-09: arquivos órfãos movidos para `Old`; troca de obra/tipo de
    pedido já gerado bloqueada (0.17.3)
-3. **Corrigir dados da NF-e antes de vincular** *(pedido do Dennis, 2026-10-09)* — hoje a tela
-   da NF-e só deixa escolher o pedido ou descartar; às vezes a leitura erra. Convergir com o
-   "✏️ Corrigir dados" do comprovante PIX (ver ROADMAP, Próximas Fiadas, item 3)
+3. ✓ **Corrigir dados da NF-e antes de vincular** *(pedido do Dennis)* — feito em 0.17.4
 4. **Decidir o arquivamento da GGV02** *(atualizado 2026-10-09)* — a obra já tem 5 pedidos da
    Laura: 001–004 no OneDrive, ao lado dos pedidos manuais GGV02-001 a 021 de mesmo código; o
    005 ficou só no disco do servidor, porque a pasta da obra está vazia
@@ -57,6 +55,33 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > (Proxmox do Eric), obra de teste GGV99, pasta automática para obra nova, trocar NF-e
 > vinculada errada, reenvio de arquivo já recebido, `Restart=always`, correção manual do
 > comprovante PIX e da parcela, mais de uma NF-e por pedido — ver entradas abaixo.
+
+---
+
+## [0.17.4] — Correção da leitura da NF-e — 2026-10-09
+
+### Motivação
+
+Dennis: ao receber uma NF-e, a Laura lia os campos e só deixava escolher o pedido — "às vezes
+puxa dados errados" e não havia como corrigir.
+
+### Adicionado
+
+- **"✏️ Corrigir dados"** na tela da NF-e recebida e na prévia do "Trocar NF-e": Valor, Número
+  da NF, Emitente, CNPJ/CPF e Data de emissão. Depois de corrigir, a tela volta com os pedidos
+  recalculados; o vínculo e o nome do arquivo usam os dados corrigidos. Valor ilegível pede de
+  novo; "← Voltar" cancela a edição. Mesmo mecanismo do comprovante PIX.
+
+### Alterado
+
+- NF-e sem pedido correspondente não é mais descartada sozinha: "Nenhum pedido em aberto
+  corresponde a esta NF-e." com "✏️ Corrigir dados" ou "✖ Descartar arquivo".
+- "Trocar NF-e" grava valor e número da nota nova (antes ficavam vazios).
+
+### Corrigido
+
+- Leitura do valor da NF-e com a mesma regra do resto da Laura (Lição #4): "R$ 83.39" virava
+  R$ 8.339. Conferido contra as 25 NF-e reais já vinculadas — mesmo valor em todas.
 
 ---
 
