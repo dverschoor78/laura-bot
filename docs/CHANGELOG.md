@@ -87,6 +87,11 @@ Laura — a conciliação com o extrato mostra o que está registrado e o que fa
 - GGV03-034: data do pagamento corrigida de 17/09 para 11/09 (leitura errada, confirmada pelo
   extrato).
 
+### Em produção
+
+Deploy em 2026-10-09 15:11, com pdfplumber instalado no servidor; fluxo testado antes no
+OneDrive real (obra de teste GGV99).
+
 ---
 
 ## [0.17.4] — Correção da leitura da NF-e — 2026-10-09

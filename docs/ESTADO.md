@@ -322,7 +322,8 @@ container (SSH + tmux + Claude Code), sem nada a abrir no firewall do Eric.
 saldo conferido linha a linha, cruzado com os pagamentos registrados e transformado na planilha
 de prestação de contas no modelo da contabilidade (abas PAGAMENTOS e RECEBIMENTOS + Obra, PFM,
 NF/Recibo, R$ Valor Total, Situação), salva com o extrato e os documentos do mês em
-`GGV03 › 01 Controle financeiro › Prestação de contas › AAAA-MM`
+`GGV03 › 01 Controle financeiro › Prestação de contas › AAAA-MM` — em produção desde
+2026-10-09 15:11
 
 **v0.17.4** — Correção da leitura da NF-e: "✏️ Corrigir dados" (valor, número, emitente,
 CNPJ/CPF, data) na chegada e na prévia da troca; NF-e sem pedido correspondente fica para
@@ -495,7 +496,13 @@ conciliados na ordem do extrato, 5 + 3 a preencher, GGV03-036 fora do extrato); 
 volta, linha a linha e totais (R$ 18.425,82 no extrato, R$ 1.322,41 fora); fluxo completo pelo
 handler real (mensagem, pasta do mês com os documentos certos e sem os de outro mês, originais
 intactos, regerar sem duplicar); datas nos 4 formatos reais; "Corrigir parcela" atualizando o
-pedido. Regressão: NF-e, bloqueio, exclusão e numeração passando.
+pedido. Regressão: NF-e, bloqueio, exclusão e numeração passando. **OneDrive real**: no servidor,
+com o código novo e a obra de teste GGV99, o extrato real gerou planilha e cópia na pasta do
+OneDrive (limpas depois).
+
+**Deploy** em 2026-10-09 15:11 (`git pull` + `pip install -r requirements.txt` — pdfplumber
+0.11.10 — + `systemctl restart laura-bot`): bot ativo, sem erro, conectado ao Telegram.
+Validação ao vivo: o Dennis manda o extrato de setembro.
 
 ---
 
