@@ -979,10 +979,9 @@ que `bot.py` parecia "bagunçado".
    - ✓ **6 arquivos órfãos movidos para `Old`** (2026-10-09, decisão do Dennis) — Sanepar 12/09
      (refeita como GGV03-035) e areia 21/09 (refeita como GGV03-037), ambos verificados pelo
      conteúdo; 2 no OneDrive, 4 no disco do servidor
-   - **Bug de programa**: trocar a obra de um documento que já virou pedido (`_cb_set_ggv()`)
-     não é bloqueado — o documento muda de obra e o pedido não; a revisão seguinte grava o PDF
-     (R01 + cópia principal) na pasta da obra nova com o código antigo. **Decisão do Dennis:
-     bloquear** (não migrar o pedido de obra) — plano em aprovação
+   - ✓ **Bug de programa corrigido em 0.17.3** (2026-10-09): trocar a obra (ou o tipo) de um
+     documento que já virou pedido é bloqueado, com o caminho "excluir e reenviar"; botões
+     antigos não releem nem trocam nada; a revisão grava sempre na pasta da obra do código
    - ("Excluir pedido deixa rastros", o item que estava aqui, foi resolvido em 0.17.2)
 3. **Corrigir dados da NF-e antes de vincular** *(pedido do Dennis, 2026-10-09)* — ao receber
    uma NF-e, a Laura lê os campos e só deixa escolher o pedido ou descartar o arquivo; não há

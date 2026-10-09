@@ -626,11 +626,13 @@ Referências para navegação no arquivo (6.546 linhas em 2026-10-09):
   resumo — o PDF novo sobrescreveria o antigo). Casos reais: GGV03-029, GGV00-005 e GGV01-001. Correção:
   contador `numeracao_pedidos` (seção 3).
 
-- **Trocar a obra de um documento que já virou pedido não é bloqueado** (achado 2026-10-09;
-  correção decidida — bloquear —, plano em aprovação) — `_cb_set_ggv()` só muda `documentos.ggv`; o pedido continua com o
-  código e a obra antigos em `lancamentos`. Uma revisão depois (`_executar_revisao_pfm()`) usa a
-  obra do documento para escolher a pasta e grava o R01 e uma cópia com o nome principal na
-  pasta da obra nova, com o código antigo. Caso real: GGV01-001 → PDFs na pasta da GGV03 (12/09).
+- ~~**Trocar a obra de um documento que já virou pedido não é bloqueado**~~ (achado e
+  **corrigido em 2026-10-09, 0.17.3**) — `_cb_set_ggv()` só mudava `documentos.ggv`; o pedido
+  ficava com o código e a obra antigos, e a revisão gravava na pasta da obra nova (caso
+  GGV01-001 → PDFs na pasta da GGV03, 12/09). Agora `_pedido_do_documento()` bloqueia obra e
+  tipo de documento que já virou pedido nos 5 pontos que os mudavam (inclusive botões antigos
+  e a releitura pela IA em `_cb_sel_tipo_inicial`), e `gerar_pfm()` escolhe a pasta pela obra
+  do código do pedido.
 
 - ~~**"Excluir pedido" deixa rastros**~~ (achado e **corrigido em 2026-10-09, 0.17.2**) —
   `_excluir_pedido()` não limpava `itens_pedido` nem `notas_fiscais_pedido` e só descartava a

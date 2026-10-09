@@ -18,8 +18,8 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 1. **Validar o contador de pedidos ao vivo** *(0.17.1, em produção desde 2026-10-09)* — o
    próximo pedido real da GGV03 tem que sair GGV03-040
 2. **GGV01-001 — código usado duas vezes e PDF na pasta da GGV03** *(novo, 2026-10-09)* —
-   arquivos órfãos já movidos para `Old`; falta corrigir o bug "trocar a obra de um pedido já
-   gerado" — decisão: bloquear, plano em aprovação (ver ROADMAP, Próximas Fiadas, item 2)
+   ✓ resolvido em 2026-10-09: arquivos órfãos movidos para `Old`; troca de obra/tipo de
+   pedido já gerado bloqueada (0.17.3)
 3. **Corrigir dados da NF-e antes de vincular** *(pedido do Dennis, 2026-10-09)* — hoje a tela
    da NF-e só deixa escolher o pedido ou descartar; às vezes a leitura erra. Convergir com o
    "✏️ Corrigir dados" do comprovante PIX (ver ROADMAP, Próximas Fiadas, item 3)
@@ -57,6 +57,28 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > (Proxmox do Eric), obra de teste GGV99, pasta automática para obra nova, trocar NF-e
 > vinculada errada, reenvio de arquivo já recebido, `Restart=always`, correção manual do
 > comprovante PIX e da parcela, mais de uma NF-e por pedido — ver entradas abaixo.
+
+---
+
+## [0.17.3] — Pedido gerado não muda de obra nem de tipo — 2026-10-09
+
+### Motivação
+
+Um PDF do pedido GGV01-001 apareceu na pasta da GGV03. Causa: trocar a obra de um documento
+que já virou pedido mudava só o documento — o pedido ficava com o código e a obra antigos, e a
+revisão seguinte gravava o PDF na pasta da obra nova.
+
+### Corrigido
+
+- "🏗 GGV" e "📋 Tipo doc." (no "✏️ Corrigir dados") de um documento que já virou pedido não
+  trocam mais nada: mostram "#GGV01-001 já é um pedido da Obra GGV01. Para lançar em outra
+  obra: exclua o pedido e envie o documento de novo. Os arquivos dele vão para a pasta Old.",
+  com "🗑 Excluir pedido" e "← Voltar".
+- Botões antigos do Telegram: escolher obra ou tipo de um pedido já gerado não troca nada; o
+  botão antigo da mensagem de recebimento (que relia o documento pela IA e regravava obra, tipo
+  e dados) agora abre o pedido direto.
+- A revisão grava o PDF sempre na pasta da obra do código do pedido.
+- Documento que ainda não virou pedido: tudo como antes.
 
 ---
 

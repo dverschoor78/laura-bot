@@ -837,6 +837,16 @@ def _descartar_documento(doc_id, force=False) -> bool:
             pass
     return True
 
+def _pedido_do_documento(doc_id) -> Optional[str]:
+    """Código do pedido que o documento originou, ou None se ainda não virou pedido. Vem do
+    lançamento (fonte de verdade do pedido), não de documentos.ggv — que podia divergir."""
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute("SELECT ggv, pfm_numero FROM documentos WHERE id=?", (doc_id,)).fetchone()
+        if not row or row[1] is None:
+            return None
+        lanc = con.execute("SELECT pfm_codigo FROM lancamentos WHERE doc_id=?", (doc_id,)).fetchone()
+    return lanc[0] if lanc else f"{row[0]}-{row[1]:03d}"
+
 def _excluir_pedido(pfm_codigo):
     """Apaga um pedido inteiro (cadastro errado): lançamento, parcelas, fotos de entrega, itens,
     NF-e e todos os documentos vinculados (orçamento, comprovantes, NF-e, recibos). No OneDrive
@@ -2012,7 +2022,9 @@ def gerar_pfm(doc_id, categoria=None, pfm_codigo_override=None):
     # é o único documento entregue. Esta função continua responsável por definir o código do
     # pedido, salvar os itens e registrar o lançamento financeiro.
 
-    pasta = _pasta_pfm(ggv)
+    # Pasta pela obra do código do pedido, nunca por documentos.ggv — se os dois divergirem,
+    # o PDF não vai pra pasta de outra obra (caso GGV01-001 na pasta da GGV03, 2026-10-09)
+    pasta = _pasta_pfm(pfm_codigo.split("-")[0])
     pasta.mkdir(parents=True, exist_ok=True)
     prefixo   = "TESTE-" if TEST_MODE else ""
     nome_base = _nome_base_pfm(pfm_codigo, fornecedor, resumo_claude, prefixo)
@@ -5199,8 +5211,28 @@ async def _cb_doc_manter(query, ctx, partes):
     await query.edit_message_text("Mantido — nada foi alterado.")
 
 
+def _tela_pedido_ja_gerado(doc_id, tipo, pfm_codigo, para_que):
+    """Obra e tipo de documento que já virou pedido não mudam por aqui (2026-10-09, caso
+    GGV01-001): o pedido não acompanhava a mudança, e a revisão seguinte gravava o PDF na pasta
+    da obra nova com o código antigo. Caminho certo: excluir e reenviar."""
+    ggv_pedido = pfm_codigo.split("-")[0]
+    texto = (f"#{pfm_codigo} já é um pedido da Obra {ggv_pedido}.\n\n"
+             f"Para {para_que}: exclua o pedido e envie o documento de novo.\n"
+             "Os arquivos dele vão para a pasta Old.")
+    markup = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🗑 Excluir pedido", callback_data=f"pedido_excluir_confirmar:{pfm_codigo}"),
+        InlineKeyboardButton("← Voltar",         callback_data=f"voltar_edit:{doc_id}:{tipo}:{ggv_pedido}"),
+    ]])
+    return texto, markup
+
+
 async def _cb_sel_tipo(query, ctx, partes):
     _, doc_id, tipo, ggv = partes
+    pfm_codigo = _pedido_do_documento(int(doc_id))
+    if pfm_codigo:
+        texto, markup = _tela_pedido_ja_gerado(doc_id, tipo, pfm_codigo, "mudar o tipo do documento")
+        await query.edit_message_text(texto, reply_markup=markup)
+        return
     botoes = [[InlineKeyboardButton(f"{e} {l}", callback_data=f"set_tipo:{doc_id}:{t}:{ggv}")]
               for t, (e, l) in TIPOS.items()]
     await query.edit_message_reply_markup(InlineKeyboardMarkup(botoes))
@@ -5208,6 +5240,11 @@ async def _cb_sel_tipo(query, ctx, partes):
 
 async def _cb_set_tipo(query, ctx, partes):
     _, doc_id, novo_tipo, ggv = partes
+    pfm_codigo = _pedido_do_documento(int(doc_id))  # botão antigo do Telegram
+    if pfm_codigo:
+        texto, markup = _tela_pedido_ja_gerado(doc_id, novo_tipo, pfm_codigo, "mudar o tipo do documento")
+        await query.edit_message_text(texto, reply_markup=markup)
+        return
     atualizar(int(doc_id), tipo=novo_tipo)
     with sqlite3.connect(DB_PATH) as con:
         status = con.execute("SELECT status FROM documentos WHERE id=?", (int(doc_id),)).fetchone()[0]
@@ -5227,6 +5264,14 @@ async def _cb_sel_tipo_inicial(query, ctx, partes):
         await query.edit_message_text("Documento não encontrado.")
         return
     caminho_doc = row[0]
+
+    # Botão antigo da mensagem de recebimento: documento que já virou pedido não é relido
+    # (a releitura trocava obra, tipo e dados por baixo do pedido) — abre o pedido direto,
+    # mesmo comportamento do "Cancelar" antigo
+    pfm_codigo = _pedido_do_documento(int(doc_id))
+    if pfm_codigo:
+        await _cb_pedido_abrir(query, ctx, ["pedido_abrir", pfm_codigo])
+        return
 
     if tipo == "foto_entrega":
         atualizar(int(doc_id), tipo=tipo)
@@ -5496,6 +5541,11 @@ async def _cb_pix_edit_campo(query, ctx, partes):
 
 async def _cb_sel_ggv(query, ctx, partes):
     _, doc_id, tipo, ggv = partes
+    pfm_codigo = _pedido_do_documento(int(doc_id))
+    if pfm_codigo:
+        texto, markup = _tela_pedido_ja_gerado(doc_id, tipo, pfm_codigo, "lançar em outra obra")
+        await query.edit_message_text(texto, reply_markup=markup)
+        return
     botoes = [[InlineKeyboardButton(codigo, callback_data=f"set_ggv:{doc_id}:{tipo}:{codigo}")]
               for codigo, _ in _listar_obras()]
     botoes.append([InlineKeyboardButton("❓ Não identificado",
@@ -5507,6 +5557,11 @@ async def _cb_sel_ggv(query, ctx, partes):
 
 async def _cb_set_ggv(query, ctx, partes):
     _, doc_id, tipo, novo_ggv = partes
+    pfm_codigo = _pedido_do_documento(int(doc_id))  # botão antigo do Telegram
+    if pfm_codigo:
+        texto, markup = _tela_pedido_ja_gerado(doc_id, tipo, pfm_codigo, "lançar em outra obra")
+        await query.edit_message_text(texto, reply_markup=markup)
+        return
     atualizar(int(doc_id), ggv=novo_ggv)
     if tipo == "orcamento":
         _autopreencher_endereco(int(doc_id), novo_ggv)

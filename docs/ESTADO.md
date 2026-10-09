@@ -49,9 +49,9 @@
 >   GGV03 e o pedido continua GGV01-001. A revisão (`_executar_revisao_pfm()`) escolhe a pasta
 >   pela obra do documento e grava ali o R01 **e** uma cópia com o nome principal: os dois PDFs
 >   idênticos das 07:38 na pasta da GGV03, logo depois do original das 07:37 na pasta da GGV01.
->   Correção decidida pelo Dennis: **bloquear** a troca (não migrar o pedido de obra) — plano em
->   aprovação. Produção conferida: nenhum dos 47 pedidos tem documento e pedido em obras
->   diferentes. Observação, não verificada: nos dois casos a sugestão inicial
+>   **Corrigido na mesma sessão (0.17.3)** — decisão do Dennis: bloquear a troca (não migrar o
+>   pedido de obra). Produção conferida antes: nenhum dos 47 pedidos tinha documento e pedido
+>   em obras diferentes. Observação, não verificada: nos dois casos a sugestão inicial
 >   foi GGV01, e GGV01, GGV02 e GGV03 têm o mesmo endereço de entrega no cadastro.
 > - **GGV02 já está em uso sem decisão de arquivamento**: 5 pedidos da Laura desde 04/08.
 >   001–004 foram para `00 Obras/2025-05 GGV02/04 Compras`, ao lado dos pedidos manuais
@@ -300,6 +300,10 @@ container (SSH + tmux + Claude Code), sem nada a abrir no firewall do Eric.
 
 ## Versão Atual
 
+**v0.17.3** — Documento que já virou pedido não muda de obra nem de tipo: "🏗 GGV" e "📋 Tipo
+doc." mostram o caminho (excluir e reenviar); botões antigos do Telegram não releem nem trocam
+nada (abrem o pedido); revisão grava sempre na pasta da obra do código do pedido
+
 **v0.17.2** — "Excluir pedido" sem rastros: apaga também itens e todas as NF-e, e move os
 arquivos do pedido no OneDrive para `Old` (nada apagado); "Trocar NF-e" manda a NF-e errada
 para `Old` em vez de apagar — em produção desde 2026-10-09 13:18
@@ -411,6 +415,36 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 ---
 
 ## Última Fiada Implementada
+
+**Pedido gerado não muda de obra nem de tipo** *(2026-10-09, mesma sessão)*
+
+Gatilho: o "GGV01 dentro da GGV03" (ver topo). Trocar a obra de um documento que já virou
+pedido mudava só `documentos.ggv` — o pedido ficava com o código e a obra antigos, e a revisão
+seguinte gravava o PDF na pasta da obra nova. Decisão do Dennis: **bloquear** (não migrar o
+pedido de obra), incluindo o "📋 Tipo doc." do mesmo menu.
+
+**Implementado** (`bot.py`): `_pedido_do_documento(doc_id)` — código do pedido que o documento
+originou, lido do lançamento (fonte de verdade), ou `None`. `_tela_pedido_ja_gerado()` — a
+mensagem de bloqueio, com "🗑 Excluir pedido" (a confirmação que já existe) e "← Voltar" (o
+resumo). Aplicado em 5 pontos: `_cb_sel_ggv`/`_cb_set_ggv` (obra) e `_cb_sel_tipo`/
+`_cb_set_tipo` (tipo) — os "set" cobrem botão antigo do Telegram —, e `_cb_sel_tipo_inicial`:
+o botão antigo da mensagem de recebimento relia o documento pela IA e regravava tipo, obra e
+dados de um pedido já gerado; agora abre o pedido direto (`_cb_pedido_abrir`, mesmo
+comportamento do "Cancelar" antigo). Rede de segurança: `gerar_pfm()` escolhe a pasta pela obra
+do código do pedido, não por `documentos.ggv`. Documento que ainda não virou pedido: nada muda.
+
+**Mensagem** (modelo aprovado antes do código): "#GGV01-001 já é um pedido da Obra GGV01. /
+Para lançar em outra obra: exclua o pedido e envie o documento de novo. / Os arquivos dele vão
+para a pasta Old." — no tipo, "Para mudar o tipo do documento: ...".
+
+**Testado** (nada tocou produção): handlers reais com consulta simulada e um cliente de IA falso
+que acusa erro se for chamado — 18 verificações: bloqueio nos 5 caminhos, documento do pedido
+intacto, IA nunca chamada, documento sem pedido com o comportamento de sempre, revisão de
+documento fora de sincronia gravando na pasta da obra do código; na **cópia do banco de
+produção**, o GGV03-035 real bloqueado e nenhum documento alterado. Regressão: exclusão (22) e
+numeração (22) passando.
+
+---
 
 **"Excluir pedido" sem rastros + arquivos para `Old`** *(2026-10-09, mesma sessão)*
 
@@ -2095,8 +2129,7 @@ da lista abaixo):
 
 - **Validar o contador de pedidos ao vivo** — em produção desde 2026-10-09; o próximo pedido
   real da GGV03 tem que sair GGV03-040
-- **Bloquear a troca de obra de pedido já gerado** — decisão do Dennis (bloquear, não migrar);
-  plano em aprovação
+- ✓ **Bloquear a troca de obra/tipo de pedido já gerado** — feito em 0.17.3 (2026-10-09)
 - **Corrigir dados da NF-e antes de vincular** (pedido do Dennis) — hoje a tela da NF-e só
   deixa escolher o pedido ou descartar, e às vezes a leitura erra; ver ROADMAP, Próximas
   Fiadas, item 3
