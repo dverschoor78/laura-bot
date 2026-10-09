@@ -80,6 +80,10 @@ revisão seguinte gravava o PDF na pasta da obra nova.
 - A revisão grava o PDF sempre na pasta da obra do código do pedido.
 - Documento que ainda não virou pedido: tudo como antes.
 
+### Em produção
+
+Deploy em 2026-10-09 13:38.
+
 ---
 
 ## [0.17.2] — "Excluir pedido" sem rastros, arquivos para Old — 2026-10-09

@@ -302,7 +302,8 @@ container (SSH + tmux + Claude Code), sem nada a abrir no firewall do Eric.
 
 **v0.17.3** — Documento que já virou pedido não muda de obra nem de tipo: "🏗 GGV" e "📋 Tipo
 doc." mostram o caminho (excluir e reenviar); botões antigos do Telegram não releem nem trocam
-nada (abrem o pedido); revisão grava sempre na pasta da obra do código do pedido
+nada (abrem o pedido); revisão grava sempre na pasta da obra do código do pedido — em produção
+desde 2026-10-09 13:38
 
 **v0.17.2** — "Excluir pedido" sem rastros: apaga também itens e todas as NF-e, e move os
 arquivos do pedido no OneDrive para `Old` (nada apagado); "Trocar NF-e" manda a NF-e errada
@@ -443,6 +444,9 @@ intacto, IA nunca chamada, documento sem pedido com o comportamento de sempre, r
 documento fora de sincronia gravando na pasta da obra do código; na **cópia do banco de
 produção**, o GGV03-035 real bloqueado e nenhum documento alterado. Regressão: exclusão (22) e
 numeração (22) passando.
+
+**Deploy** em 2026-10-09 13:38 (`git pull` + `systemctl restart laura-bot`): bot ativo, sem erro
+no log, conectado ao Telegram; contadores de pedido inalterados.
 
 ---
 
