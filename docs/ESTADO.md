@@ -41,14 +41,17 @@
 >   (4145.7392.0826.5154) e o mesmo código de barras, e há um só pagamento de R$ 60,05; (2) 21/09,
 >   o orçamento de areia da IS Ferreira (7 m³, R$ 890,00) recebeu **de novo** o código GGV01-001
 >   (3º caso do reuso de código), foi excluído e refeito como **GGV03-037** — orçamento original
->   idêntico byte a byte. Sobras: 2 PDFs no OneDrive (`2026-06 GGV03/04 Compras`) e 4 arquivos
->   no disco do servidor (`data/pfms`). Decisão do Dennis pendente (mover para `Old`?).
+>   idêntico byte a byte. Sobras **movidas para `Old`** por decisão do Dennis: os 2 PDFs do
+>   OneDrive em `2026-06 GGV03/04 Compras/Old/`, os 4 do servidor em `data/pfms/Old/` e
+>   `data/pfms/00 Orçamentos/Old/`.
 > - **Por que havia PDF da GGV01 na pasta da GGV03 — bug de programa**: trocar a obra de um
 >   documento (`_cb_set_ggv()`) não verifica se ele já virou pedido — o documento passa a dizer
 >   GGV03 e o pedido continua GGV01-001. A revisão (`_executar_revisao_pfm()`) escolhe a pasta
 >   pela obra do documento e grava ali o R01 **e** uma cópia com o nome principal: os dois PDFs
 >   idênticos das 07:38 na pasta da GGV03, logo depois do original das 07:37 na pasta da GGV01.
->   Correção ainda não planejada. Observação, não verificada: nos dois casos a sugestão inicial
+>   Correção decidida pelo Dennis: **bloquear** a troca (não migrar o pedido de obra) — plano em
+>   aprovação. Produção conferida: nenhum dos 47 pedidos tem documento e pedido em obras
+>   diferentes. Observação, não verificada: nos dois casos a sugestão inicial
 >   foi GGV01, e GGV01, GGV02 e GGV03 têm o mesmo endereço de entrega no cadastro.
 > - **GGV02 já está em uso sem decisão de arquivamento**: 5 pedidos da Laura desde 04/08.
 >   001–004 foram para `00 Obras/2025-05 GGV02/04 Compras`, ao lado dos pedidos manuais
@@ -2092,8 +2095,8 @@ da lista abaixo):
 
 - **Validar o contador de pedidos ao vivo** — em produção desde 2026-10-09; o próximo pedido
   real da GGV03 tem que sair GGV03-040
-- **GGV01-001** — decidir se os 6 arquivos órfãos (2 no OneDrive, 4 no servidor) vão para
-  `Old`; e planejar a correção de "trocar a obra de um pedido já gerado" (ver topo)
+- **Bloquear a troca de obra de pedido já gerado** — decisão do Dennis (bloquear, não migrar);
+  plano em aprovação
 - **Corrigir dados da NF-e antes de vincular** (pedido do Dennis) — hoje a tela da NF-e só
   deixa escolher o pedido ou descartar, e às vezes a leitura erra; ver ROADMAP, Próximas
   Fiadas, item 3

@@ -976,13 +976,13 @@ que `bot.py` parecia "bagunçado".
    GGV03-029 fica vago; GGV02 continua do 022. Validar ao vivo: próximo pedido da GGV03 =
    GGV03-040
 2. **GGV01-001 — código usado duas vezes e PDF na pasta da GGV03** *(novo, 2026-10-09)*:
-   - **Decisão**: 6 arquivos órfãos (Sanepar 12/09, refeita como GGV03-035; areia 21/09,
-     refeita como GGV03-037 — ambos verificados pelo conteúdo) — 2 no OneDrive
-     (`2026-06 GGV03/04 Compras`), 4 no disco do servidor (`data/pfms`). Vão para `Old`?
+   - ✓ **6 arquivos órfãos movidos para `Old`** (2026-10-09, decisão do Dennis) — Sanepar 12/09
+     (refeita como GGV03-035) e areia 21/09 (refeita como GGV03-037), ambos verificados pelo
+     conteúdo; 2 no OneDrive, 4 no disco do servidor
    - **Bug de programa**: trocar a obra de um documento que já virou pedido (`_cb_set_ggv()`)
      não é bloqueado — o documento muda de obra e o pedido não; a revisão seguinte grava o PDF
-     (R01 + cópia principal) na pasta da obra nova com o código antigo. Planejar a correção
-     (ex: bloquear a troca com mensagem clara, ou mudar o pedido de obra de verdade)
+     (R01 + cópia principal) na pasta da obra nova com o código antigo. **Decisão do Dennis:
+     bloquear** (não migrar o pedido de obra) — plano em aprovação
    - ("Excluir pedido deixa rastros", o item que estava aqui, foi resolvido em 0.17.2)
 3. **Corrigir dados da NF-e antes de vincular** *(pedido do Dennis, 2026-10-09)* — ao receber
    uma NF-e, a Laura lê os campos e só deixa escolher o pedido ou descartar o arquivo; não há

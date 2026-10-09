@@ -18,8 +18,8 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 1. **Validar o contador de pedidos ao vivo** *(0.17.1, em produção desde 2026-10-09)* — o
    próximo pedido real da GGV03 tem que sair GGV03-040
 2. **GGV01-001 — código usado duas vezes e PDF na pasta da GGV03** *(novo, 2026-10-09)* —
-   decidir se os 6 arquivos órfãos vão para `Old`; planejar a correção do bug "trocar a obra
-   de um pedido já gerado" (ver ROADMAP, Próximas Fiadas, item 2)
+   arquivos órfãos já movidos para `Old`; falta corrigir o bug "trocar a obra de um pedido já
+   gerado" — decisão: bloquear, plano em aprovação (ver ROADMAP, Próximas Fiadas, item 2)
 3. **Corrigir dados da NF-e antes de vincular** *(pedido do Dennis, 2026-10-09)* — hoje a tela
    da NF-e só deixa escolher o pedido ou descartar; às vezes a leitura erra. Convergir com o
    "✏️ Corrigir dados" do comprovante PIX (ver ROADMAP, Próximas Fiadas, item 3)

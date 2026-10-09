@@ -626,8 +626,8 @@ Referências para navegação no arquivo (6.546 linhas em 2026-10-09):
   resumo — o PDF novo sobrescreveria o antigo). Casos reais: GGV03-029, GGV00-005 e GGV01-001. Correção:
   contador `numeracao_pedidos` (seção 3).
 
-- **Trocar a obra de um documento que já virou pedido não é bloqueado** (achado 2026-10-09,
-  correção não planejada) — `_cb_set_ggv()` só muda `documentos.ggv`; o pedido continua com o
+- **Trocar a obra de um documento que já virou pedido não é bloqueado** (achado 2026-10-09;
+  correção decidida — bloquear —, plano em aprovação) — `_cb_set_ggv()` só muda `documentos.ggv`; o pedido continua com o
   código e a obra antigos em `lancamentos`. Uma revisão depois (`_executar_revisao_pfm()`) usa a
   obra do documento para escolher a pasta e grava o R01 e uma cópia com o nome principal na
   pasta da obra nova, com o código antigo. Caso real: GGV01-001 → PDFs na pasta da GGV03 (12/09).
