@@ -397,21 +397,26 @@ outro cartório. PFM e planilha de prestação de contas saem com o fornecedor e
 **Causa raiz:** `buscar_fornecedor()` procura primeiro pelo CNPJ; como o do Tabelionato de Notas
 não estava no cadastro, caiu no passo 2 — `UPPER(nome) LIKE 'TABELIONATO%'` — e pegou o primeiro
 cartório cadastrado. A primeira palavra não identifica ninguém quando é genérica (Tabelionato,
-Comercial, Companhia, Operador, Serviço...). Os outros 9 pedidos que passaram pelo passo 2
-(SANEPAR, B&C, ONR) saíram com o fornecedor esperado porque o cadastro tinha um candidato só com
-aquela primeira palavra, ou o certo vinha primeiro ("OPERADOR%" casa dois cadastros do ONR) — não
-porque a busca soubesse distinguir.
+Comercial, Companhia, Operador, Serviço...).
+
+**Segundo caso, achado no mesmo dia:** o GGV03-024 (R$ 293,22, chapa plastificada) é da **Blum &
+Chinato Madeiras** (31.317.200/0001-04 — chave PIX do orçamento, emitente da NF-e 000.018.583 e
+recebedor do PIX), mas o orçamento não trazia o CNPJ no campo próprio e `LIKE 'BLUM%'` casou com o
+cadastro "Blum & Chinato", que é a **B&C Materiais de Construção** (01.985.870/0001-20) — outra
+empresa da mesma família. Pelo cadastro o 024 parecia certo; foram a NF-e e o PIX que mostraram o
+erro. Os demais pedidos do passo 2 (SANEPAR, ONR) conferem com NF-e/PIX.
 
 **Vizinho, no cadastro:** "OPERADOR NACIONAL DO SISTEMA DE REGISTRO ELETRÔNICO DE IMÓVEIS (ONR)"
 (id 34) tem o CNPJ 45.997.665/0001-86, que a Receita recusa (dígito verificador) — o ONR de
 verdade é o id 31, 37.318.313/0001-00. Ninguém conferia o dígito ao cadastrar.
 
-**Correção:** pendente, decisão do Dennis (corrigir o GGV03-032 e a busca). A planilha de
+**Correção:** pendente, decisão do Dennis (corrigir o GGV03-032 e o GGV03-024, e a busca). A planilha de
 prestação de contas já se protege: CNPJ do orçamento só vale se está no cadastro, nome só casa
 completo, e CNPJ/CPF inválido fica em branco (`validate-docbr`).
 
 **Lição geral:** CNPJ válido no documento e fora do cadastro quer dizer **fornecedor novo** —
 nunca "o mais parecido pelo nome". Casar por nome só com o nome inteiro, e na dúvida perguntar.
+E conferir pelo conteúdo dos documentos (NF-e, PIX), não pelo cadastro — o cadastro repete o erro.
 
 ---
 

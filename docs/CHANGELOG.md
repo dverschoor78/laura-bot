@@ -15,7 +15,7 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > sozinhas com o uso do dia a dia não entram aqui (ex: fechar um pedido parcelado esperando
 > pagamento). Ver Dívida Técnica em `docs/ROADMAP.md`.
 
-0. **GGV03-032 com o fornecedor errado + `buscar_fornecedor()` pela primeira palavra**
+0. **GGV03-032 e GGV03-024 com o fornecedor errado + `buscar_fornecedor()` pela primeira palavra**
    *(novo, 2026-10-09 — Lição #17)* — decidir com o Dennis como corrigir o pedido (pago ao
    Tabelionato de Notas, gravado como Tabelionato de Protesto) e consertar a busca: CNPJ válido
    fora do cadastro = fornecedor novo, não o primeiro nome parecido; conferir o dígito
@@ -95,7 +95,9 @@ CNPJ/CPF — antes de mandar a planilha de setembro para a Diniz.
 - **GGV03-032 com o fornecedor errado**: pago ao Tabelionato de Notas de Castro
   (45.134.842/0001-74), gravado como Tabelionato de Protesto (41.736.625/0001-01), porque
   `buscar_fornecedor()` cai na primeira palavra do nome quando o CNPJ não está no cadastro
-  (Lição #17). A planilha mostra o pedido como está.
+  (Lição #17). A planilha mostra o pedido como está. **Mesmo erro no GGV03-024** (achado depois,
+  conferindo NF-e e PIX): é da Blum & Chinato Madeiras (31.317.200/0001-04), gravado como B&C
+  Materiais de Construção (01.985.870/0001-20).
 - Cadastro do ONR (id 34) com CNPJ inválido na Receita (45.997.665/0001-86); o certo é o id 31.
 - `_extrair_descricao()`, dos relatórios antigos de `relatorios.py`, mistura campos (ex:
   "CNPJ/CPF do favorecido: … - Cópia") — a prestação de contas não usa.

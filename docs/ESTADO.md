@@ -515,8 +515,9 @@ quando está cadastrado, senão pelo nome completo; só com dígito verificador 
 (`validate-docbr`, aceita o CNPJ alfanumérico). A descrição é o resumo da compra ou, sem ele, os
 itens do pedido. Montando a coluna apareceu o **GGV03-032 com o fornecedor errado** (Tabelionato
 de Notas gravado como Tabelionato de Protesto — `buscar_fornecedor()` pela primeira palavra,
-Lição #17) e o cadastro do ONR id 34 com CNPJ inválido: anotados para decisão do Dennis, não
-corrigidos.
+Lição #17) — e, conferindo NF-e e PIX depois, o **GGV03-024** com o mesmo erro (Blum & Chinato
+Madeiras gravado como B&C) — e o cadastro do ONR id 34 com CNPJ inválido: anotados para decisão do
+Dennis, não corrigidos.
 
 ---
 
@@ -2274,8 +2275,9 @@ da lista abaixo):
 - **Prestação de contas de setembro** — Dennis manda o extrato pelo Telegram, preenche no Excel
   o que a Laura não sabe (obra das saídas sem lançamento, categoria das entradas) e leva à Diniz
   com as perguntas: conta compartilhada entre obras, aportes, reembolso do GGV03-036
-- **GGV03-032 com o fornecedor errado** (Lição #17) — pago ao Tabelionato de Notas, gravado como
-  Tabelionato de Protesto; decidir como corrigir o pedido e o `buscar_fornecedor()` (CNPJ fora do
+- **GGV03-032 e GGV03-024 com o fornecedor errado** (Lição #17) — 032 pago ao Tabelionato de
+  Notas, gravado como Tabelionato de Protesto; 024 da Blum & Chinato Madeiras, gravado como B&C;
+  decidir como corrigir o pedido e o `buscar_fornecedor()` (CNPJ fora do
   cadastro = fornecedor novo; dígito verificador ao cadastrar — ONR id 34 com CNPJ inválido)
 - Arquivos arquivados com a data do processamento por causa da Lição #16 (ex: FUNREJUS de 10/09
   como `2026-09-11 …`) — renomear só se o Dennis quiser

@@ -984,10 +984,11 @@ que `bot.py` parecia "bagunçado".
    particular). Próximo passo natural, se fizer falta: guardar na Laura o que hoje é preenchido no
    Excel (obra das saídas sem pedido, categoria das entradas) e registrar a conta de origem de
    cada pagamento
-   - **GGV03-032 com o fornecedor errado + `buscar_fornecedor()` pela primeira palavra**
+   - **GGV03-032 e GGV03-024 com o fornecedor errado + `buscar_fornecedor()` pela primeira palavra**
      *(achado ao montar a coluna CNPJ/CPF — Lição #17 em `LICOES_EXTRACAO.md`)* — o pagamento foi
      ao Tabelionato de Notas (45.134.842/0001-74, fora do cadastro) e o pedido ficou com o
-     Tabelionato de Protesto, o único "TABELIONATO%" cadastrado. Decidir com o Dennis: como
+     Tabelionato de Protesto, o único "TABELIONATO%" cadastrado; o 024 é da Blum & Chinato
+     Madeiras (31.317.200/0001-04) e ficou com a B&C ("BLUM%"). Decidir com o Dennis: como
      corrigir o pedido (não há troca de fornecedor em pedido gerado; excluir e refazer muda o
      código) e o conserto da busca (CNPJ válido fora do cadastro = fornecedor novo; dígito
      verificador ao cadastrar — o ONR id 34 tem CNPJ inválido)
