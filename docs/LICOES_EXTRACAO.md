@@ -47,6 +47,14 @@ Dennis tem duas empresas (VII e DeltaD) que podem aparecer como Pagador em docum
 não só a mais óbvia. Se uma terceira empresa aparecer no futuro, adicionar aqui também — ver
 [[project_deltad_vii]] na memória para o contexto societário completo.
 
+**Recorrência (2026-10-09), no comprovante PIX:** em 4 dos 9 comprovantes de setembro da GGV03
+(GGV03-010, 032, 033) a IA gravou a própria VII como "Favorecido" (58.358.802/0001-58), e no do
+GGV03-034 leu o CNPJ da Junta Comercial errado (27.865.170/0001-99, dígito verificador inválido —
+o certo, no cadastro, é 77.968.170/0001-99). Sem estrago hoje — o vínculo do comprovante não
+depende desse campo —, mas o "Favorecido" do comprovante **não** é fonte de CNPJ: a planilha de
+prestação de contas (0.18.1) usa o cadastro de fornecedores, e só imprime CNPJ/CPF com dígito
+verificador válido.
+
 ---
 
 ## 3. Unidade de medida com dígito quebra o regex de item
@@ -377,11 +385,41 @@ gravada não bate com o extrato.
 
 ---
 
+## 17. Fornecedor casado pela primeira palavra do nome quando o CNPJ não está no cadastro *(aberto)*
+
+**Sintoma:** o GGV03-032 (R$ 30,16, cópia autenticada do contrato da matrícula 39394) foi pago ao
+**Tabelionato de Notas** de Castro — o documento traz o CNPJ 45.134.842/0001-74 (Receita:
+"TABELIONATO DE NOTAS DE CASTRO/PR", nome fantasia ARC.REGISTRO@UOL.COM.BR, o "Arc.registrouol.com.br"
+do extrato) —, mas o pedido ficou com o **Tabelionato de Protesto** de Títulos (41.736.625/0001-01),
+outro cartório. PFM e planilha de prestação de contas saem com o fornecedor errado. Achado em
+2026-10-09, ao montar a coluna CNPJ/CPF da prestação de contas.
+
+**Causa raiz:** `buscar_fornecedor()` procura primeiro pelo CNPJ; como o do Tabelionato de Notas
+não estava no cadastro, caiu no passo 2 — `UPPER(nome) LIKE 'TABELIONATO%'` — e pegou o primeiro
+cartório cadastrado. A primeira palavra não identifica ninguém quando é genérica (Tabelionato,
+Comercial, Companhia, Operador, Serviço...). Os outros 9 pedidos que passaram pelo passo 2
+(SANEPAR, B&C, ONR) saíram com o fornecedor esperado porque o cadastro tinha um candidato só com
+aquela primeira palavra, ou o certo vinha primeiro ("OPERADOR%" casa dois cadastros do ONR) — não
+porque a busca soubesse distinguir.
+
+**Vizinho, no cadastro:** "OPERADOR NACIONAL DO SISTEMA DE REGISTRO ELETRÔNICO DE IMÓVEIS (ONR)"
+(id 34) tem o CNPJ 45.997.665/0001-86, que a Receita recusa (dígito verificador) — o ONR de
+verdade é o id 31, 37.318.313/0001-00. Ninguém conferia o dígito ao cadastrar.
+
+**Correção:** pendente, decisão do Dennis (corrigir o GGV03-032 e a busca). A planilha de
+prestação de contas já se protege: CNPJ do orçamento só vale se está no cadastro, nome só casa
+completo, e CNPJ/CPF inválido fica em branco (`validate-docbr`).
+
+**Lição geral:** CNPJ válido no documento e fora do cadastro quer dizer **fornecedor novo** —
+nunca "o mais parecido pelo nome". Casar por nome só com o nome inteiro, e na dúvida perguntar.
+
+---
+
 ## Padrão geral por trás de tudo isso
 
 Três famílias de bug, não uma só.
 
-**Família A (itens 1-6, 11, 12, 14) — o código assume uma forma fixa de string vinda do Claude**
+**Família A (itens 1-6, 11, 12, 14, 17) — o código assume uma forma fixa de string vinda do Claude**
 (largura de caractere, formato numérico americano, unidade só-letra, gênero gramatical, campo
 com nome exato, vocabulário implícito de "o que é uma unidade válida") — mas a extração por IA
 é inerentemente variável, principalmente em documentos que fogem do padrão esperado (boleto em
@@ -408,6 +446,6 @@ Item 15 abre uma quarta frente: **entrada humana contaminada** — o texto digit
 usuário pode conter a própria pergunta do bot; validação de entrada precisa reconhecer isso.
 
 Regra prática comum a todas as famílias: testar contra pelo menos um caso real de produção antes
-de considerar corrigido — não só contra dado fictício. Foi assim que todos os 16 casos acima foram
+de considerar corrigido — não só contra dado fictício. Foi assim que todos os 17 casos acima foram
 confirmados (lendo o PDF/imagem real ou consultando o banco de produção, não assumindo a partir do
 sintoma).

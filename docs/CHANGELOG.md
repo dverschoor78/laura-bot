@@ -15,6 +15,11 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > sozinhas com o uso do dia a dia não entram aqui (ex: fechar um pedido parcelado esperando
 > pagamento). Ver Dívida Técnica em `docs/ROADMAP.md`.
 
+0. **GGV03-032 com o fornecedor errado + `buscar_fornecedor()` pela primeira palavra**
+   *(novo, 2026-10-09 — Lição #17)* — decidir com o Dennis como corrigir o pedido (pago ao
+   Tabelionato de Notas, gravado como Tabelionato de Protesto) e consertar a busca: CNPJ válido
+   fora do cadastro = fornecedor novo, não o primeiro nome parecido; conferir o dígito
+   verificador ao cadastrar (o ONR id 34 tem CNPJ inválido)
 1. **Validar o contador de pedidos ao vivo** *(0.17.1, em produção desde 2026-10-09)* — o
    próximo pedido real da GGV03 tem que sair GGV03-040
 2. **GGV01-001 — código usado duas vezes e PDF na pasta da GGV03** *(novo, 2026-10-09)* —
@@ -55,6 +60,55 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > (Proxmox do Eric), obra de teste GGV99, pasta automática para obra nova, trocar NF-e
 > vinculada errada, reenvio de arquivo já recebido, `Restart=always`, correção manual do
 > comprovante PIX e da parcela, mais de uma NF-e por pedido — ver entradas abaixo.
+
+---
+
+## [0.18.1] — Prestação de contas: Fornecedor, CNPJ/CPF e Descrição em colunas próprias — 2026-10-09
+
+### Motivação
+
+Pedido do Dennis ao ver as colunas: separar "Fornecedor / Descrição Pagamento" e incluir o
+CNPJ/CPF — antes de mandar a planilha de setembro para a Diniz.
+
+### Mudado
+
+- **PAGAMENTOS**: Fornecedor | CNPJ/CPF | Descrição Pagamento, onde antes havia uma coluna só.
+  **RECEBIMENTOS** igual: Cliente | CNPJ/CPF | Descrição Receita. Os totais seguem na coluna do
+  valor pago/recebido (agora a H).
+- **CNPJ/CPF** vem do cadastro de fornecedores (validado na Receita), nunca do "Favorecido" do
+  comprovante (Lição #2). Pagamento com pedido: como no PFM, o CNPJ/CPF do orçamento quando é de
+  um fornecedor cadastrado (resolve matriz × filial da Carlessi); senão, pelo nome completo do
+  fornecedor. Movimento sem pedido: pelo nome do extrato, só se for exatamente um nome do
+  cadastro (setembro: Capital Vidros, conferido na Receita). Só sai CNPJ/CPF com dígito
+  verificador válido — inclusive o CNPJ alfanumérico que a Receita emite desde 2026; na dúvida,
+  fica em branco para preencher.
+- **Descrição Pagamento**: o resumo da compra; sem ele, os itens do pedido (os três primeiros e
+  "(+N itens)").
+
+### Adicionado
+
+- Dependência `validate-docbr==2.0.0` (dígito verificador de CNPJ numérico e alfanumérico e de
+  CPF; sem dependências próprias).
+
+### Encontrado, não corrigido (decisão do Dennis)
+
+- **GGV03-032 com o fornecedor errado**: pago ao Tabelionato de Notas de Castro
+  (45.134.842/0001-74), gravado como Tabelionato de Protesto (41.736.625/0001-01), porque
+  `buscar_fornecedor()` cai na primeira palavra do nome quando o CNPJ não está no cadastro
+  (Lição #17). A planilha mostra o pedido como está.
+- Cadastro do ONR (id 34) com CNPJ inválido na Receita (45.997.665/0001-86); o certo é o id 31.
+- `_extrair_descricao()`, dos relatórios antigos de `relatorios.py`, mistura campos (ex:
+  "CNPJ/CPF do favorecido: … - Cópia") — a prestação de contas não usa.
+
+### Testado
+
+Cópia nova do banco de produção: cabeçalhos das duas abas, larguras, cada linha de setembro
+(CNPJ/CPF e descrição de todos os pagamentos registrados, Capital Vidros pelo cadastro, Copel e
+entradas em branco), totais na coluna H; regras do CNPJ/CPF (inválidos do ONR e da Junta em
+branco, alfanumérico, CPF, Carlessi pelo orçamento, GGV03-004 pelo orçamento e não pelo cadastro
+inválido, GGV03-025 pelo nome); descrição pelos itens com truncamento (41 itens, numa cópia sem
+o resumo). Regressão: conciliação, fluxo pelo Telegram, NF-e, bloqueio, exclusão e numeração
+passando.
 
 ---
 

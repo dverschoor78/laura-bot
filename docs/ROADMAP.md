@@ -978,12 +978,19 @@ que `bot.py` parecia "bagunçado".
 > gatilho arquitetural que ainda não ocorreu) não são fiadas — ficam registradas em Dívida Técnica
 > ou no ADR correspondente, sem duplicar aqui como se fossem tarefa da próxima sessão.
 
-0. **Prestação de contas de setembro** *(0.18.0, 2026-10-09)* — Dennis manda o extrato pelo
-   Telegram, preenche no Excel o que a Laura não sabe e leva à Diniz com as perguntas em aberto:
-   conta da VII compartilhada entre obras, aportes, reembolso do GGV03-036 (conta particular).
-   Próximo passo natural, se fizer falta: guardar na Laura o que hoje é preenchido no Excel
-   (obra das saídas sem pedido, categoria das entradas) e registrar a conta de origem de cada
-   pagamento
+0. **Prestação de contas de setembro** *(0.18.0 e 0.18.1, 2026-10-09)* — Dennis manda o extrato
+   pelo Telegram, preenche no Excel o que a Laura não sabe e leva à Diniz com as perguntas em
+   aberto: conta da VII compartilhada entre obras, aportes, reembolso do GGV03-036 (conta
+   particular). Próximo passo natural, se fizer falta: guardar na Laura o que hoje é preenchido no
+   Excel (obra das saídas sem pedido, categoria das entradas) e registrar a conta de origem de
+   cada pagamento
+   - **GGV03-032 com o fornecedor errado + `buscar_fornecedor()` pela primeira palavra**
+     *(achado ao montar a coluna CNPJ/CPF — Lição #17 em `LICOES_EXTRACAO.md`)* — o pagamento foi
+     ao Tabelionato de Notas (45.134.842/0001-74, fora do cadastro) e o pedido ficou com o
+     Tabelionato de Protesto, o único "TABELIONATO%" cadastrado. Decidir com o Dennis: como
+     corrigir o pedido (não há troca de fornecedor em pedido gerado; excluir e refazer muda o
+     código) e o conserto da busca (CNPJ válido fora do cadastro = fornecedor novo; dígito
+     verificador ao cadastrar — o ONR id 34 tem CNPJ inválido)
 1. **Validar o contador de pedidos por obra ao vivo** *(em produção desde 2026-10-09)* —
    `proximo_pfm_numero()` era `MAX+1` sobre os pedidos existentes: excluir o
    pedido mais recente devolvia o número, e o próximo pedido herdava o código (GGV03-029 e

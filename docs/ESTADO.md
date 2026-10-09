@@ -67,12 +67,13 @@
 >   errada** pelo cockpit (08/08); `Restart=always` nos dois serviços (12/08); **menu ao
 >   reenviar arquivo já recebido** — descartar e liberar reenvio, ou manter (12/08). Detalhes
 >   no CHANGELOG.
-> - **5 entregas na mesma sessão** (planos aprovados pelo Dennis antes do código; detalhe em
+> - **6 entregas na mesma sessão** (planos aprovados pelo Dennis antes do código; detalhe em
 >   Última Fiada Implementada): **0.17.1** código de pedido nunca reaproveitado (contador por
 >   obra); **0.17.2** "Excluir pedido" sem rastros, arquivos para `Old`; **0.17.3** pedido gerado
 >   não muda de obra nem de tipo; **0.17.4** correção da leitura da NF-e (pedido do Dennis);
 >   **0.18.0** conciliação do extrato do Mercado Pago + planilha de prestação de contas no modelo
->   da contabilidade (Diniz), para o RET da GGV03. A validar no uso real: próximo pedido da GGV03
+>   da contabilidade (Diniz), para o RET da GGV03; **0.18.1** Fornecedor, CNPJ/CPF e Descrição em
+>   colunas próprias na planilha (pedido do Dennis). A validar no uso real: próximo pedido da GGV03
 >   = **GGV03-040**; próxima NF-e com "✏️ Corrigir dados"; extrato de setembro enviado pelo Dennis.
 > - **Contexto do RET (2026-10-09)**: a contabilidade Diniz mandou um modelo de prestação de
 >   contas (PAGAMENTOS e RECEBIMENTOS, 8 colunas). A conta Mercado Pago da VII paga **várias
@@ -318,6 +319,9 @@ container (SSH + tmux + Claude Code), sem nada a abrir no firewall do Eric.
 
 ## Versão Atual
 
+**v0.18.1** — Prestação de contas com Fornecedor, CNPJ/CPF (do cadastro, dígito verificador
+conferido) e Descrição em colunas próprias, nas duas abas
+
 **v0.18.0** — Conciliação do extrato do Mercado Pago: o PDF do extrato é lido sem IA, com o
 saldo conferido linha a linha, cruzado com os pagamentos registrados e transformado na planilha
 de prestação de contas no modelo da contabilidade (abas PAGAMENTOS e RECEBIMENTOS + Obra, PFM,
@@ -503,6 +507,16 @@ OneDrive (limpas depois).
 **Deploy** em 2026-10-09 15:11 (`git pull` + `pip install -r requirements.txt` — pdfplumber
 0.11.10 — + `systemctl restart laura-bot`): bot ativo, sem erro, conectado ao Telegram.
 Validação ao vivo: o Dennis manda o extrato de setembro.
+
+**Ajuste 0.18.1 (mesmo dia, pedido do Dennis, antes da primeira planilha real)**: "Fornecedor /
+Descrição Pagamento" virou Fornecedor | CNPJ/CPF | Descrição Pagamento (e Cliente | CNPJ/CPF |
+Descrição Receita). O CNPJ/CPF vem do cadastro de fornecedores — para pedido, o do orçamento
+quando está cadastrado, senão pelo nome completo; só com dígito verificador válido
+(`validate-docbr`, aceita o CNPJ alfanumérico). A descrição é o resumo da compra ou, sem ele, os
+itens do pedido. Montando a coluna apareceu o **GGV03-032 com o fornecedor errado** (Tabelionato
+de Notas gravado como Tabelionato de Protesto — `buscar_fornecedor()` pela primeira palavra,
+Lição #17) e o cadastro do ONR id 34 com CNPJ inválido: anotados para decisão do Dennis, não
+corrigidos.
 
 ---
 
@@ -2260,9 +2274,12 @@ da lista abaixo):
 - **Prestação de contas de setembro** — Dennis manda o extrato pelo Telegram, preenche no Excel
   o que a Laura não sabe (obra das saídas sem lançamento, categoria das entradas) e leva à Diniz
   com as perguntas: conta compartilhada entre obras, aportes, reembolso do GGV03-036
+- **GGV03-032 com o fornecedor errado** (Lição #17) — pago ao Tabelionato de Notas, gravado como
+  Tabelionato de Protesto; decidir como corrigir o pedido e o `buscar_fornecedor()` (CNPJ fora do
+  cadastro = fornecedor novo; dígito verificador ao cadastrar — ONR id 34 com CNPJ inválido)
 - Arquivos arquivados com a data do processamento por causa da Lição #16 (ex: FUNREJUS de 10/09
   como `2026-09-11 …`) — renomear só se o Dennis quiser
-- **GGV02** — decidir o arquivamento (item 6): já há pedido fora do OneDrive
+- **GGV02** — decidir o arquivamento (item 4 do ROADMAP): já há pedido fora do OneDrive
 
 1. **Validar a Consultoria de Recompra ao vivo em produção** — implementada e testada com
    objetos simulados/dados reais fora do Telegram; falta o teste ponta a ponta clicando nos

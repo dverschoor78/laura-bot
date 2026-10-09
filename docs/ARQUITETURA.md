@@ -43,7 +43,8 @@ e registra o lançamento A PAGAR no banco.
 **Tecnologias em uso:** Python 3.12+ (3.13 no servidor) · python-telegram-bot 22 (+ `job-queue`/APScheduler) · SQLite ·
 Claude API (Anthropic) · Playwright Chromium (HTML → PDF) · num2words (valor por extenso) ·
 BrasilAPI (Receita Federal) · OneDrive (montado via rclone no servidor) · openpyxl (relatórios `.xlsx`,
-`financeiro/relatorios.py`) · pdfplumber (leitura do extrato Mercado Pago, sem IA — 2026-10-09)
+`financeiro/relatorios.py`) · pdfplumber (leitura do extrato Mercado Pago, sem IA — 2026-10-09) ·
+validate-docbr (dígito verificador de CNPJ/CPF na prestação de contas, inclusive CNPJ alfanumérico)
 
 **Onde roda:** container LXC Debian 13 no Proxmox do Eric, com systemd — ver seção 2.2.
 
