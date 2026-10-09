@@ -975,11 +975,11 @@ que `bot.py` parecia "bagunçado".
    GGV00-005). Agora o contador `numeracao_pedidos` só sobe. A numeração existente não muda —
    GGV03-029 fica vago; GGV02 continua do 022. Validar ao vivo: próximo pedido da GGV03 =
    GGV03-040
-2. **Excluir pedido deixa rastros** *(novo, 2026-10-09)* — `_excluir_pedido()` não limpa
-   `itens_pedido` nem `notas_fiscais_pedido`, e só descarta a primeira NF-e (a tabela de N
-   NF-e nasceu depois da função). Itens soltos hoje: GGV00-005, GGV01-001, GGV03-029 —
-   inofensivos (`procurar_item()` só enxerga item com pedido); NF-e solta seria herdada por
-   um pedido que reaproveitasse o código
+2. **GGV01-001: 2 arquivos órfãos na pasta da GGV03** *(novo, 2026-10-09)* — conta da Sanepar
+   lançada na GGV01 em 12/09, excluída e refeita como GGV03-035; os 2 PDFs (original e R01)
+   ficaram em `2026-06 GGV03/04 Compras`. Decidir se vão para `Old`. Como um PDF da GGV01
+   (obra sem pasta) foi parar na pasta da GGV03 não está claro — investigar se acontecer de
+   novo. ("Excluir pedido deixa rastros", o item que estava aqui, foi resolvido em 0.17.2)
 3. **Corrigir dados da NF-e antes de vincular** *(pedido do Dennis, 2026-10-09)* — ao receber
    uma NF-e, a Laura lê os campos e só deixa escolher o pedido ou descartar o arquivo; não há
    como corrigir um campo lido errado, e às vezes a leitura erra. Convergir com o "✏️ Corrigir
@@ -989,7 +989,8 @@ que `bot.py` parecia "bagunçado".
    NF-e" (só Confirmar/Cancelar). Suspeito conhecido para valor errado: `parse_nfe()`
    (`nfe/nfe.py`) limpa o valor na mão em vez de usar `_parse_brl()` (Lição #4 de
    `LICOES_EXTRACAO.md`). A definir no plano: corrigir também NF-e já vinculada (valor e
-   número em `notas_fiscais_pedido`, que entram na soma do fechamento fiscal)
+   número em `notas_fiscais_pedido`, que entram na soma do fechamento fiscal). Achado no
+   caminho: `trocar_nfe()` zera `valor` e `numero` da nota trocada em `notas_fiscais_pedido`
 4. **Decidir o arquivamento da GGV02** *(atualizado 2026-10-09)* — deixou de ser só decisão
    futura: a obra já tem 5 pedidos da Laura (desde 04/08). 001–004 estão em
    `00 Obras/2025-05 GGV02/04 Compras`, ao lado dos pedidos manuais GGV02-001 a 021 de antes
@@ -1061,10 +1062,9 @@ gatilho original (consultar preço de item já comprado sem ler o texto inteiro 
   `numeracao_pedidos`, que só sobe. Casos reais: GGV03-029 e GGV00-005. Ver Próximas Fiadas,
   item 1.
 
-- **Média — "Excluir pedido" deixa rastros em `itens_pedido` e `notas_fiscais_pedido`**
-  `_excluir_pedido()` apaga lançamento, parcelas, fotos e documentos, mas não os itens nem as
-  NF-e da tabela nova (só descarta a primeira NF-e, via `doc_id_nfe`). Ver Próximas Fiadas,
-  item 2.
+- ~~**Média — "Excluir pedido" deixa rastros em `itens_pedido` e `notas_fiscais_pedido`**~~
+  *(corrigido em 0.17.2, 2026-10-09)* — `_excluir_pedido()` agora limpa as duas tabelas,
+  descarta todas as NF-e e move os arquivos do pedido para `Old`.
 
 - **Baixa — 9 índices de `data/laura.db` não persistidos em código**
   Criados diretamente no banco vivo durante a sessão "Otimização de BD" (2026-07-03) — não existe

@@ -17,10 +17,8 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 1. **Validar o contador de pedidos ao vivo** *(0.17.1, em produção desde 2026-10-09)* — o
    próximo pedido real da GGV03 tem que sair GGV03-040
-2. **Excluir pedido deixa rastros** *(novo, 2026-10-09)* — `_excluir_pedido()` não limpa
-   `itens_pedido` nem `notas_fiscais_pedido`, e só descarta a primeira NF-e. Itens soltos são
-   inofensivos (a busca de histórico ignora item sem pedido); NF-e solta seria herdada por um
-   pedido que reaproveitasse o código
+2. **GGV01-001: 2 arquivos órfãos na pasta da GGV03** *(novo, 2026-10-09)* — decidir se vão
+   para `Old` (conta da Sanepar lançada na GGV01, excluída e refeita como GGV03-035)
 3. **Corrigir dados da NF-e antes de vincular** *(pedido do Dennis, 2026-10-09)* — hoje a tela
    da NF-e só deixa escolher o pedido ou descartar; às vezes a leitura erra. Convergir com o
    "✏️ Corrigir dados" do comprovante PIX (ver ROADMAP, Próximas Fiadas, item 3)
@@ -58,6 +56,31 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > (Proxmox do Eric), obra de teste GGV99, pasta automática para obra nova, trocar NF-e
 > vinculada errada, reenvio de arquivo já recebido, `Restart=always`, correção manual do
 > comprovante PIX e da parcela, mais de uma NF-e por pedido — ver entradas abaixo.
+
+---
+
+## [0.17.2] — "Excluir pedido" sem rastros, arquivos para Old — 2026-10-09
+
+### Motivação
+
+Excluir um pedido deixava os itens e as NF-e dele no banco (a tabela de N NF-e nasceu depois
+da função) e só descartava a primeira NF-e. No OneDrive, os arquivos do pedido excluído ficavam
+soltos com um código que não existe mais — Dennis tinha que limpar à mão (caso GGV03-029).
+
+### Alterado
+
+- **Excluir pedido** apaga também itens e todas as NF-e, e **move os arquivos do pedido no
+  OneDrive para a pasta `Old`** de cada pasta (PDF, revisões, orçamento, comprovantes, NF-e,
+  fatura, recibos, fotos). Nada é apagado no OneDrive; nome repetido em `Old` ganha " (2)".
+- **Trocar NF-e** move a NF-e errada para `Old` em vez de apagar.
+- Mensagens: a confirmação avisa que os arquivos vão para `Old`; o resultado diz quantos foram
+  movidos ("#GGV03-040 excluído — 6 arquivos movidos para Old.") e avisa se algum não pôde ser
+  movido.
+
+### Técnico
+
+- `_mover_para_old()` + `_mover_arquivos_do_pedido_para_old()` — um mecanismo só, usado pelo
+  "Excluir" e pelo "Trocar NF-e"; `_remover_arquivo_financeiro_antigo()` removida.
 
 ---
 

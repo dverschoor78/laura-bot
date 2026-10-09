@@ -28,9 +28,16 @@
 >   PDFs em `04 Compras/Old/`; os 2 orçamentos em `04 Compras/00 Orçamentos/Old/`, porque têm
 >   o mesmo nome dos PDFs). **Corrigido e em produção na mesma sessão** (deploy 13:02) — ver
 >   Última Fiada Implementada.
-> - **"Excluir pedido" deixa rastros**: `_excluir_pedido()` não limpa `itens_pedido` nem
->   `notas_fiscais_pedido`, e só descarta a primeira NF-e. Itens soltos hoje: GGV00-005,
->   GGV01-001 e GGV03-029 — inofensivos, porque `procurar_item()` só enxerga item com pedido.
+> - **"Excluir pedido" deixava rastros** — **corrigido na mesma sessão (0.17.2)**: além de
+>   limpar `itens_pedido` e `notas_fiscais_pedido` e descartar todas as NF-e, excluir agora
+>   move os arquivos do pedido para `Old`; "Trocar NF-e" também (antes apagava o arquivo
+>   errado). Itens soltos antigos (GGV00-005, GGV01-001, GGV03-029) ficam — inofensivos,
+>   porque `procurar_item()` só enxerga item com pedido.
+> - **GGV01-001 — 2 arquivos órfãos na pasta da GGV03**: conta da Sanepar lançada na GGV01 em
+>   12/09, excluída e refeita como GGV03-035; os 2 PDFs (original e R01) ficaram em
+>   `2026-06 GGV03/04 Compras`. Varredura de GGV00 e GGV03 contra o banco: são as únicas sobras.
+>   Decisão do Dennis pendente (mover para `Old`?). Como um PDF da GGV01 (obra sem pasta) foi
+>   parar na pasta da GGV03 não está claro — investigar se acontecer de novo.
 > - **GGV02 já está em uso sem decisão de arquivamento**: 5 pedidos da Laura desde 04/08.
 >   001–004 foram para `00 Obras/2025-05 GGV02/04 Compras`, ao lado dos pedidos manuais
 >   GGV02-001 a 021 de antes da Laura, com os mesmos códigos. O 005 (e as revisões R01–R03, de
@@ -278,6 +285,10 @@ container (SSH + tmux + Claude Code), sem nada a abrir no firewall do Eric.
 
 ## Versão Atual
 
+**v0.17.2** — "Excluir pedido" sem rastros: apaga também itens e todas as NF-e, e move os
+arquivos do pedido no OneDrive para `Old` (nada apagado); "Trocar NF-e" manda a NF-e errada
+para `Old` em vez de apagar
+
 **v0.17.1** — Código de pedido nunca mais é reaproveitado: contador por obra
 (`numeracao_pedidos`) que só sobe; numeração existente intacta (GGV03-029 vago); GGV02 continua
 do 022, depois dos pedidos manuais — em produção desde 2026-10-09 13:02
@@ -344,7 +355,10 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
   (nota pode ser emitida antes de o pedido estar totalmente pago) — um pedido pode ter mais
   de uma NF-e (ex: dois serviços na mesma fatura), fechamento fiscal exige que a soma cubra o
   valor total quando há 2 ou mais; tela "Ver notas fiscais" no cockpit nesse caso
-- Troca de NF-e vinculada errada pelo cockpit (Ver / Trocar, com prévia e confirmação)
+- Troca de NF-e vinculada errada pelo cockpit (Ver / Trocar, com prévia e confirmação) — a NF-e
+  errada vai para a pasta `Old`, não é apagada
+- Exclusão de pedido (cadastro errado): apaga tudo dele na Laura e move os arquivos dele no
+  OneDrive para `Old`; o código nunca é reaproveitado
 - Correção manual do comprovante PIX antes do vínculo (valor, data, favorecido, CNPJ/CPF) e
   de parcela já registrada (bloqueada quando o recibo da parcela está assinado)
 - Reenvio de arquivo já recebido: descartar e liberar reenvio, ou manter como está
@@ -382,6 +396,42 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 ---
 
 ## Última Fiada Implementada
+
+**"Excluir pedido" sem rastros + arquivos para `Old`** *(2026-10-09, mesma sessão)*
+
+Gatilho: achado da conferência do dia — `_excluir_pedido()` não limpava `itens_pedido` nem
+`notas_fiscais_pedido` (a tabela de N NF-e nasceu depois da função) e só descartava a primeira
+NF-e. Plano aprovado pelo Dennis com um acréscimo dele: "apagar NF-e (move os arquivos para
+old)"; e duas decisões: **todos** os arquivos do pedido vão para `Old` (não só os de NF-e), e o
+"Trocar NF-e" também passa a mover a NF-e errada para `Old` em vez de apagar.
+
+**Implementado** (`bot.py`): `_mover_para_old(arquivo)` — move para a subpasta `Old` da própria
+pasta; nunca apaga nem sobrescreve (nome repetido ganha " (2)"). `_mover_arquivos_do_pedido_para_old(
+pfm_codigo, marcador="")` — percorre as 4 pastas da obra (04 Compras, 00 Orçamentos, 01 Controle
+financeiro, 05 Entrega) e casa o código exato no nome (pega `-R01` e `TESTE-`, nunca
+`GGV03-0400`); com `marcador`, só os arquivos que o trazem no nome. Uma função, dois usos
+(convergência): `_excluir_pedido()` move tudo do pedido e devolve (movidos, falhas);
+`_cb_nfe_trocar_confirmar()` move só os arquivos "NFe". `_remover_arquivo_financeiro_antigo()`
+(apagava o arquivo) deixou de existir. `_excluir_pedido()` também apaga `itens_pedido` e
+`notas_fiscais_pedido` do pedido e descarta todos os documentos de NF-e.
+
+**Mensagens** (modelo aprovado antes do código): confirmação — "Apaga o pedido, parcelas,
+entrega, itens e NF-e na Laura. Os arquivos dele no OneDrive vão para a pasta Old — nada é
+apagado lá. Não pode ser desfeito."; resultado — "#GGV03-040 excluído — 6 arquivos movidos
+para Old." (com aviso ⚠️ se algum arquivo não puder ser movido); "Trocar NF-e" — "🟢 NF-e do
+Pedido #X trocada — a anterior foi para a pasta Old."
+
+**Testado** (nada tocou produção): pedido sintético completo (2 NF-e, revisão, recibo, foto,
+nome repetido em `Old`, arquivos de outros pedidos que não podem se mexer) — 10 arquivos
+movidos, banco limpo nas 5 tabelas, 7 documentos descartados, nada apagado; handlers reais do
+Telegram ("Excluir" e "Trocar NF-e") com consulta simulada; **cópia do banco de produção** com
+os ~170 nomes reais de arquivo da GGV03 — excluir o GGV03-025 moveu só os 6 arquivos dele;
+caminhos de falha (OneDrive recusa um arquivo, pasta ilegível) viram aviso ⚠️, nunca erro
+depois do banco já limpo; regressão do contador de pedidos (22 testes) passando; **OneDrive real**: no servidor, com o
+código novo numa pasta temporária, arquivos fictícios na obra de teste GGV99 foram para os
+`Old` reais nas 4 pastas sem falha (limpos depois).
+
+---
 
 **Código de pedido nunca mais é reaproveitado — contador por obra** *(2026-10-09)*
 
@@ -1895,8 +1945,7 @@ Ver Última Fiada Implementada. Restrição do Dennis respeitada: a numeração 
 - **Código de pedido reaproveitado depois de excluir o pedido mais recente** (2026-10-09 —
   corrigido e em produção, contador `numeracao_pedidos`): era
   `MAX(pfm_numero)+1` sobre os documentos que existem. Casos reais: GGV03-029 e GGV00-005.
-- **"Excluir pedido" deixa rastros** (2026-10-09): `_excluir_pedido()` não limpa
-  `itens_pedido` nem `notas_fiscais_pedido`, e só descarta a primeira NF-e.
+- ~~**"Excluir pedido" deixa rastros**~~ — corrigido em 0.17.2 (2026-10-09).
 - `bot.py` com 6.546 linhas (2026-10-09) — parcialmente modularizado (ADR-004, 2026-07-02): dispatch table +
   módulo `nfe/` extraído. `fornecedor/`, `obra/`, `comprovante/` avaliados e adiados com gatilho
   próprio (ver ADR-004); extração do domínio `entrega/` continua adiada (ADR-003, motivo não mudou)
@@ -2027,8 +2076,7 @@ da lista abaixo):
 
 - **Validar o contador de pedidos ao vivo** — em produção desde 2026-10-09; o próximo pedido
   real da GGV03 tem que sair GGV03-040
-- **"Excluir pedido" deixa rastros** — limpar `itens_pedido` e `notas_fiscais_pedido` e
-  descartar todas as NF-e do pedido, não só a primeira (plano a apresentar ao Dennis)
+- **GGV01-001** — decidir se os 2 PDFs órfãos que ficaram na pasta da GGV03 vão para `Old`
 - **Corrigir dados da NF-e antes de vincular** (pedido do Dennis) — hoje a tela da NF-e só
   deixa escolher o pedido ou descartar, e às vezes a leitura erra; ver ROADMAP, Próximas
   Fiadas, item 3

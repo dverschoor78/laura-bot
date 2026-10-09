@@ -4,8 +4,9 @@
 > `notas_fiscais_pedido` (mais de uma NF-e por pedido, 2026-08-28); pasta da obra nova criada
 > pelo `/nova_obra` e obra de teste GGV99 (2026-08-07); nomes de arquivo por parcela
 > (comprovante/recibo) e fatura na seção 2.1; tabela `numeracao_pedidos` — contador de
-> pedidos por obra que só sobe (corrige o código reaproveitado após exclusão); limitação nova
-> na seção 6 — rastros de "Excluir pedido".
+> pedidos por obra que só sobe (corrige o código reaproveitado após exclusão); "Excluir
+> pedido" e "Trocar NF-e" movem os arquivos para `Old` (`_mover_arquivos_do_pedido_para_old`,
+> seção 2.1) e o "Excluir" passou a limpar itens e todas as NF-e.
 >
 > Versão anterior: 2026-07-06 — reflete o estado real do sistema (pós ADR-004: dispatch table + módulo
 > `nfe/`; DOCX removido; segurança de `responder_botao()`/`atualizar()`/`atualizar_obra()`
@@ -170,11 +171,16 @@ Se `pasta_onedrive` estiver vazia para uma obra, os documentos caem em `data/pfm
 falhar — evita gravar no lugar errado por engano. **No servidor, `data/pfms/` é disco local do
 container: não sincroniza com o OneDrive** (caso real: GGV02-005).
 
-**Pasta `Old`** — arquivo que sai de circulação (ex: órfão de pedido excluído) é movido para
-uma subpasta `Old`, nunca apagado nem renomeado — mesmo padrão já usado à mão nas obras
-antigas. Usos registrados (2026-10-09): GGV03-029 — orçamento e PDF em `04 Compras/Old/`,
-fatura e comprovante em `01 Controle financeiro/Old/`; GGV00-005 — PDFs em `04 Compras/Old/`
-e orçamentos em `04 Compras/00 Orçamentos/Old/` (têm o mesmo nome dos PDFs).
+**Pasta `Old`** — arquivo que sai de circulação é movido para uma subpasta `Old`, nunca
+apagado — mesmo padrão já usado à mão nas obras antigas. **Automático desde 2026-10-09
+(0.17.2)**: "Excluir pedido" move todos os arquivos do pedido e "Trocar NF-e" move a NF-e
+errada, cada um para o `Old` da própria pasta (`04 Compras/Old`, `00 Orçamentos/Old`,
+`01 Controle financeiro/Old`, `05 Entrega/Old`) — `_mover_arquivos_do_pedido_para_old()` casa
+o código exato no nome (pega `-R01` e `TESTE-`, nunca `GGV03-0400`) e `_mover_para_old()` nunca
+sobrescreve (nome repetido ganha " (2)"). Validado no OneDrive real (rclone) com a obra de
+teste GGV99. Usos manuais registrados (2026-10-09): GGV03-029 — orçamento e PDF em
+`04 Compras/Old/`, fatura e comprovante em `01 Controle financeiro/Old/`; GGV00-005 — PDFs em
+`04 Compras/Old/` e orçamentos em `04 Compras/00 Orçamentos/Old/`.
 
 **Resolução de caminhos (2026-07-10, preparação pro deploy Linux/Proxmox)** — `_raiz_obra()`
 aceita `pasta_onedrive` em duas formas: **relativa** (ex: `00 Obras/2026-06 GGV03`), resolvida
@@ -340,8 +346,8 @@ Fonte de verdade de quantas e quais NF-e um pedido tem — mesmo modelo de `parc
 NF-e", só por compatibilidade com código que lê o campo isolado; ao remover a primeira, a
 próxima é promovida. Criada e populada (backfill idempotente) por `init_db_notas_fiscais()`
 (`financeiro/lancamento.py`). Fechamento fiscal: com 1 NF-e, fecha como sempre; com 2 ou mais,
-a soma precisa cobrir `lancamentos.valor`. `_excluir_pedido()` ainda não limpa esta tabela —
-ver seção 6.
+a soma precisa cobrir `lancamentos.valor`. `_excluir_pedido()` apaga as linhas do pedido e
+descarta todos os documentos de NF-e dele (desde 2026-10-09; antes só o primeiro).
 
 ---
 
@@ -620,11 +626,10 @@ Referências para navegação no arquivo (6.546 linhas em 2026-10-09):
   resumo — o PDF novo sobrescreveria o antigo). Casos reais: GGV03-029 e GGV00-005. Correção:
   contador `numeracao_pedidos` (seção 3).
 
-- **"Excluir pedido" deixa rastros** (achado 2026-10-09) — `_excluir_pedido()` apaga
-  lançamento, parcelas, fotos de entrega e documentos, mas não `itens_pedido` nem
-  `notas_fiscais_pedido`, e só descarta a primeira NF-e (via `lancamentos.doc_id_nfe`). Itens
-  soltos são inofensivos (`procurar_item()` faz JOIN com `lancamentos`); NF-e solta seria
-  herdada por um pedido que reaproveitasse o código.
+- ~~**"Excluir pedido" deixa rastros**~~ (achado e **corrigido em 2026-10-09, 0.17.2**) —
+  `_excluir_pedido()` não limpava `itens_pedido` nem `notas_fiscais_pedido` e só descartava a
+  primeira NF-e. Itens soltos de exclusões anteriores (GGV00-005, GGV01-001, GGV03-029)
+  continuam no banco — inofensivos, porque `procurar_item()` faz JOIN com `lancamentos`.
 
 - **Tela do Item esconde a razão de uma referência não calculada** — quando o SINAPI acha um
   código com confiança alta mas não converte a unidade (ex: Cal Hidratada: KG→SC sem

@@ -460,20 +460,44 @@ def _arquivar_doc_financeiro(pfm_codigo: str, sufixo: str, caminho_original, dat
     """Copia comprovante/NF-e para '01 Controle financeiro', nome padronizado."""
     _arquivar_documento(pfm_codigo, sufixo, caminho_original, data_str, _pasta_controle_financeiro)
 
-def _remover_arquivo_financeiro_antigo(pfm_codigo: str, marcador: str):
-    """Remove da pasta '01 Controle financeiro' da obra qualquer arquivo já arquivado que
-    contenha `pfm_codigo` e `marcador` no nome (ex: marcador="NFe"). Casa por padrão de nome,
-    não por registro no banco — _arquivar_documento() nunca grava de volta o caminho pra onde
-    copiou, então essa é a única forma de reencontrar um arquivo já arquivado. Usado ao trocar
-    um documento vinculado errado (ex: NF-e errada em GGV02-020, 2026-08-08): sem isso, o
-    arquivo errado ficava esquecido no OneDrive pra sempre depois da troca."""
+def _mover_para_old(arquivo: Path) -> bool:
+    """Move o arquivo para a subpasta 'Old' da própria pasta. Nunca apaga nem sobrescreve:
+    nome repetido em Old ganha ' (2)', ' (3)'... Retorna False se o OneDrive recusou."""
+    old = arquivo.parent / "Old"
+    try:
+        old.mkdir(exist_ok=True)
+        destino, n = old / arquivo.name, 2
+        while destino.exists():
+            destino, n = old / f"{arquivo.stem} ({n}){arquivo.suffix}", n + 1
+        arquivo.rename(destino)
+        return True
+    except OSError:
+        return False
+
+def _mover_arquivos_do_pedido_para_old(pfm_codigo: str, marcador: str = "") -> tuple:
+    """Move para 'Old' os arquivos do pedido nas pastas da obra (04 Compras, 00 Orçamentos,
+    01 Controle financeiro, 05 Entrega) — só os que trazem `marcador` no nome, se informado
+    (ex: "NFe" ao trocar a NF-e). Casa por nome, não por registro no banco:
+    _arquivar_documento() nunca grava de volta o caminho pra onde copiou. Código exato —
+    'GGV03-040' pega também '-R01' e 'TESTE-', nunca 'GGV03-0400'. Retorna (movidos, falhas).
+    Arquivo que sai de circulação vai pra Old, nunca é apagado (2026-10-09, decisão do Dennis)."""
     ggv = pfm_codigo.split("-")[0]
-    pasta = _pasta_controle_financeiro(ggv)
-    for arquivo in pasta.glob(f"*{pfm_codigo}*{marcador}*"):
+    do_pedido = re.compile(rf"(?<![A-Za-z0-9]){re.escape(pfm_codigo)}(?!\d)")
+    movidos = falhas = 0
+    for pasta in (_pasta_pfm(ggv), _pasta_orcamentos(ggv),
+                  _pasta_controle_financeiro(ggv), _pasta_entrega(ggv)):
         try:
-            arquivo.unlink()
-        except OSError:
-            pass
+            arquivos = sorted(pasta.iterdir())
+        except OSError:  # OneDrive fora do ar: o banco já foi limpo, então avisa em vez de estourar
+            falhas += 1
+            continue
+        for arquivo in arquivos:
+            if arquivo.is_file() and do_pedido.search(arquivo.name) and marcador in arquivo.name:
+                if _mover_para_old(arquivo):
+                    movidos += 1
+                else:
+                    falhas += 1
+    return movidos, falhas
 
 def _total_pago(pfm_codigo: str) -> float:
     with sqlite3.connect(DB_PATH) as con:
@@ -814,9 +838,10 @@ def _descartar_documento(doc_id, force=False) -> bool:
     return True
 
 def _excluir_pedido(pfm_codigo):
-    """Apaga um pedido inteiro (cadastro errado): lançamento, parcelas, fotos de entrega e
-    todos os documentos vinculados (orçamento, comprovantes, NF-e, recibos). Não mexe em
-    arquivos já arquivados no OneDrive — só no registro da Laura e nos uploads originais."""
+    """Apaga um pedido inteiro (cadastro errado): lançamento, parcelas, fotos de entrega, itens,
+    NF-e e todos os documentos vinculados (orçamento, comprovantes, NF-e, recibos). No OneDrive
+    nada é apagado: os arquivos do pedido vão para 'Old' (2026-10-09). O código do pedido não
+    volta pra fila (numeracao_pedidos). Retorna (arquivos movidos, falhas)."""
     with sqlite3.connect(DB_PATH) as con:
         row = con.execute(
             "SELECT doc_id, doc_id_comprovante, doc_id_nfe, doc_id_recibo FROM lancamentos WHERE pfm_codigo=?",
@@ -834,14 +859,21 @@ def _excluir_pedido(pfm_codigo):
         fotos = con.execute("SELECT doc_id FROM entrega_fotos WHERE pfm_codigo=?", (pfm_codigo,)).fetchall()
         doc_ids.update(f[0] for f in fotos)
 
+        # Todas as NF-e, não só a primeira (lancamentos.doc_id_nfe) — tabela de N NF-e, 2026-08-28
+        nfes = con.execute("SELECT doc_id FROM notas_fiscais_pedido WHERE pfm_codigo=?", (pfm_codigo,)).fetchall()
+        doc_ids.update(n[0] for n in nfes)
+
         doc_ids.discard(None)
 
         con.execute("DELETE FROM parcelas_pagamento WHERE pfm_codigo=?", (pfm_codigo,))
         con.execute("DELETE FROM entrega_fotos WHERE pfm_codigo=?", (pfm_codigo,))
+        con.execute("DELETE FROM itens_pedido WHERE pfm_codigo=?", (pfm_codigo,))
+        con.execute("DELETE FROM notas_fiscais_pedido WHERE pfm_codigo=?", (pfm_codigo,))
         con.execute("DELETE FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,))
 
     for doc_id in doc_ids:
         _descartar_documento(doc_id, force=True)
+    return _mover_arquivos_do_pedido_para_old(pfm_codigo)
 
 def registrar_lancamento(doc_id, pfm_codigo, ggv, fornecedor, valor_v, data_entrega, categoria=None):
     """Insere lançamento A PAGAR. Idempotente: se pfm_codigo já existe, retorna o existente."""
@@ -6127,13 +6159,14 @@ async def _cb_nfe_cancelar(query, ctx, partes):
 
 
 async def _cb_nfe_trocar_confirmar(query, ctx, partes):
-    """Efetiva a troca de NF-e de um pedido: substitui o vínculo no banco, remove do OneDrive
-    o arquivo errado (antes de arquivar o novo — senão o padrão de nome do novo bateria com
-    a busca do antigo e os dois seriam apagados), arquiva o novo no lugar certo, descarta o
-    registro antigo. 2026-08-08, gatilho: NF-e errada em GGV02-020."""
+    """Efetiva a troca de NF-e de um pedido: substitui o vínculo no banco, move para 'Old' o
+    arquivo errado (antes de arquivar o novo — senão o padrão de nome do novo bateria com
+    a busca do antigo e os dois iriam pra Old), arquiva o novo no lugar certo, descarta o
+    registro antigo. 2026-08-08, gatilho: NF-e errada em GGV02-020; desde 2026-10-09 o arquivo
+    errado vai pra Old em vez de ser apagado."""
     _, doc_id_novo, pfm_codigo = partes
     doc_id_antigo = trocar_nfe(pfm_codigo, int(doc_id_novo), DB_PATH)
-    _remover_arquivo_financeiro_antigo(pfm_codigo, "NFe")
+    movidos, _ = _mover_arquivos_do_pedido_para_old(pfm_codigo, marcador="NFe")
     with sqlite3.connect(DB_PATH) as con:
         row_nfe = con.execute(
             "SELECT caminho, dados_claude FROM documentos WHERE id=?", (int(doc_id_novo),)
@@ -6146,7 +6179,8 @@ async def _cb_nfe_trocar_confirmar(query, ctx, partes):
         _arquivar_doc_financeiro(pfm_codigo, sufixo_nfe, caminho_nfe, data_nfe)
     if doc_id_antigo:
         _descartar_documento(doc_id_antigo, force=True)
-    await query.edit_message_text(f"🟢 NF-e do Pedido #{pfm_codigo} trocada.")
+    aviso_old = " — a anterior foi para a pasta Old" if movidos else ""
+    await query.edit_message_text(f"🟢 NF-e do Pedido #{pfm_codigo} trocada{aviso_old}.")
 
 
 async def _cb_parcelas_ver(query, ctx, partes):
@@ -6340,8 +6374,9 @@ async def _cb_pedido_excluir_confirmar(query, ctx, partes):
     pfm_codigo = partes[1]
     await query.edit_message_text(
         f"Excluir #{pfm_codigo}?\n\n"
-        "Apaga o pedido, parcelas, entrega e todos os documentos vinculados na Laura. "
-        "Não apaga arquivos já arquivados no OneDrive. Não pode ser desfeito.",
+        "Apaga o pedido, parcelas, entrega, itens e NF-e na Laura.\n"
+        "Os arquivos dele no OneDrive vão para a pasta Old — nada é apagado lá.\n"
+        "Não pode ser desfeito.",
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("🗑 Sim, excluir", callback_data=f"pedido_excluir_ok:{pfm_codigo}"),
             InlineKeyboardButton("← Voltar",       callback_data=f"pedido_abrir:{pfm_codigo}"),
@@ -6352,9 +6387,18 @@ async def _cb_pedido_excluir_confirmar(query, ctx, partes):
 async def _cb_pedido_excluir_ok(query, ctx, partes):
     pfm_codigo = partes[1]
     ggv = pfm_codigo.rsplit("-", 1)[0]
-    _excluir_pedido(pfm_codigo)
+    movidos, falhas = _excluir_pedido(pfm_codigo)
+    texto = f"#{pfm_codigo} excluído"
+    if movidos:
+        s = "s" if movidos > 1 else ""
+        texto += f" — {movidos} arquivo{s} movido{s} para Old"
+    texto += "."
+    if falhas:
+        s = "s" if falhas > 1 else ""
+        texto += (f"\n⚠️ {falhas} arquivo{s} não {'puderam' if falhas > 1 else 'pôde'} ser movido{s} "
+                  "— confira a pasta da obra no OneDrive.")
     await query.edit_message_text(
-        f"#{pfm_codigo} excluído.",
+        texto,
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("◀️ Pedidos", callback_data=f"obra_pedidos:{ggv}")
         ]])
