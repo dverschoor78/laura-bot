@@ -6,7 +6,8 @@
 > (comprovante/recibo) e fatura na seção 2.1; tabela `numeracao_pedidos` — contador de
 > pedidos por obra que só sobe (corrige o código reaproveitado após exclusão); "Excluir
 > pedido" e "Trocar NF-e" movem os arquivos para `Old` (`_mover_arquivos_do_pedido_para_old`,
-> seção 2.1) e o "Excluir" passou a limpar itens e todas as NF-e.
+> seção 2.1) e o "Excluir" passou a limpar itens e todas as NF-e; conciliação do extrato
+> Mercado Pago + planilha de prestação de contas (`financeiro/conciliacao.py`, seção 2 e 2.1).
 >
 > Versão anterior: 2026-07-06 — reflete o estado real do sistema (pós ADR-004: dispatch table + módulo
 > `nfe/`; DOCX removido; segurança de `responder_botao()`/`atualizar()`/`atualizar_obra()`
@@ -42,7 +43,7 @@ e registra o lançamento A PAGAR no banco.
 **Tecnologias em uso:** Python 3.12+ (3.13 no servidor) · python-telegram-bot 22 (+ `job-queue`/APScheduler) · SQLite ·
 Claude API (Anthropic) · Playwright Chromium (HTML → PDF) · num2words (valor por extenso) ·
 BrasilAPI (Receita Federal) · OneDrive (montado via rclone no servidor) · openpyxl (relatórios `.xlsx`,
-`financeiro/relatorios.py`)
+`financeiro/relatorios.py`) · pdfplumber (leitura do extrato Mercado Pago, sem IA — 2026-10-09)
 
 **Onde roda:** container LXC Debian 13 no Proxmox do Eric, com systemd — ver seção 2.2.
 
@@ -88,8 +89,19 @@ Telegram ──────► bot.py ──────► Claude API (haiku-4-
   `listar_pedidos_pendentes()`, `procurar_item()`. Usadas por `scripts/consultar.py` (CLI) e por
   `financeiro/relatorios.py`
 - **`financeiro/relatorios.py`** (2026-07-03) — gera fluxo de pagamentos por obra e relatório
-  consolidado em Excel (`data/relatorios/*.xlsx`); ainda sem botão/comando no Telegram, só roda
-  chamado manualmente
+  consolidado em Excel (`data/relatorios/*.xlsx`), chamados manualmente (uma linha por pedido —
+  anteriores ao pagamento parcelado e às N NF-e; não usados na prestação de contas). Desde
+  2026-10-09, `gerar_planilha_prestacao_contas()`: planilha no modelo da contabilidade (Diniz) a
+  partir do extrato conciliado — uma linha por movimento, colunas A–H do modelo + Obra, PFM,
+  NF/Recibo, R$ Valor Total, Situação
+- **`financeiro/conciliacao.py`** (esqueleto da Fase 5d, implementado em 2026-10-09) —
+  `processar_extrato_mp()` lê o PDF do extrato do Mercado Pago sem IA (pdfplumber; movimentos
+  separados pelas linhas horizontais, campos reconhecidos pelo formato) e `conferir_saldos()`
+  exige que cada linha feche com o saldo anterior e as somas com Entradas/Saídas — senão
+  `ExtratoInvalido`, nada é gerado. `identificar_correspondencias()` casa cada saída com uma
+  parcela registrada (número da operação no comprovante; senão valor exato + data até 3 dias) e
+  devolve conciliados, saídas a preencher, entradas e pagamentos "fora do extrato". Chamado por
+  `_processar_extrato_mp()` (`bot.py`), no tipo de documento "🏦 Extrato MP"
 - **`compras/`** (2026-07-03) — domínio de Compras, nasce modular desde o primeiro dia (ADR-002).
   `compras/lista.py`: Lista de Compras e Item da Lista (Modelo de Domínio: `docs/MODELO_DOMINIO_COMPRAS.md`),
   todas as funções recebendo `db_path`. Três pontos de entrada em `bot.py` — comando `/lista`
@@ -174,6 +186,13 @@ silenciosamente (não bloqueia nenhum fluxo do Telegram) se o arquivo original n
 Se `pasta_onedrive` estiver vazia para uma obra, os documentos caem em `data/pfms/` em vez de
 falhar — evita gravar no lugar errado por engano. **No servidor, `data/pfms/` é disco local do
 container: não sincroniza com o OneDrive** (caso real: GGV02-005).
+
+**Prestação de contas** (2026-10-09) — `GGV03 › 01 Controle financeiro › Prestação de contas ›
+AAAA-MM` (`OBRA_PRESTACAO_CONTAS`, a obra no RET; a conta Mercado Pago da VII é geral, todas as
+obras): planilha `Prestação de contas - Mercado Pago VII - AAAA-MM.xlsx`, cópia do extrato e
+**cópias** dos comprovantes, NF-e, faturas e recibos dos pagamentos do mês
+(`_copiar_documentos_do_pagamento()` — originais ficam onde estão). Regerar o mês manda a
+planilha anterior para `Old` e não duplica as cópias.
 
 **Pasta `Old`** — arquivo que sai de circulação é movido para uma subpasta `Old`, nunca
 apagado — mesmo padrão já usado à mão nas obras antigas. **Automático desde 2026-10-09
@@ -621,6 +640,12 @@ Referências para navegação no arquivo (6.546 linhas em 2026-10-09):
 ---
 
 ## 6. Limitações Conhecidas
+
+- **Conciliação depende do formato do PDF do Mercado Pago** (2026-10-09) — a leitura é sem IA,
+  pelo layout atual (linhas horizontais entre movimentos, número da operação de 9+ dígitos, "R$"
+  antes dos valores). Se o Mercado Pago mudar o layout, a conferência de saldo falha e a Laura
+  recusa o extrato em vez de gerar planilha errada. O que o Dennis preenche no Excel (obra de
+  saídas sem pedido, categoria de entradas) não volta para a Laura — guardar só se fizer falta.
 
 - **Código de pedido reaproveitado depois de excluir o pedido mais recente** (achado
   2026-10-09; **corrigido e em produção no mesmo dia**) — `proximo_pfm_numero()`

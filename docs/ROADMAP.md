@@ -7,6 +7,10 @@
 > reuso de código de pedido, rastros de "Excluir pedido", órfãos do GGV00-005 — e a GGV02
 > atualizada (já tem pedido fora do OneDrive).
 >
+> Mesma sessão, depois: 0.17.1 a 0.17.4 (contador de pedidos, Excluir sem rastros, bloqueio de
+> obra/tipo, correção da NF-e) e **0.18.0 — conciliação do extrato Mercado Pago + prestação de
+> contas para o RET da GGV03** (Fiada 5d-1, primeira parte).
+>
 > Histórico anterior — 2026-07-11 (**marcador 🔵 no Sistema de Status** — 🟢 reservado ao ciclo
 > fechado (pago + NF-e/fatura/recibos assinados), pago sem fechamento vira 🔵;
 > `_fechamento_fiscal()`/`_emoji_pedido()` fonte única, 3 dicts duplicados removidos;
@@ -76,10 +80,15 @@
 - `financeiro/lancamento.py`: `criar_lancamento_manual()`
 - Aportes, impostos e despesas avulsas sem PFM registráveis via Telegram
 
-**Fiada 5d-1 — Conciliação Mensal** *(planejada)*
+**Fiada 5d-1 — Conciliação Mensal** ✓ *(primeira parte em 2026-10-09, v0.18.0)*
 
-- `financeiro/conciliacao.py` completo
-- Importação extrato Mercado Pago + matching automático + fechamento de período
+- `financeiro/conciliacao.py`: extrato Mercado Pago em PDF lido sem IA, saldo conferido linha a
+  linha, cruzamento automático com os pagamentos registrados (número da operação, depois valor +
+  data)
+- Planilha de prestação de contas no modelo da contabilidade (Diniz), para o RET da GGV03 — ver
+  `docs/ESTADO.md`
+- Ainda não: fechamento de período (mês travado) e guardar no banco o que o Dennis preenche no
+  Excel — só quando houver necessidade real
 
 ---
 
@@ -969,6 +978,12 @@ que `bot.py` parecia "bagunçado".
 > gatilho arquitetural que ainda não ocorreu) não são fiadas — ficam registradas em Dívida Técnica
 > ou no ADR correspondente, sem duplicar aqui como se fossem tarefa da próxima sessão.
 
+0. **Prestação de contas de setembro** *(0.18.0, 2026-10-09)* — Dennis manda o extrato pelo
+   Telegram, preenche no Excel o que a Laura não sabe e leva à Diniz com as perguntas em aberto:
+   conta da VII compartilhada entre obras, aportes, reembolso do GGV03-036 (conta particular).
+   Próximo passo natural, se fizer falta: guardar na Laura o que hoje é preenchido no Excel
+   (obra das saídas sem pedido, categoria das entradas) e registrar a conta de origem de cada
+   pagamento
 1. **Validar o contador de pedidos por obra ao vivo** *(em produção desde 2026-10-09)* —
    `proximo_pfm_numero()` era `MAX+1` sobre os pedidos existentes: excluir o
    pedido mais recente devolvia o número, e o próximo pedido herdava o código (GGV03-029 e

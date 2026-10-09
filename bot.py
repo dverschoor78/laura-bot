@@ -23,6 +23,9 @@ from financeiro.lancamento import (init_db_financeiro, init_db_notas_fiscais, su
                                    CategoriaLancamento, vincular_nfe, trocar_nfe, buscar_candidatos_nfe,
                                    listar_notas_fiscais, remover_nota_fiscal, soma_notas_fiscais)
 from financeiro.consultas import procurar_item
+from financeiro.conciliacao import (processar_extrato_mp, identificar_correspondencias,
+                                    apelido_conta, ExtratoInvalido)
+from financeiro.relatorios import gerar_planilha_prestacao_contas
 from nfe import parse_nfe, mostrar_nfe, teclado_candidatos_nfe, mostrar_troca_nfe, teclado_confirmar_troca_nfe
 from compras import (init_db_compras, criar_ou_buscar_lista_aberta, buscar_lista,
                       atualizar_lista, encerrar_lista, listar_listas_obra,
@@ -344,6 +347,15 @@ def _pasta_entrega(ggv: str) -> Path:
     pasta.mkdir(parents=True, exist_ok=True)
     return pasta
 
+# A prestação de contas da conta Mercado Pago da VII (todas as obras) fica na pasta da GGV03 —
+# a obra no RET —, um subdiretório por mês do extrato (decisão do Dennis, 2026-10-09)
+OBRA_PRESTACAO_CONTAS = "GGV03"
+
+def _pasta_prestacao_contas(ano_mes: str) -> Path:
+    pasta = _pasta_controle_financeiro(OBRA_PRESTACAO_CONTAS) / "Prestação de contas" / ano_mes
+    pasta.mkdir(parents=True, exist_ok=True)
+    return pasta
+
 def _nome_arquivo_seguro(s: str, max_len: int = 60) -> str:
     """Remove caracteres inválidos em nome de arquivo do Windows. Vazio/"A PREENCHER" -> ""."""
     if not s or s == "A PREENCHER":
@@ -405,9 +417,13 @@ def _parse_data_qualquer(data_str):
     m = re.search(r"(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})", s, re.IGNORECASE)
     if m:
         d, mes_nome, y = m.groups()
-        if mes_nome.lower() in MESES:
+        # mês por extenso ou numérico — "12 de 09 de 2026" é o formato real de 12 pagamentos da
+        # GGV03; até 2026-10-09 só o extenso era aceito e esses caíam na data do processamento
+        mes = (MESES.index(mes_nome.lower()) + 1 if mes_nome.lower() in MESES
+               else int(mes_nome) if mes_nome.isdigit() else None)
+        if mes:
             try:
-                return datetime(int(y), MESES.index(mes_nome.lower()) + 1, int(d))
+                return datetime(int(y), mes, int(d))
             except ValueError:
                 pass
     return None
@@ -474,30 +490,58 @@ def _mover_para_old(arquivo: Path) -> bool:
     except OSError:
         return False
 
+def _arquivos_do_pedido(pasta: Path, pfm_codigo: str) -> list:
+    """Arquivos soltos da pasta (sem entrar em subpastas como Old) com o código exato do pedido
+    no nome — 'GGV03-040' pega '-R01' e 'TESTE-', nunca 'GGV03-0400'. Casa por nome, não por
+    registro no banco: _arquivar_documento() nunca grava de volta o caminho pra onde copiou.
+    OSError se a pasta não abrir (ex: OneDrive fora do ar)."""
+    do_pedido = re.compile(rf"(?<![A-Za-z0-9]){re.escape(pfm_codigo)}(?!\d)")
+    return [a for a in sorted(pasta.iterdir()) if a.is_file() and do_pedido.search(a.name)]
+
 def _mover_arquivos_do_pedido_para_old(pfm_codigo: str, marcador: str = "") -> tuple:
     """Move para 'Old' os arquivos do pedido nas pastas da obra (04 Compras, 00 Orçamentos,
     01 Controle financeiro, 05 Entrega) — só os que trazem `marcador` no nome, se informado
-    (ex: "NFe" ao trocar a NF-e). Casa por nome, não por registro no banco:
-    _arquivar_documento() nunca grava de volta o caminho pra onde copiou. Código exato —
-    'GGV03-040' pega também '-R01' e 'TESTE-', nunca 'GGV03-0400'. Retorna (movidos, falhas).
-    Arquivo que sai de circulação vai pra Old, nunca é apagado (2026-10-09, decisão do Dennis)."""
+    (ex: "NFe" ao trocar a NF-e). Retorna (movidos, falhas). Arquivo que sai de circulação vai
+    pra Old, nunca é apagado (2026-10-09, decisão do Dennis)."""
     ggv = pfm_codigo.split("-")[0]
-    do_pedido = re.compile(rf"(?<![A-Za-z0-9]){re.escape(pfm_codigo)}(?!\d)")
     movidos = falhas = 0
     for pasta in (_pasta_pfm(ggv), _pasta_orcamentos(ggv),
                   _pasta_controle_financeiro(ggv), _pasta_entrega(ggv)):
         try:
-            arquivos = sorted(pasta.iterdir())
+            arquivos = _arquivos_do_pedido(pasta, pfm_codigo)
         except OSError:  # OneDrive fora do ar: o banco já foi limpo, então avisa em vez de estourar
             falhas += 1
             continue
         for arquivo in arquivos:
-            if arquivo.is_file() and do_pedido.search(arquivo.name) and marcador in arquivo.name:
+            if marcador in arquivo.name:
                 if _mover_para_old(arquivo):
                     movidos += 1
                 else:
                     falhas += 1
     return movidos, falhas
+
+def _copiar_documentos_do_pagamento(pag: dict, destino: Path) -> None:
+    """Copia para a pasta da prestação de contas os documentos arquivados de um pagamento: o
+    comprovante desta parcela, a fatura e as NF-e do pedido e o recibo desta parcela. Nunca
+    mexe no original e não sobrescreve o que já foi copiado (regerar não duplica)."""
+    pfm, pid = pag["pfm_codigo"], pag["parcela_id"]
+    ggv = pfm.split("-")[0]
+    for pasta in (_pasta_controle_financeiro(ggv), _pasta_entrega(ggv)):
+        try:
+            arquivos = _arquivos_do_pedido(pasta, pfm)
+        except OSError:
+            continue
+        for arquivo in arquivos:
+            nome = arquivo.name
+            base = nome.rsplit(".", 1)[0]
+            deste_pagamento = (base.endswith((f"comprovante-parcela{pid}", f"recibo-parcela{pid}", "- fatura"))
+                               or " - NFe" in nome
+                               or (base.endswith("- comprovante") and pag["qtd_parcelas"] == 1))
+            if deste_pagamento and not (destino / nome).exists():
+                try:
+                    shutil.copy2(arquivo, destino / nome)
+                except OSError:
+                    pass
 
 def _total_pago(pfm_codigo: str) -> float:
     with sqlite3.connect(DB_PATH) as con:
@@ -527,6 +571,14 @@ def _recalcular_status_pagamento(pfm_codigo: str, valor: float, data_pagamento: 
                 (total_pago, pfm_codigo)
             )
     return quitado
+
+def _data_ultima_parcela(pfm_codigo: str) -> Optional[str]:
+    """Data (texto como foi gravado) do pagamento mais recente do pedido — a data de quitação."""
+    with sqlite3.connect(DB_PATH) as con:
+        datas = [r[0] for r in con.execute(
+            "SELECT data_pagamento FROM parcelas_pagamento WHERE pfm_codigo=?", (pfm_codigo,))]
+    validas = [(d, _parse_data_qualquer(d)) for d in datas if _parse_data_qualquer(d)]
+    return max(validas, key=lambda par: par[1])[0] if validas else None
 
 def _registrar_parcela(pfm_codigo, valor, data_pagamento, doc_id_comprovante, identificador_comprovante) -> int:
     with sqlite3.connect(DB_PATH) as con:
@@ -5040,7 +5092,9 @@ async def receber_texto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 con.execute("UPDATE parcelas_pagamento SET data_pagamento=? WHERE id=?", (texto, parcela_id))
         with sqlite3.connect(DB_PATH) as con:
             row_valor = con.execute("SELECT valor FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)).fetchone()
-        _recalcular_status_pagamento(pfm_codigo, row_valor[0] if row_valor else 0)
+        # data do pedido acompanha a correção (antes de 2026-10-09 ficava a antiga — caso GGV03-034)
+        _recalcular_status_pagamento(pfm_codigo, row_valor[0] if row_valor else 0,
+                                     _data_ultima_parcela(pfm_codigo))
         pedido = buscar_pedido(pfm_codigo)
         await update.message.reply_text(_texto_parcelas(pedido), reply_markup=teclado_parcelas(pfm_codigo))
 
@@ -5289,6 +5343,84 @@ async def _cb_set_tipo(query, ctx, partes):
         await query.edit_message_text(texto, reply_markup=markup, parse_mode="HTML")
 
 
+def _qtd(n: int, singular: str, plural: str) -> str:
+    return f"{n} {singular if n == 1 else plural}"
+
+
+def _texto_prestacao_contas(extrato, resultado: dict, n_documentos: int, ano_mes: str) -> str:
+    mes = f"{MESES[extrato.inicio.month - 1]}/{extrato.inicio.year}"
+    linhas = [f"Extrato Mercado Pago · {apelido_conta(extrato)} · {mes}",
+              f"Saldo confere: R$ {_fmt_brl(extrato.saldo_inicial)} + {_fmt_brl(extrato.entradas)} − "
+              f"{_fmt_brl(-extrato.saidas)} = R$ {_fmt_brl(extrato.saldo_final)} ✓", ""]
+    conciliados, fora = resultado["conciliados"], resultado["fora_do_extrato"]
+    if conciliados:
+        obras = {}
+        for _, pag, _ in conciliados:
+            obras[pag["obra"]] = obras.get(pag["obra"], 0) + 1
+        resumo_obras = ", ".join(f"{o}: {n}" for o, n in sorted(obras.items())) if len(obras) > 1 else next(iter(obras))
+        linhas.append(f"✅ {_qtd(len(conciliados), 'pagamento conciliado', 'pagamentos conciliados')} ({resumo_obras})")
+    for mov, pag, _ in conciliados:
+        if pag["data"] != mov.data:
+            linhas.append(f"⚠️ Data diferente: #{pag['pfm_codigo']} — Laura {pag['data']:%d/%m}, extrato {mov.data:%d/%m}")
+    n_saidas, n_entradas = len(resultado["a_preencher"]), len(resultado["entradas"])
+    if n_saidas + n_entradas:
+        partes = [p for p in (n_saidas and _qtd(n_saidas, "saída", "saídas"),
+                              n_entradas and _qtd(n_entradas, "entrada", "entradas")) if p]
+        linhas.append(f"✍️ {_qtd(n_saidas + n_entradas, 'movimento', 'movimentos')} para preencher no "
+                      f"Excel ({', '.join(partes)})")
+    if fora:
+        codigos = ", ".join(f"#{p['pfm_codigo']}" for p in fora)
+        linhas.append(f"↪️ {_qtd(len(fora), 'pagamento', 'pagamentos')} fora do extrato: {codigos} (conta particular)")
+    for mov in resultado["a_preencher"]:  # mesmo valor fora da janela de datas: provável data errada
+        for pag in fora:
+            if abs(pag["valor"] + mov.valor) < 0.01:
+                linhas.append(f"⚠️ Confira a data: #{pag['pfm_codigo']} (Laura {pag['data']:%d/%m}) tem o "
+                              f"mesmo valor da saída de {mov.data:%d/%m} no extrato")
+    linhas += ["", f"Planilha e {_qtd(n_documentos, 'documento', 'documentos')} em",
+               f"{OBRA_PRESTACAO_CONTAS} › 01 Controle financeiro › Prestação de contas › {ano_mes}"]
+    return "\n".join(linhas)
+
+
+async def _processar_extrato_mp(query, ctx, doc_id: int, caminho_doc: str):
+    """Extrato do Mercado Pago → conciliação → planilha de prestação de contas no modelo da
+    contabilidade, salva com os documentos do mês na pasta da GGV03 (2026-10-09). O registro do
+    extrato é descartado no fim (a cópia fica na pasta do mês) — o mesmo PDF pode ser reenviado
+    pra regerar a planilha; a anterior, com o que já foi preenchido, vai pra Old."""
+    if not str(caminho_doc).lower().endswith(".pdf"):
+        _descartar_documento(doc_id)
+        await query.edit_message_text("Envie o extrato em PDF, exportado pelo app do Mercado Pago.")
+        return
+    await query.edit_message_text("Lendo o extrato...")
+    try:
+        extrato = processar_extrato_mp(caminho_doc)
+    except ExtratoInvalido as e:
+        _descartar_documento(doc_id)
+        await query.edit_message_text(f"Não consegui conferir este extrato: {e}. Nada foi gerado.")
+        return
+    resultado = identificar_correspondencias(extrato, DB_PATH)
+    ano_mes = f"{extrato.inicio:%Y-%m}"
+    conta = apelido_conta(extrato)
+    pasta = _pasta_prestacao_contas(ano_mes)
+    planilha = pasta / f"Prestação de contas - Mercado Pago {conta} - {ano_mes}.xlsx"
+    if planilha.exists():
+        _mover_para_old(planilha)
+    gerar_planilha_prestacao_contas(extrato, resultado, DB_PATH, planilha)
+    copia_extrato = pasta / f"Extrato Mercado Pago {conta} {ano_mes}.pdf"
+    if not copia_extrato.exists():
+        shutil.copy2(caminho_doc, copia_extrato)
+    for _, pag, _ in resultado["conciliados"]:
+        _copiar_documentos_do_pagamento(pag, pasta)
+    for pag in resultado["fora_do_extrato"]:
+        _copiar_documentos_do_pagamento(pag, pasta)
+    n_documentos = sum(1 for a in pasta.iterdir() if a.is_file() and a != planilha)
+    _descartar_documento(doc_id)
+    await query.edit_message_text(_texto_prestacao_contas(extrato, resultado, n_documentos, ano_mes))
+    await ctx.bot.send_document(
+        chat_id=DONO_ID, document=planilha.read_bytes(), filename=planilha.name,
+        caption=f"Prestação de contas — {MESES[extrato.inicio.month - 1]}/{extrato.inicio.year}"
+    )
+
+
 async def _cb_sel_tipo_inicial(query, ctx, partes):
     _, doc_id, tipo = partes
     with sqlite3.connect(DB_PATH) as con:
@@ -5304,6 +5436,10 @@ async def _cb_sel_tipo_inicial(query, ctx, partes):
     pfm_codigo = _pedido_do_documento(int(doc_id))
     if pfm_codigo:
         await _cb_pedido_abrir(query, ctx, ["pedido_abrir", pfm_codigo])
+        return
+
+    if tipo == "extrato_mp":  # lido sem IA (formato fixo) — conciliação + prestação de contas
+        await _processar_extrato_mp(query, ctx, int(doc_id), caminho_doc)
         return
 
     if tipo == "foto_entrega":

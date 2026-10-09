@@ -58,6 +58,37 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.18.0] — Conciliação do extrato Mercado Pago + prestação de contas — 2026-10-09
+
+### Motivação
+
+A GGV03 vai para o RET, e a contabilidade (Diniz) pediu a prestação de contas num modelo próprio
+(PAGAMENTOS e RECEBIMENTOS). A conta Mercado Pago da VII paga várias obras, e nem todas estão na
+Laura — a conciliação com o extrato mostra o que está registrado e o que falta.
+
+### Adicionado
+
+- **Extrato Mercado Pago (PDF)**: escolha "🏦 Extrato MP" ao enviar. A Laura lê o extrato sem IA,
+  confere o saldo linha a linha (se não fechar, avisa e não gera nada) e cruza cada saída com os
+  pagamentos registrados — pelo número da operação ou por valor e data.
+- **Planilha de prestação de contas** no modelo da Diniz: colunas A–H iguais + Obra, PFM,
+  NF/Recibo, R$ Valor Total e Situação (Conciliado / Preencher / Fora do extrato). Uma linha por
+  movimento; pagamentos feitos por outra conta no fim. O que a Laura não sabe fica em branco para
+  preencher no Excel.
+- Salva em `GGV03 › 01 Controle financeiro › Prestação de contas › AAAA-MM`, com cópia do extrato e
+  dos comprovantes, NF-e, faturas e recibos do mês; a planilha também chega no Telegram. Mandar o
+  extrato de novo regera a planilha — a anterior vai para `Old`.
+
+### Corrigido
+
+- Datas no formato "12 de 09 de 2026" (mês numérico) não eram reconhecidas: o comprovante era
+  arquivado com a data do processamento (Lição #16).
+- "✏️ Corrigir parcela" corrigia a data do pagamento mas não a do pedido.
+- GGV03-034: data do pagamento corrigida de 17/09 para 11/09 (leitura errada, confirmada pelo
+  extrato).
+
+---
+
 ## [0.17.4] — Correção da leitura da NF-e — 2026-10-09
 
 ### Motivação

@@ -353,6 +353,30 @@ pra qualquer prompt de texto livre que mostre exemplos no formato exato do que e
 
 ---
 
+## 16. Data com mês numérico por extenso ("12 de 09 de 2026") não era reconhecida
+
+**Sintoma:** comprovantes cuja data a IA escreve como "10 de 09 de 2026" foram arquivados com a
+data do **processamento** no nome (FUNREJUS pago em 10/09 virou `2026-09-11 GGV03-030 …`). 12 dos
+45 pagamentos da GGV03 têm esse formato. Achado em 2026-10-09, conciliando o extrato de setembro.
+
+**Causa raiz:** `_parse_data_qualquer()` só aceitava "DD de **mês por extenso** de AAAA"; com mês
+numérico devolvia `None`, e `_data_para_arquivo()` caía em "hoje". Recorrência da Lição #5.
+
+**Correção:** o formato "DD de MM de AAAA" passou a aceitar mês numérico (em `bot.py` e na cópia
+da regra em `financeiro/conciliacao.py`). Arquivos já arquivados com a data errada não foram
+renomeados.
+
+**Lição geral:** a IA não escolhe um formato de data só — por extenso, numérico, misturado. Todo
+parser de data precisa de teste com cada formato real já visto no banco, não só com os
+"bonitos". E quando o parser falha, cair em "hoje" esconde o erro: o nome do arquivo fica
+plausível e errado.
+
+**Caso vizinho, mesmo dia:** no comprovante do GGV03-034 a IA leu "11" como "17" (pagamento em
+11/09). O extrato do banco é a referência: a conciliação mostra "Data diferente" quando a data
+gravada não bate com o extrato.
+
+---
+
 ## Padrão geral por trás de tudo isso
 
 Três famílias de bug, não uma só.
@@ -384,6 +408,6 @@ Item 15 abre uma quarta frente: **entrada humana contaminada** — o texto digit
 usuário pode conter a própria pergunta do bot; validação de entrada precisa reconhecer isso.
 
 Regra prática comum a todas as famílias: testar contra pelo menos um caso real de produção antes
-de considerar corrigido — não só contra dado fictício. Foi assim que todos os 15 casos acima foram
+de considerar corrigido — não só contra dado fictício. Foi assim que todos os 16 casos acima foram
 confirmados (lendo o PDF/imagem real ou consultando o banco de produção, não assumindo a partir do
 sintoma).

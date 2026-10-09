@@ -18,6 +18,7 @@ from pathlib import Path
 from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
 
 def _criar_diretorio_relatorios():
@@ -551,6 +552,160 @@ def gerar_relatorio_pagamentos(db_path: Path, output_dir: Path = None) -> Path:
     wb.save(output_file)
 
     return output_file
+
+
+# ── Prestação de contas da conta Mercado Pago (modelo da contabilidade Diniz, 2026-10-09) ──────
+
+_CATEGORIA_ROTULO = {"material": "Material", "mo": "Mão de obra", "servicos": "Serviços",
+                     "taxa": "Taxa", "imposto": "Imposto", "servico_publico": "Serviço público"}
+_SEM_NFE_OBRIGATORIA = {"taxa", "imposto", "servico_publico"}
+BANCO_FORA_DO_EXTRATO = "Conta particular (Dennis)"  # decisão do Dennis, caso GGV03-036
+_PREFIXOS_OPERACAO = ("Pagamento com QR Pix", "Pagamento com Pix", "Pagamento de conta",
+                      "Pix enviado", "Pix recebido", "Transferência enviada", "Transferência recebida")
+
+_CAB_PAGAMENTOS = ["Data Pagamento", "Documento", "Fornecedor /  Descrição Pagamento",
+                   "Detalhes do pagamento", "Valor Original", "Valor Pago", "Banco (Portador)",
+                   "Categoria (despesa)", "Obra", "PFM", "NF/Recibo", "R$ Valor Total", "Situação"]
+_CAB_RECEBIMENTOS = ["Data Recebimento", "Documento", "Cliente /  Descrição Receita",
+                     "Detalhes do Recebimento", "Valor Original", "Valor Recebido",
+                     "Banco (Portador)", "Categoria (Receita)", "Obra", "Situação"]
+_LARGURAS_MODELO = [19.4, 14.3, 43.5, 31.8, 16.8, 16.8, 24.0, 27.6]  # A–H do modelo (F e G ampliadas)
+_LARGURAS_EXTRAS = {"Obra": 9.0, "PFM": 12.0, "NF/Recibo": 22.0, "R$ Valor Total": 16.0, "Situação": 30.0}
+
+
+def _operacao_e_contraparte(descricao: str) -> tuple:
+    """'Pix enviado Capital Vidros Ltda' → ('Pix enviado', 'Capital Vidros Ltda')."""
+    for prefixo in _PREFIXOS_OPERACAO:
+        if descricao.startswith(prefixo):
+            return prefixo, descricao[len(prefixo):].strip()
+    return "", descricao
+
+
+def _documentos_dos_pedidos(db_path, pagamentos: list) -> tuple:
+    """NF-e por pedido, resumo da compra por pedido e situação do recibo por parcela."""
+    pfms = sorted({p["pfm_codigo"] for p in pagamentos})
+    nfes, resumos, recibos = {}, {}, {}
+    if not pfms:
+        return nfes, resumos, recibos
+    marcas = ",".join("?" * len(pfms))
+    with sqlite3.connect(db_path) as con:
+        for pfm, numero in con.execute(
+                f"SELECT pfm_codigo, numero FROM notas_fiscais_pedido WHERE pfm_codigo IN ({marcas}) ORDER BY id", pfms):
+            nfes.setdefault(pfm, []).append(numero or "s/nº")
+        for pfm, resumo, dados in con.execute(
+                f"SELECT l.pfm_codigo, l.resumo_compra, d.dados_claude FROM lancamentos l "
+                f"LEFT JOIN documentos d ON d.id = l.doc_id WHERE l.pfm_codigo IN ({marcas})", pfms):
+            if not resumo and dados:
+                m = re.search(r"Resumo da compra:\**\s*(.+)", dados)
+                resumo = m.group(1).strip(" *") if m else None
+            resumos[pfm] = resumo
+        ids = [p["parcela_id"] for p in pagamentos]
+        for pid, gerado, assinado in con.execute(
+                f"SELECT id, doc_id_recibo IS NOT NULL, doc_id_recibo_assinado IS NOT NULL "
+                f"FROM parcelas_pagamento WHERE id IN ({','.join('?' * len(ids))})", ids):
+            recibos[pid] = "Recibo assinado" if assinado else ("Recibo pendente" if gerado else None)
+    return nfes, resumos, recibos
+
+
+def _nf_ou_recibo(pag: dict, nfes: dict, recibos: dict) -> str:
+    if pag["pfm_codigo"] in nfes:
+        return "NF-e " + ", ".join(nfes[pag["pfm_codigo"]])
+    if pag["categoria"] in _SEM_NFE_OBRIGATORIA:
+        return "Fatura"
+    if recibos.get(pag["parcela_id"]):
+        return recibos[pag["parcela_id"]]
+    return "Recibo pendente" if pag["categoria"] == "mo" else "Pendente"
+
+
+def _linha_pagamento(pag: dict, nfes: dict, resumos: dict, recibos: dict, operacao: str) -> list:
+    """Colunas C..M de um pagamento registrado. Valor Original: valor do pedido quando foi pago
+    de uma vez; valor da própria parcela quando é parcelado (regra do Dennis, 2026-10-09)."""
+    unico = pag["qtd_parcelas"] == 1 and pag["status"] == "pago"
+    resumo = resumos.get(pag["pfm_codigo"])
+    detalhe = "pagamento único" if unico else f"parcela {pag['ordem']}"
+    return [
+        pag["fornecedor"] + (f" — {resumo}" if resumo else ""),
+        f"{operacao} · {detalhe}" if operacao else detalhe,
+        pag["valor_pedido"] if unico else pag["valor"],
+        pag["valor"],
+        None,  # banco: preenchido por quem chama
+        _CATEGORIA_ROTULO.get(pag["categoria"], pag["categoria"] or ""),
+        pag["obra"], pag["pfm_codigo"], _nf_ou_recibo(pag, nfes, recibos), pag["valor_pedido"],
+    ]
+
+
+def gerar_planilha_prestacao_contas(extrato, resultado: dict, db_path, caminho_xlsx: Path) -> Path:
+    """Planilha de prestação de contas da conta Mercado Pago no modelo da contabilidade (Diniz):
+    abas PAGAMENTOS e RECEBIMENTOS, colunas A–H do modelo + Obra, PFM, NF/Recibo, R$ Valor Total
+    e Situação (decisões do Dennis, 2026-10-09). Uma linha por movimento do extrato; pagamentos
+    registrados que não passaram por esta conta vão no fim, como "Fora do extrato". O que a Laura
+    não sabe fica em branco, com Situação "Preencher"."""
+    from financeiro.conciliacao import apelido_conta  # aqui: o módulo também roda como script
+    banco = f"Mercado Pago {apelido_conta(extrato)}"
+    conciliados = {id(mov): (pag, como) for mov, pag, como in resultado["conciliados"]}
+    pagamentos = [pag for _, pag, _ in resultado["conciliados"]] + resultado["fora_do_extrato"]
+    nfes, resumos, recibos = _documentos_dos_pedidos(db_path, pagamentos)
+
+    wb = Workbook()
+    ws_pag = wb.active
+    ws_pag.title = "PAGAMENTOS"
+    ws_rec = wb.create_sheet("RECEBIMENTOS")
+    negrito = Font(bold=True)
+    for ws, cab in ((ws_pag, _CAB_PAGAMENTOS), (ws_rec, _CAB_RECEBIMENTOS)):
+        for col, titulo in enumerate(cab, 1):
+            ws.cell(row=2, column=col, value=titulo).font = negrito
+            ws.column_dimensions[get_column_letter(col)].width = (
+                _LARGURAS_MODELO[col - 1] if col <= len(_LARGURAS_MODELO) else _LARGURAS_EXTRAS[titulo])
+        ws.freeze_panes = "A3"
+
+    def escreve(ws, linha, valores):
+        for col, valor in enumerate(valores, 1):
+            cel = ws.cell(row=linha, column=col, value=valor)
+            if col == 1 and valor is not None:
+                cel.number_format = "DD/MM/YY"
+            elif isinstance(valor, float):
+                cel.number_format = "#,##0.00"
+
+    def total(ws, linha, rotulo, valor):
+        ws.cell(row=linha, column=1, value=rotulo).font = negrito
+        cel = ws.cell(row=linha, column=6, value=round(valor, 2))
+        cel.font, cel.number_format = negrito, "#,##0.00"
+
+    linha = 3
+    for mov in (m for m in extrato.movimentos if m.valor < 0):
+        operacao, contraparte = _operacao_e_contraparte(mov.descricao)
+        if id(mov) in conciliados:
+            pag, _ = conciliados[id(mov)]
+            c_m = _linha_pagamento(pag, nfes, resumos, recibos, operacao)
+            c_m[4] = banco
+            situacao = "Conciliado" + (f" · data na Laura {pag['data']:%d/%m}" if pag["data"] != mov.data else "")
+            escreve(ws_pag, linha, [mov.data, mov.id_operacao] + c_m + [situacao])
+        else:
+            escreve(ws_pag, linha, [mov.data, mov.id_operacao, contraparte, operacao, -mov.valor,
+                                    -mov.valor, banco, None, None, None, None, None, "Preencher"])
+        linha += 1
+    total(ws_pag, linha, "TOTAL NO EXTRATO", -sum(m.valor for m in extrato.movimentos if m.valor < 0))
+    if resultado["fora_do_extrato"]:
+        linha += 2
+        for pag in resultado["fora_do_extrato"]:
+            c_m = _linha_pagamento(pag, nfes, resumos, recibos, "Pago fora do extrato")
+            c_m[4] = BANCO_FORA_DO_EXTRATO
+            escreve(ws_pag, linha, [pag["data"], pag["identificador"] or None] + c_m + ["Fora do extrato"])
+            linha += 1
+        total(ws_pag, linha, "PAGO FORA DO EXTRATO", sum(p["valor"] for p in resultado["fora_do_extrato"]))
+
+    linha = 3
+    for mov in resultado["entradas"]:
+        operacao, contraparte = _operacao_e_contraparte(mov.descricao)
+        escreve(ws_rec, linha, [mov.data, mov.id_operacao, contraparte, operacao, mov.valor,
+                                mov.valor, banco, None, None, "Preencher"])
+        linha += 1
+    total(ws_rec, linha, "TOTAL", sum(m.valor for m in resultado["entradas"]))
+
+    caminho_xlsx = Path(caminho_xlsx)
+    caminho_xlsx.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(caminho_xlsx)
+    return caminho_xlsx
 
 
 if __name__ == "__main__":

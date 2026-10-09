@@ -67,12 +67,24 @@
 >   errada** pelo cockpit (08/08); `Restart=always` nos dois serviços (12/08); **menu ao
 >   reenviar arquivo já recebido** — descartar e liberar reenvio, ou manter (12/08). Detalhes
 >   no CHANGELOG.
-> - **4 entregas na mesma sessão, todas em produção** (planos aprovados pelo Dennis antes do
->   código; detalhe em Última Fiada Implementada): **0.17.1** código de pedido nunca
->   reaproveitado (contador por obra); **0.17.2** "Excluir pedido" sem rastros, arquivos para
->   `Old`; **0.17.3** pedido gerado não muda de obra nem de tipo; **0.17.4** correção da
->   leitura da NF-e (pedido do Dennis). A validar no uso real: próximo pedido da GGV03 =
->   **GGV03-040**; próxima NF-e recebida com "✏️ Corrigir dados".
+> - **5 entregas na mesma sessão** (planos aprovados pelo Dennis antes do código; detalhe em
+>   Última Fiada Implementada): **0.17.1** código de pedido nunca reaproveitado (contador por
+>   obra); **0.17.2** "Excluir pedido" sem rastros, arquivos para `Old`; **0.17.3** pedido gerado
+>   não muda de obra nem de tipo; **0.17.4** correção da leitura da NF-e (pedido do Dennis);
+>   **0.18.0** conciliação do extrato do Mercado Pago + planilha de prestação de contas no modelo
+>   da contabilidade (Diniz), para o RET da GGV03. A validar no uso real: próximo pedido da GGV03
+>   = **GGV03-040**; próxima NF-e com "✏️ Corrigir dados"; extrato de setembro enviado pelo Dennis.
+> - **Contexto do RET (2026-10-09)**: a contabilidade Diniz mandou um modelo de prestação de
+>   contas (PAGAMENTOS e RECEBIMENTOS, 8 colunas). A conta Mercado Pago da VII paga **várias
+>   obras** — a planilha é geral da conta, com coluna Obra; o que a Laura não sabe (obras não
+>   cadastradas, como a GGV02, e as entradas) o Dennis preenche no Excel. Recebimentos = aportes
+>   (e, em outubro, dois empréstimos do Dennis de R$ 10 mil, que serão reembolsados).
+>   **GGV03-036** (ONR, R$ 1.322,41) foi pago pela conta particular do Dennis — sai "Fora do
+>   extrato" na planilha; reembolso ou aporte é decisão da Diniz. **GGV03-034**: data corrigida
+>   de 17/09 para 11/09 (a IA leu errado; o extrato e o código do PIX confirmam), pelo mesmo
+>   caminho da tela "Corrigir parcela", com cópia de segurança do banco antes. A pedido do
+>   Dennis, as perguntas à Diniz (conta compartilhada, aportes, reembolso) ficam para depois de
+>   ele ter a primeira planilha.
 
 > Atualizado em: 2026-08-28 — **N NF-e por pedido — implementado, testado, deployado e
 > validado em produção no mesmo dia** (ver entrada de 2026-10-09). Gatilho: Dennis reportou o **GGV03-025** (Operador Nacional do
@@ -306,6 +318,12 @@ container (SSH + tmux + Claude Code), sem nada a abrir no firewall do Eric.
 
 ## Versão Atual
 
+**v0.18.0** — Conciliação do extrato do Mercado Pago: o PDF do extrato é lido sem IA, com o
+saldo conferido linha a linha, cruzado com os pagamentos registrados e transformado na planilha
+de prestação de contas no modelo da contabilidade (abas PAGAMENTOS e RECEBIMENTOS + Obra, PFM,
+NF/Recibo, R$ Valor Total, Situação), salva com o extrato e os documentos do mês em
+`GGV03 › 01 Controle financeiro › Prestação de contas › AAAA-MM`
+
 **v0.17.4** — Correção da leitura da NF-e: "✏️ Corrigir dados" (valor, número, emitente,
 CNPJ/CPF, data) na chegada e na prévia da troca; NF-e sem pedido correspondente fica para
 corrigir ou descartar; troca grava valor e número; leitura do valor com a regra da Lição #4 —
@@ -393,6 +411,10 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
   corrigir ou descartar, não é descartada sozinha
 - Exclusão de pedido (cadastro errado): apaga tudo dele na Laura e move os arquivos dele no
   OneDrive para `Old`; o código nunca é reaproveitado
+- Conciliação do extrato do Mercado Pago (PDF, tipo "🏦 Extrato MP"): saldo conferido linha a
+  linha, cruzamento com os pagamentos registrados e planilha de prestação de contas no modelo da
+  contabilidade, salva com o extrato e os documentos do mês em
+  `GGV03 › 01 Controle financeiro › Prestação de contas › AAAA-MM` e enviada no Telegram
 - Correção manual do comprovante PIX antes do vínculo (valor, data, favorecido, CNPJ/CPF) e
   de parcela já registrada (bloqueada quando o recibo da parcela está assinado)
 - Reenvio de arquivo já recebido: descartar e liberar reenvio, ou manter como está
@@ -430,6 +452,52 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 ---
 
 ## Última Fiada Implementada
+
+**Conciliação do extrato Mercado Pago + prestação de contas (RET da GGV03)** *(2026-10-09)*
+
+Gatilho: modelo de prestação de contas da contabilidade Diniz (enquadramento da GGV03 no RET) e
+o extrato de setembro da conta Mercado Pago da VII, que paga várias obras — muitas delas (GGV02)
+sem lançamento na Laura. Análise feita antes, sem criar nada: dos 18 movimentos de setembro, 10
+saídas eram da GGV03 e já estavam na Laura, 5 saídas e 3 entradas não, e 1 pagamento da GGV03
+(036) tinha saído de outra conta. Plano, colunas e mensagem aprovados pelo Dennis antes do
+código.
+
+**Fluxo**: o Dennis manda o PDF e escolhe "🏦 Extrato MP" → `processar_extrato_mp()`
+(`financeiro/conciliacao.py`, o esqueleto da Fase 5d virou código) lê o PDF **sem IA** com
+`pdfplumber` — cada movimento fica entre duas linhas horizontais; data, número da operação, valor
+e saldo são reconhecidos pelo formato — e `conferir_saldos()` exige que cada linha feche com o
+saldo anterior, a última com o saldo final e as somas com Entradas/Saídas (senão recusa e não gera
+nada). `identificar_correspondencias()` casa cada saída com um pagamento registrado (todas as
+obras): primeiro pelo número da operação (aparece no comprovante), depois por valor exato + data
+até 3 dias; devolve conciliados, saídas a preencher, entradas e pagamentos do período que não
+passaram pela conta ("fora do extrato"). `gerar_planilha_prestacao_contas()`
+(`financeiro/relatorios.py`) monta a planilha no modelo da Diniz: colunas A–H iguais (cabeçalho
+na linha 2, data DD/MM/AA) + Obra, PFM, NF/Recibo, R$ Valor Total e Situação (Conciliado /
+Preencher / Fora do extrato); Valor Original = valor do pedido quando pago de uma vez, da parcela
+quando parcelado. `_processar_extrato_mp()` (`bot.py`) salva a planilha, uma cópia do extrato e
+cópias dos comprovantes, NF-e, faturas e recibos dos pagamentos em
+`GGV03 › 01 Controle financeiro › Prestação de contas › AAAA-MM` (`OBRA_PRESTACAO_CONTAS`), manda a
+planilha no Telegram e descarta o registro do extrato — o mesmo PDF pode ser reenviado para regerar;
+a planilha anterior, com o que o Dennis já preencheu, vai para `Old`. Nada novo no banco nesta
+versão: o que o Dennis preenche fica no Excel.
+
+**Junto, dois erros de data** (Lição #16 em `LICOES_EXTRACAO.md`): `_parse_data_qualquer()` não
+aceitava "12 de 09 de 2026" (mês numérico) — 12 pagamentos da GGV03 — e caía na data do
+processamento; e "✏️ Corrigir parcela" atualizava a data do pagamento mas não a do pedido
+(`_data_ultima_parcela()` resolve). `_arquivos_do_pedido()` saiu de dentro de
+`_mover_arquivos_do_pedido_para_old()` para ser usado também na cópia dos documentos.
+`pdfplumber` (já prevista no `pyproject.toml`) entrou no `requirements.txt` com as dependências.
+
+**Testado** (nada tocou produção): 44 verificações — leitura do extrato real (18 movimentos,
+saldos, palavras quebradas juntas), extrato adulterado recusado ("o saldo não fecha no movimento
+de 10/09…"), PDF que não é extrato recusado; conciliação na cópia do banco de produção (10
+conciliados na ordem do extrato, 5 + 3 a preencher, GGV03-036 fora do extrato); planilha lida de
+volta, linha a linha e totais (R$ 18.425,82 no extrato, R$ 1.322,41 fora); fluxo completo pelo
+handler real (mensagem, pasta do mês com os documentos certos e sem os de outro mês, originais
+intactos, regerar sem duplicar); datas nos 4 formatos reais; "Corrigir parcela" atualizando o
+pedido. Regressão: NF-e, bloqueio, exclusão e numeração passando.
+
+---
 
 **Correção da leitura da NF-e** *(2026-10-09, mesma sessão — pedido do Dennis)*
 
@@ -2182,6 +2250,11 @@ da lista abaixo):
   real da GGV03 tem que sair GGV03-040
 - ✓ **Bloquear a troca de obra/tipo de pedido já gerado** — feito em 0.17.3 (2026-10-09)
 - ✓ **Corrigir dados da NF-e antes de vincular** (pedido do Dennis) — feito em 0.17.4
+- **Prestação de contas de setembro** — Dennis manda o extrato pelo Telegram, preenche no Excel
+  o que a Laura não sabe (obra das saídas sem lançamento, categoria das entradas) e leva à Diniz
+  com as perguntas: conta compartilhada entre obras, aportes, reembolso do GGV03-036
+- Arquivos arquivados com a data do processamento por causa da Lição #16 (ex: FUNREJUS de 10/09
+  como `2026-09-11 …`) — renomear só se o Dennis quiser
 - **GGV02** — decidir o arquivamento (item 6): já há pedido fora do OneDrive
 
 1. **Validar a Consultoria de Recompra ao vivo em produção** — implementada e testada com
