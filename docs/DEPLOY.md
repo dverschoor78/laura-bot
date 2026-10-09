@@ -2,6 +2,11 @@
 
 > Criado em 2026-07-10. Alvo real: container **109 (laura)** no node `grow1` do Proxmox
 > do Eric — Debian LXC (community-scripts), unprivileged, 2 vCPU, 2 GB RAM, 20 GB disco.
+>
+> **Atualizado em 2026-10-09**: o corte de produção foi executado em agosto/2026. Caminho e
+> nome de serviço abaixo são os reais (`/opt/laura-bot`, `laura-bot.service`) — a primeira
+> versão deste roteiro dizia `/opt/laura` e `laura.service`. Estado atual do servidor:
+> `docs/ARQUITETURA.md`, seção 2.2.
 
 ## Visão geral
 
@@ -34,21 +39,21 @@ O repositório é **privado** (`github.com/dverschoor78/laura-bot`). No containe
 
 ```bash
 cd /opt
-git clone https://github.com/dverschoor78/laura-bot.git laura
-cd laura
+git clone https://github.com/dverschoor78/laura-bot.git laura-bot
+cd laura-bot
 ```
 
 Pro clone funcionar num repo privado, usar um **fine-grained personal access token**
 (GitHub → Settings → Developer settings → tokens, só leitura de conteúdo, só neste repo)
 como senha do clone — ou adicionar uma deploy key. Nunca gravar o token em arquivo do repo.
 
-> O caminho `/opt/laura` é o assumido pelas units do systemd. Se mudar, ajustar
-> `deploy/laura.service` antes do passo 3.
+> O caminho `/opt/laura-bot` é o assumido pelas units do systemd. Se mudar, ajustar
+> `deploy/laura-bot.service` antes do passo 3.
 
 ## 3. Setup automático
 
 ```bash
-cd /opt/laura
+cd /opt/laura-bot
 bash deploy/setup.sh
 ```
 
@@ -81,9 +86,9 @@ do Windows do Dennis (Tailscale + scp, ou qualquer canal seguro):
 
 ```bash
 # exemplo, rodando NO WINDOWS (PowerShell), com Tailscale nos dois lados:
-scp .env root@100.x.y.z:/opt/laura/.env
-scp data/laura.db root@100.x.y.z:/opt/laura/data/laura.db
-scp -r data/uploads root@100.x.y.z:/opt/laura/data/
+scp .env root@100.x.y.z:/opt/laura-bot/.env
+scp data/laura.db root@100.x.y.z:/opt/laura-bot/data/laura.db
+scp -r data/uploads root@100.x.y.z:/opt/laura-bot/data/
 ```
 
 No `.env` do servidor, ajustar/garantir:
@@ -102,7 +107,7 @@ bancos divergem. O corte é: parar no Windows → copiar → subir no servidor.
 (`C:\Users\denni\OneDrive\...`). Converter pra relativo (resolvido contra `ONEDRIVE_PATH`):
 
 ```bash
-cd /opt/laura
+cd /opt/laura-bot
 .venv/bin/python scripts/migrar_caminhos_obras.py            # dry-run, confere o que muda
 .venv/bin/python scripts/migrar_caminhos_obras.py --aplicar  # grava
 ```
@@ -113,7 +118,7 @@ Proteção no código: se um caminho Windows não migrado chegar num host Linux,
 ## 7. Testar antes de produção
 
 ```bash
-cd /opt/laura
+cd /opt/laura-bot
 LAURA_ENV=test .venv/bin/python bot.py
 ```
 
@@ -123,19 +128,19 @@ Mandar um documento de teste pelo Telegram, conferir a resposta e um PDF gerado
 ## 8. Subir em produção
 
 ```bash
-systemctl enable --now laura
-systemctl status laura            # deve estar "active (running)"
-journalctl -u laura -f            # acompanhar o log ao vivo
+systemctl enable --now laura-bot
+systemctl status laura-bot        # deve estar "active (running)"
+journalctl -u laura-bot -f        # acompanhar o log ao vivo
 ```
 
 ## 9. Operação
 
 | Ação | Comando |
 |---|---|
-| Ver log | `journalctl -u laura -f` |
-| Reiniciar (após `git pull`) | `systemctl restart laura` |
-| Parar | `systemctl stop laura` |
-| Atualizar código | `cd /opt/laura && git pull && systemctl restart laura` |
+| Ver log | `journalctl -u laura-bot -f` |
+| Reiniciar (após `git pull`) | `systemctl restart laura-bot` |
+| Parar | `systemctl stop laura-bot` |
+| Atualizar código | `cd /opt/laura-bot && git pull && systemctl restart laura-bot` |
 | Status do OneDrive | `systemctl status rclone-onedrive` |
 
 **Backup**: snapshot do CT no Proxmox (pedir ao Eric um agendamento) já cobre tudo —
@@ -143,13 +148,15 @@ banco, uploads, config. O que é insubstituível: `data/laura.db`, `data/uploads
 
 ## Checklist do corte de produção
 
-- [ ] Features FUSE + Nesting habilitadas no CT (Eric)
-- [ ] `setup.sh` concluído sem erro
-- [ ] `rclone lsd onedrive:` lista as pastas reais
-- [ ] `.env` copiado, com `ONEDRIVE_PATH=/mnt/onedrive`
-- [ ] Bot do Windows **PARADO**
-- [ ] `data/` copiado (laura.db + uploads)
-- [ ] Migração de caminhos aplicada (`--aplicar`)
-- [ ] Teste em `LAURA_ENV=test` OK (mensagem + PDF)
-- [ ] `systemctl enable --now laura`
-- [ ] Documento real processado de ponta a ponta, arquivo apareceu no OneDrive
+> Corte executado em agosto/2026; itens conferidos contra o servidor em 2026-10-09.
+
+- [x] Features FUSE + Nesting habilitadas no CT (Eric)
+- [x] `setup.sh` concluído sem erro
+- [x] `rclone lsd onedrive:` lista as pastas reais
+- [x] `.env` copiado, com `ONEDRIVE_PATH=/mnt/onedrive`
+- [x] Bot do Windows **PARADO**
+- [x] `data/` copiado (laura.db + uploads)
+- [x] Migração de caminhos aplicada (`--aplicar`) — GGV00/GGV03 com caminho relativo
+- [x] Teste em `LAURA_ENV=test` OK (mensagem + PDF) — obra de teste GGV99
+- [x] `systemctl enable --now laura-bot`
+- [x] Documento real processado de ponta a ponta, arquivo apareceu no OneDrive

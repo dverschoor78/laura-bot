@@ -1,7 +1,51 @@
 # Estado do Projeto Laura
 
-> Atualizado em: 2026-08-28 — **N NF-e por pedido — implementado, testado, aguardando deploy
-> e validação em produção**. Gatilho: Dennis reportou o **GGV03-025** (Operador Nacional do
+> Atualizado em: 2026-10-09 — **Alinhamento documentos × produção + diagnóstico do GGV03-029**.
+> A abertura da sessão (Jeito Claude) conferiu os documentos contra o servidor e o banco de
+> produção, só com leitura, e achou os documentos atrasados desde 28/08. Corrigidos nesta
+> sessão: ESTADO, ROADMAP, CHANGELOG, ARQUITETURA e DEPLOY.
+>
+> - **Produção no servidor**: container `laura` (192.168.1.72, Debian 13, Python 3.13 em
+>   `.venv`), código em `/opt/laura-bot` = `main` (`17fd260`), `laura-bot.service` e
+>   `rclone-onedrive.service` ativos com `Restart=always`, OneDrive em `/mnt/onedrive`. O rclone
+>   roda só pelo systemd (o processo manual duplicado que causava o crash-loop em 07/08 não
+>   existe mais). Caminhos de GGV00/GGV03 já relativos. Bot do Windows desligado.
+> - **Mais de uma NF-e por pedido — validado em 28/08**: as duas NFS-e do GGV03-025 (10474 e
+>   10475, R$ 83,39 cada) vinculadas ao vivo. Pendência da entrada de 28/08 encerrada.
+> - **GGV03-029 — não havia duplicidade no banco**: nenhum registro 029 existe. O Tabelionato
+>   de R$ 27,18 que Dennis queria manter é o **GGV03-027** (pago em 28/08 às 08:10). O "029
+>   Tabelionato" (28/08) era cópia do 027 — o mesmo print de WhatsApp — e saiu do banco antes de
+>   11/09; o "029 FUNREJUS" (11/09) foi o excluído por Dennis (as guias reais viraram 030 e
+>   031). Os 4 arquivos órfãos com código 029 foram movidos, por decisão do Dennis, para
+>   `04 Compras/Old/` e `01 Controle financeiro/Old/` da GGV03 — nada apagado. **Numeração
+>   mantida: GGV03-029 fica vago para sempre; 001–039 não mudam.**
+> - **Bug de programa — código de pedido reaproveitado**: `proximo_pfm_numero()` calcula
+>   `MAX(pfm_numero)+1` sobre os documentos que existem; excluir o pedido mais recente libera o
+>   número e o pedido seguinte herda o código. Os arquivos do excluído continuam no OneDrive com
+>   o mesmo código (no pior caso — mesmo fornecedor e resumo — o PDF novo sobrescreve o antigo).
+>   Segundo caso achado: **GGV00-005** foi dado a dois pedidos (FUNREJUS e Junta Comercial), os
+>   dois excluídos — 4 arquivos órfãos em `2024-01 GGV00/04 Compras`, não movidos, aguardam
+>   decisão. Correção = próxima fiada (plano em aprovação).
+> - **"Excluir pedido" deixa rastros**: `_excluir_pedido()` não limpa `itens_pedido` nem
+>   `notas_fiscais_pedido`, e só descarta a primeira NF-e. Itens soltos hoje: GGV00-005,
+>   GGV01-001 e GGV03-029 — inofensivos, porque `procurar_item()` só enxerga item com pedido.
+> - **GGV02 já está em uso sem decisão de arquivamento**: 5 pedidos da Laura desde 04/08.
+>   001–004 foram para `00 Obras/2025-05 GGV02/04 Compras`, ao lado dos pedidos manuais
+>   GGV02-001 a 021 de antes da Laura, com os mesmos códigos. O 005 (e as revisões R01–R03, de
+>   27/08) ficou só em `data/pfms/` no servidor, porque `obras.pasta_onedrive` da GGV02 está
+>   vazio hoje — esteve preenchido em 04/08 e foi esvaziado antes de 27/08, sem registro de
+>   por quê.
+> - **Registrado com atraso** (commits de agosto que não entraram neste documento): deploy no
+>   servidor (`requirements.txt`, `setup.sh`, units systemd — 01 a 03/08); obra de teste GGV99
+>   (07/08 — **validada**: o PDF `TESTE-GGV99-001` está no OneDrive real); pasta OneDrive
+>   criada sozinha pelo `/nova_obra` e trava técnica que impede gravar pasta na GGV01 (07/08);
+>   lista de obras da IA e do menu manual vinda do banco (07/08); **trocar NF-e vinculada
+>   errada** pelo cockpit (08/08); `Restart=always` nos dois serviços (12/08); **menu ao
+>   reenviar arquivo já recebido** — descartar e liberar reenvio, ou manter (12/08). Detalhes
+>   no CHANGELOG.
+
+> Atualizado em: 2026-08-28 — **N NF-e por pedido — implementado, testado, deployado e
+> validado em produção no mesmo dia** (ver entrada de 2026-10-09). Gatilho: Dennis reportou o **GGV03-025** (Operador Nacional do
 > Registro, R$166,78) referente a dois serviços de cartório de registro de imóveis, com
 > **duas NF-e** pro mesmo pedido — situação que a Laura não previa (Caso 2 do ROADMAP Fase 6,
 > identificado em 2026-06-30 e nunca implementado até bater na prática). Mockup em texto
@@ -33,8 +77,8 @@
 > **cópia** do `data/laura.db` local (14 pedidos reais com NF-e, todos migrados 1:1,
 > idempotente em execuções repetidas) — cópia local está desatualizada (31/07, antes da
 > migração pro servidor), só serviu pra validar a forma dos dados reais, não o estado atual.
-> **Pendente**: deploy no servidor (`git pull` + restart do `laura-bot.service`) e registrar
-> as duas NF-e reais do GGV03-025 ao vivo pelo Telegram.
+> **Concluído em 28/08**: deploy no servidor e as duas NF-e reais do GGV03-025 (10474 e
+> 10475) vinculadas ao vivo pelo Telegram — confirmado no banco de produção em 2026-10-09.
 
 > Atualizado em: 2026-08-27 — **correção manual do comprovante PIX — implementada, deployada
 > e validada em produção**. Gatilho: comprovante do **GGV03-026** (registrado antes como
@@ -68,12 +112,14 @@
 > GGV03 permanece em `test_pfms` mesmo com `pasta_onedrive` configurada; GGV99 resolve o
 > caminho real. **Pendente**: criar a obra GGV99 de fato no servidor (`/nova_obra`, banco de
 > teste), configurar `pasta_onedrive` dela (sugestão: `00 Obras/9999 GGV99-TESTE`), gerar um
-> PFM de teste e confirmar visualmente que o PDF aparece no OneDrive. Produção do servidor
+> PFM de teste e confirmar visualmente que o PDF aparece no OneDrive (**feito** — conferido em
+> 2026-10-09: GGV99 no banco de teste com pasta `00 Obras/2026-08 GGV99`, PDF
+> `TESTE-GGV99-001` no OneDrive real). Produção do servidor
 > foi pausada (`systemctl stop laura-bot`) só pra rodar o teste sem conflito de token
 > (mesmo `TELEGRAM_BOT_TOKEN` em prod/teste — considerar um bot dedicado de teste no futuro).
 > Achado: nome real do arquivo do serviço é `deploy/laura-bot.service`, não `laura.service`
 > como `ARQUITETURA.md`/entradas antigas deste documento registram — corrigir quando mexer
-> nesses docs de novo.
+> nesses docs de novo (**corrigido em 2026-10-09** no DEPLOY.md e na ARQUITETURA.md).
 
 > Atualizado em: 2026-07-11 (mesma sessão, segunda fiada — **marcador 🔵 no Sistema de
 > Status**, aprovado por Dennis: 🟢 reservado ao ciclo fechado (pago + NF-e/fatura/recibos
@@ -132,11 +178,11 @@ container (SSH + tmux + Claude Code), sem nada a abrir no firewall do Eric.
 🟢 Verde
 
 - Fundação concluída.
-- **Deploy no Proxmox preparado (2026-07-10)** — código portátil Windows/Linux
-  (`ONEDRIVE_PATH` + caminho relativo em `obras.pasta_onedrive`), pasta `deploy/` (systemd +
-  rclone + `setup.sh`), roteiro completo em `docs/DEPLOY.md`. Container 109 "laura" já criado
-  no Proxmox do Eric; a migração em si ainda não foi executada — bot segue em produção no
-  Windows até o corte.
+- **Produção no servidor (Proxmox do Eric) desde agosto/2026** — container `laura`
+  (192.168.1.72, Debian 13, Python 3.13), código em `/opt/laura-bot`, `laura-bot.service` e
+  `rclone-onedrive.service` com `Restart=always`, OneDrive montado em `/mnt/onedrive`. Bot do
+  Windows desligado (instância única). Atualizar = `git pull` + `systemctl restart laura-bot`.
+  Roteiro em `docs/DEPLOY.md`; código portátil Windows/Linux desde 2026-07-10.
 - Ciclo documental completo: orçamento → PFM → A PAGAR → PIX → PAGO → NF-e vinculada (vínculo de
   NF-e agora independente do status de pagamento — ver Última Fiada Implementada).
 - **DOCX removido do fluxo principal** — PC 2.0 (PDF via HTML/Playwright) é o único formato gerado
@@ -292,6 +338,11 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
   (nota pode ser emitida antes de o pedido estar totalmente pago) — um pedido pode ter mais
   de uma NF-e (ex: dois serviços na mesma fatura), fechamento fiscal exige que a soma cubra o
   valor total quando há 2 ou mais; tela "Ver notas fiscais" no cockpit nesse caso
+- Troca de NF-e vinculada errada pelo cockpit (Ver / Trocar, com prévia e confirmação)
+- Correção manual do comprovante PIX antes do vínculo (valor, data, favorecido, CNPJ/CPF) e
+  de parcela já registrada (bloqueada quando o recibo da parcela está assinado)
+- Reenvio de arquivo já recebido: descartar e liberar reenvio, ou manter como está
+- Obra nova (`/nova_obra`) já nasce com pasta e subpastas no OneDrive
 - Revisão do Pedido de Compra com geração de arquivo rev01, rev02...
 - Cockpit do pedido com número da NF-e, botões de comprovante e nota
 - Registro de entrega: foto, /entrega, botão no cockpit, observação com sugestões
@@ -389,8 +440,9 @@ de `data/laura.db` local — 14 pedidos reais com NF-e, todos migrados 1 para 1,
 execuções repetidas (cópia local é de 31/07, anterior à migração pro servidor — só validou a
 forma dos dados reais, não substitui teste contra o banco de produção atual).
 
-**Pendente**: deploy no servidor (`git pull` + restart do `laura-bot.service`) e registrar as
-duas NF-e reais do GGV03-025 ao vivo pelo Telegram — validação ponta a ponta com Dennis.
+**Concluído em 28/08**: deploy no servidor e as duas NF-e reais do GGV03-025 (10474 e 10475,
+R$ 83,39 cada) vinculadas ao vivo pelo Telegram — confirmado no banco de produção em
+2026-10-09.
 
 ---
 
@@ -1760,14 +1812,14 @@ em script à parte), incluindo múltiplas fotos, revisão de PFM e datas em form
 
 ## Em Andamento
 
-**Fase 4b — Pedido de Compra 2.0** *(aguarda validação)*
+**Correção do reuso de código de pedido** *(planejamento, 2026-10-09)*
 
-HTML→PDF implementado via Playwright Chromium. Precisa ser testado em produção com orçamento real.
-O DOCX ainda é gerado em paralelo (salvo na pasta OneDrive). Remoção do Word fica para depois da validação.
+Plano e critério de aceite aguardam aprovação do Dennis antes do código. Restrição dele: a
+numeração existente não muda — GGV03-029 fica vago, 001–039 intocados.
 
-**Fiada 6b — Recibo como Exceção** *(próxima)*
-
-Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção registrada com motivo.
+> Removido daqui em 2026-10-09 (já concluídos há meses): Fase 4b — Pedido de Compra 2.0
+> (validada, DOCX removido em 2026-07-02) e Fiada 6b — recibo automático (concluída em
+> 2026-07-01, depois evoluída pro recibo por parcela).
 
 ---
 
@@ -1790,7 +1842,12 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 - **9 índices de `data/laura.db` não persistidos em código** (2026-07-03): criados diretamente no
   banco vivo, sem `CREATE INDEX` em `bot.py` ou script versionado — um banco recriado do zero não
   os recria, performance de consulta regride silenciosamente até rodar o comando manual de novo.
-- `bot.py` com 4.994 linhas — parcialmente modularizado (ADR-004, 2026-07-02): dispatch table +
+- **Código de pedido reaproveitado depois de excluir o pedido mais recente** (2026-10-09, em
+  correção): `proximo_pfm_numero()` = `MAX(pfm_numero)+1` sobre os documentos que existem.
+  Casos reais: GGV03-029 e GGV00-005.
+- **"Excluir pedido" deixa rastros** (2026-10-09): `_excluir_pedido()` não limpa
+  `itens_pedido` nem `notas_fiscais_pedido`, e só descarta a primeira NF-e.
+- `bot.py` com 6.546 linhas (2026-10-09) — parcialmente modularizado (ADR-004, 2026-07-02): dispatch table +
   módulo `nfe/` extraído. `fornecedor/`, `obra/`, `comprovante/` avaliados e adiados com gatilho
   próprio (ver ADR-004); extração do domínio `entrega/` continua adiada (ADR-003, motivo não mudou)
 - `gerar_pfm()` acumula responsabilidades: gravação no banco + criação de lançamento + arquivamento
@@ -1798,8 +1855,10 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 - `mime_type` não gravado no banco — inferido pela extensão do arquivo
 - Deduplicação de comprovante por `identificador_comprovante` não atua quando Claude
   não extrai o ID da transação (comprovante sem número visível)
-- **GGV02 sem `pasta_onedrive` configurada** — estrutura real da pasta é diferente da convenção
-  nova (GGV03); decisão de onde arquivar pendente (ver Fiada "Organização automática" acima)
+- **GGV02 sem `pasta_onedrive` configurada, já com pedido fora do OneDrive** (revisto
+  2026-10-09) — 5 pedidos da Laura desde 04/08; o GGV02-005 ficou só em `data/pfms/` no
+  servidor. Estrutura real da pasta é diferente da convenção nova (GGV03); decisão de onde
+  arquivar pendente
 - `buscar_candidatos_pix()` faz SQL inline direto contra `lancamentos`/`fornecedores` em vez de
   reusar função de domínio (diferente de `buscar_candidatos_nfe()`, que já faz certo) — mapeado na
   ADR-004, não corrigido
@@ -1913,6 +1972,16 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
 > gatilho arquitetural que ainda não ocorreu) não são fiada — ficam em Dívida Técnica/ADR, sem
 > duplicar aqui como se fossem tarefa da próxima sessão.
 
+**Novos em 2026-10-09** (achados na conferência com a produção — prioridade sugerida, antes
+da lista abaixo):
+
+- **Corrigir o reuso de código de pedido** — plano em aprovação nesta sessão; a numeração
+  existente não muda (GGV03-029 fica vago)
+- **"Excluir pedido" deixa rastros** — limpar `itens_pedido` e `notas_fiscais_pedido` e
+  descartar todas as NF-e do pedido, não só a primeira
+- **GGV00-005** — decidir se os 4 arquivos órfãos vão para `Old`, como os do GGV03-029
+- **GGV02** — decidir o arquivamento (item 6): já há pedido fora do OneDrive
+
 1. **Validar a Consultoria de Recompra ao vivo em produção** — implementada e testada com
    objetos simulados/dados reais fora do Telegram; falta o teste ponta a ponta clicando nos
    botões de verdade, agora que `LAURA_ENV=prod` está ativo
@@ -1932,14 +2001,16 @@ Recibo automático para fornecedores sem NF-e (`emite_nf = false`). Exceção re
    banco; mas ainda é uma ilha — falta o próximo elo da cadeia até virar negociação/pedido real
 5. **Testar o fix de deduplicação (Gerar Lista de Compras 2x) e edição de endereço/
    observações reabrindo uma lista já existente** — ambos só testados com objetos simulados
-6. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
+6. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03.
+   **Urgente desde 2026-10-09**: a obra já tem 5 pedidos da Laura; o GGV02-005 ficou só no
+   disco do servidor, e 001–004 dividem código com pedidos manuais no OneDrive
 7. **Alimentar `docs/LICOES_EXTRACAO.md`** sempre que aparecer um novo bug de parsing/extração —
    não só corrigir e seguir (ver [[feedback_documentar_padroes_bugs]] na memória)
 8. **Limpeza opcional no OneDrive** — 2 arquivos órfãos do pedido excluído Base Forte/GGV03-006
    antigo (`.docx`, `.pdf` em `04 Compras`); a `- Copy.jpeg` foi feita pelo próprio Dennis
    (backup pessoal) — perguntar se ele quer manter essa antes de apagar
-9. **Acesso via Claude Code Remote (celular)** — sem ambiente configurado ainda; ideia de hospedar
-   Laura + banco num servidor Proxmox em casa (Eric administra) registrada, não iniciada
+9. **Acesso via Claude Code do celular** — a Laura já roda no servidor Proxmox (desde agosto);
+   o acesso pelo celular (Tailscale + SSH + tmux no container) não foi verificado
 10. **Persistir os 9 índices de `data/laura.db` em código** — hoje só existem no banco vivo
 11. **Integrar `financeiro/relatorios.py` a `bot.py`** — hoje só roda chamado manualmente, sem
     botão/comando no Telegram
@@ -1973,6 +2044,6 @@ Arquitetura detalhada:
 
 ---
 
-*Última atualização: 2026-07-06*
+*Última atualização: 2026-10-09*
 *Responsáveis: Dennis + Claude*
 *Próxima revisão: ao final da próxima sessão*

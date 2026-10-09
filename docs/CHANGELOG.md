@@ -15,27 +15,37 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > sozinhas com o uso do dia a dia não entram aqui (ex: fechar um pedido parcelado esperando
 > pagamento). Ver Dívida Técnica em `docs/ROADMAP.md`.
 
-1. **Validar a Consultoria de Recompra ao vivo em produção** — implementada 2026-07-06,
+1. **Corrigir o reuso de código de pedido** *(novo, 2026-10-09 — plano em aprovação)* —
+   `proximo_pfm_numero()` calcula `MAX+1` sobre os pedidos existentes: excluir o pedido mais
+   recente devolve o número, e o próximo pedido herda o código. Aconteceu com GGV03-029 e
+   GGV00-005. A numeração existente não muda (GGV03-029 fica vago)
+2. **Excluir pedido deixa rastros** *(novo, 2026-10-09)* — `_excluir_pedido()` não limpa
+   `itens_pedido` nem `notas_fiscais_pedido`, e só descarta a primeira NF-e. Itens soltos são
+   inofensivos (a busca de histórico ignora item sem pedido); NF-e solta seria herdada por um
+   pedido que reaproveitasse o código
+3. **GGV00-005: 4 arquivos órfãos no OneDrive** *(novo, 2026-10-09)* — dois pedidos diferentes
+   (FUNREJUS e Junta Comercial) receberam esse código e foram excluídos; decidir se vão para
+   `Old`, como os do GGV03-029
+4. **Decidir o arquivamento da GGV02** *(atualizado 2026-10-09)* — a obra já tem 5 pedidos da
+   Laura: 001–004 no OneDrive, ao lado dos pedidos manuais GGV02-001 a 021 de mesmo código; o
+   005 ficou só no disco do servidor, porque a pasta da obra está vazia
+5. **Validar a Consultoria de Recompra ao vivo em produção** — implementada 2026-07-06,
    testada com objetos simulados/dados reais fora do Telegram; falta o teste ponta a ponta
    clicando nos botões de verdade, com `LAURA_ENV=prod` já ativo
-2. Comparar fornecedores diferentes na Consultoria de Recompra — adiado por decisão explícita
+6. Comparar fornecedores diferentes na Consultoria de Recompra — adiado por decisão explícita
    do Dennis, junto com filtros e mais opções
-3. 3 correções de exibição diagnosticadas ao vivo, não implementadas (observações não
+7. 3 correções de exibição diagnosticadas ao vivo, não implementadas (observações não
    aparecem na Tela do Item; correspondência escondida junto com preço ausente; prompt não
    traduz termo coloquial pro vocabulário SINAPI)
-4. Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento
-5. Testar ao vivo no Telegram: nome de arquivo padronizado, campo Resumo, picker "📝 Listas
+8. Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento
+9. Testar ao vivo no Telegram: nome de arquivo padronizado, campo Resumo, picker "📝 Listas
    de Compras" (buscar por nome, reabrir lista antiga) e o novo ciclo de vida (encerrar ao
    gerar) — implementados 2026-07-06, só validados contra um banco temporário nesta sessão
-6. Decidir onde a GGV02 arquiva documentos novos (estrutura de pasta diferente da GGV03)
-7. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
-8. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
-9. Executar a migração pro container Proxmox (repositório preparado em 2026-07-10 — roteiro e
-   checklist em `docs/DEPLOY.md`; CT 109 já criado pelo Eric; Tailscale cobre o acesso remoto
-   via Claude Code do celular)
-10. Persistir os 9 índices de `data/laura.db` em código (hoje só existem no banco vivo — um `init_db()`
+10. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração
+11. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
+12. Persistir os índices de `data/laura.db` em código (hoje só existem no banco vivo — um `init_db()`
     contra um banco novo não os recria; ver Dívida Técnica em `docs/ROADMAP.md`)
-11. Aplicar "← Voltar" nos ~25 prompts de texto do resto do bot (Obra, entrega, recibo,
+13. Aplicar "← Voltar" nos ~25 prompts de texto do resto do bot (Obra, entrega, recibo,
     `/nova_obra`...) — feito só na Lista de Compras
 
 > **Explicitamente rejeitado**: glossário determinístico de sinônimos SINAPI — Dennis: "não é
@@ -46,19 +56,113 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > Produto antes da Correspondência SINAPI" (atributos técnicos completos antes de casar com
 > SINAPI — deliberadamente não persistido ainda, ver Visão de Longo Prazo em `docs/ROADMAP.md`).
 
-> Concluído desde a última revisão: 5 correções da sessão de fatura Copel (2026-07-08 — saldo
-> não recalculado após revisão com desconto, edição de itens corrompendo o registro, prompt de
-> fatura perdendo linha de cobrança/Chave PIX falsa/sem Vencimento, alerta de divergência
-> soma×total, trava contra colar mensagem do bot na edição); bug real de valor de pedido não
-> atualizando após revisão corrigido (2026-07-06); bug real de NF-e presa corrigido (documento sem candidato
-> ou "Nenhum destes" agora descarta, 2026-07-06); nome de arquivo padronizado + campo Resumo +
-> histórico de Listas de Compras por obra (picker "📝 Listas de Compras", buscar por nome,
-> reabrir lista antiga pra editar, 2026-07-06); Consultoria de Recompra (painel "🔁 Você já comprou isso" +
-> botão "🔁 Repetir esta compra", sem limiar de tempo/preço, 2026-07-06) e `LAURA_ENV=prod`
-> reativado; PDF da Lista de Compras (2 variantes) + enriquecimento de descrição genérica +
-> correção de bug de duplicação (2026-07-05) e Camada 4b (correção campo a campo + Tela do
-> Item unificada + cabeçalho editável + convergência do endereço de entrega com o Pedido de
-> Compra, 2026-07-05, validado ao vivo no Telegram) — ver entradas abaixo.
+> Concluído desde a última revisão (2026-07-11 → 2026-10-09): Laura em produção no servidor
+> (Proxmox do Eric), obra de teste GGV99, pasta automática para obra nova, trocar NF-e
+> vinculada errada, reenvio de arquivo já recebido, `Restart=always`, correção manual do
+> comprovante PIX e da parcela, mais de uma NF-e por pedido — ver entradas abaixo.
+
+---
+
+## [0.17.0] — Mais de uma NF-e por pedido — 2026-08-28
+
+### Motivação
+
+GGV03-025 (Operador Nacional do Registro, R$ 166,78): dois serviços de cartório, duas NF-e
+para o mesmo pedido. O modelo era 1 pedido : 1 NF-e (Caso 2 da Fase 6, mapeado em 2026-06-30).
+
+### Adicionado
+
+- Tabela `notas_fiscais_pedido`: quantas e quais NF-e um pedido tem. `lancamentos.doc_id_nfe`
+  continua existindo como "primeira NF-e", por compatibilidade (backfill idempotente dos
+  vínculos antigos).
+- Tela "Ver notas fiscais" no cockpit quando o pedido tem 2 ou mais NF-e (mesmo padrão de
+  "Ver parcelas"). Com 1 NF-e, nada muda na tela.
+
+### Alterado
+
+- `vincular_nfe()` acrescenta a nova NF-e em vez de bloquear; `buscar_candidatos_nfe()`
+  oferece pedidos com NF-e parcial, comparando com o valor restante.
+- Fechamento fiscal: com 2 ou mais NF-e, a soma precisa cobrir o valor do pedido; com 1,
+  segue como sempre foi.
+
+### Validado em produção
+
+As duas NF-e do GGV03-025 (10474 e 10475, R$ 83,39 cada) vinculadas ao vivo em 28/08.
+
+---
+
+## [Correção manual do comprovante PIX e da parcela] — 2026-08-27
+
+### Motivação
+
+Comprovante do GGV03-026 lido com valor/data errados, sem nenhum jeito de corrigir — só o
+orçamento tinha "✏️ Corrigir dados".
+
+### Adicionado
+
+- "✏️ Corrigir dados" na tela de candidatos do comprovante PIX (Valor, Data do pagamento,
+  Favorecido, CNPJ/CPF), disponível mesmo sem candidato.
+- "✏️ Corrigir parcela N" em "Ver parcelas", para parcela já registrada; recalcula o status do
+  pedido. Bloqueado quando o recibo da parcela já está assinado.
+
+### Alterado
+
+- Comprovante sem candidato não é mais descartado sozinho: o usuário escolhe entre corrigir os
+  dados ou descartar.
+- A confirmação genérica (`_cb_ok`) passa a mostrar a mesma tela de comprovante dos outros
+  caminhos (`_tela_comprovante`).
+
+Validado ao vivo pelo Dennis no GGV03-026.
+
+---
+
+## [Reenvio de arquivo já recebido + reinício automático] — 2026-08-12
+
+### Corrigido
+
+- Reenviar um arquivo já recebido (ex: o bot reiniciou no meio do processamento) mostrava
+  "Este arquivo já foi recebido." sem saída. Agora mostra tipo e obra e oferece "🗑 Descartar
+  e liberar reenvio" ou "✖ Manter como está"; se o arquivo já virou pedido, abre o pedido.
+- `laura-bot.service` e `rclone-onedrive.service` com `Restart=always` (antes `on-failure`, que
+  não reinicia em saída limpa): o bot volta sozinho depois de queda ou reboot do servidor.
+
+---
+
+## [Trocar NF-e vinculada errada] — 2026-08-08
+
+### Motivação
+
+GGV03-020 tinha o orçamento de outro pedido (GGV03-022) vinculado como NF-e. Uma vez
+vinculada, não havia como corrigir.
+
+### Adicionado
+
+- O botão "🧾 NF-e" do cockpit abre um submenu Ver / Trocar / Voltar. Trocar extrai a nova
+  nota pela IA, mostra prévia e pede confirmação (`trocar_nfe()`).
+- `_remover_arquivo_financeiro_antigo()`: ao descartar um documento, remove também a cópia
+  arquivada no OneDrive (localizada pelo padrão de nome).
+
+---
+
+## [Servidor em produção + pasta automática para obra nova] — 2026-08-01 a 2026-08-07
+
+### Adicionado
+
+- Deploy no container LXC do Proxmox do Eric: `requirements.txt`, ajustes no
+  `deploy/setup.sh`, units `laura-bot.service` e `rclone-onedrive.service`. A Laura passou a
+  rodar no servidor (`/opt/laura-bot`), com o OneDrive montado via rclone em `/mnt/onedrive`;
+  o bot do Windows foi desligado (instância única).
+- Obra de teste **GGV99**: única obra que grava no OneDrive real mesmo em `LAURA_ENV=test`.
+  Validou o mount sem tocar produção (o PDF de teste apareceu no OneDrive).
+- `/nova_obra` cria sozinho a pasta da obra (`00 Obras/AAAA-MM {código}`) e as subpastas
+  `04 Compras`, `04 Compras/00 Orçamentos`, `01 Controle financeiro` e `05 Entrega`.
+
+### Alterado
+
+- A pasta OneDrive não é mais digitada à mão (o botão "📁 Pasta OneDrive" saiu no mesmo dia,
+  pelo risco de erro de digitação). A GGV01 ganhou trava técnica: nunca grava pasta nela.
+- A lista de obras da IA e do botão "📍 Definir obra" vem do banco, não de lista fixa — obra
+  nova aparece nos dois; a obra de teste nunca é sugerida pela IA.
 
 ---
 

@@ -1,6 +1,12 @@
 # Arquitetura do Projeto Laura
 
-> Versão: 2026-07-06 — reflete o estado real do sistema (pós ADR-004: dispatch table + módulo
+> Versão: 2026-10-09 — produção no servidor Proxmox (seção 2.2, nova); tabela
+> `notas_fiscais_pedido` (mais de uma NF-e por pedido, 2026-08-28); pasta da obra nova criada
+> pelo `/nova_obra` e obra de teste GGV99 (2026-08-07); nomes de arquivo por parcela
+> (comprovante/recibo) e fatura na seção 2.1; limitações novas na seção 6 — código de pedido
+> reaproveitado após exclusão e rastros de "Excluir pedido".
+>
+> Versão anterior: 2026-07-06 — reflete o estado real do sistema (pós ADR-004: dispatch table + módulo
 > `nfe/`; DOCX removido; segurança de `responder_botao()`/`atualizar()`/`atualizar_obra()`
 > corrigida; `itens_pedido`/`parcelas_pagamento`/`insumos_sinapi` documentadas; `financeiro/consultas.py`
 > e `financeiro/relatorios.py` adicionados; **módulo `compras/` — Lista de Compras com pipeline
@@ -18,7 +24,8 @@
 > Listas de Compras" no Cockpit da Obra (`listar_listas_obra`, `_cb_obra_listas`,
 > `_cb_lc_abrir`, `_cb_lc_buscar`)**)
 >
-> **`LAURA_ENV=prod` ativo** — Laura em produção real desde 2026-07-06.
+> **`LAURA_ENV=prod` ativo** — Laura em produção real desde 2026-07-06; no servidor Proxmox
+> desde agosto/2026 (seção 2.2).
 
 ---
 
@@ -30,10 +37,12 @@ Dennis envia fotos ou PDFs de orçamentos pelo Telegram. O bot extrai os dados
 com IA, apresenta para confirmação, gera o PFM em PDF numerado, salva no OneDrive
 e registra o lançamento A PAGAR no banco.
 
-**Tecnologias em uso:** Python 3.12 · python-telegram-bot 22 (+ `job-queue`/APScheduler) · SQLite ·
+**Tecnologias em uso:** Python 3.12+ (3.13 no servidor) · python-telegram-bot 22 (+ `job-queue`/APScheduler) · SQLite ·
 Claude API (Anthropic) · Playwright Chromium (HTML → PDF) · num2words (valor por extenso) ·
-BrasilAPI (Receita Federal) · OneDrive (pasta local mapeada) · openpyxl (relatórios `.xlsx`,
+BrasilAPI (Receita Federal) · OneDrive (montado via rclone no servidor) · openpyxl (relatórios `.xlsx`,
 `financeiro/relatorios.py`)
+
+**Onde roda:** container LXC Debian 13 no Proxmox do Eric, com systemd — ver seção 2.2.
 
 `python-docx` não é mais dependência de `bot.py` (DOCX removido em 2026-07-02) — continua usado só
 por `scripts/import_fornecedores.py` (leitura de .docx legado, não geração).
@@ -49,7 +58,7 @@ Telegram ──────► bot.py ──────► Claude API (haiku-4-
                    ├──────────► data/uploads/  (arquivos recebidos, staging)
                    ├──────────► Playwright Chromium (HTML → PDF em memória)
                    ├──────────► BrasilAPI (consulta CNPJ na Receita Federal)
-                   └──────────► OneDrive/00 Obras/{AAAA-MM} {GGVxx}/
+                   └──────────► /mnt/onedrive (rclone) → 00 Obras/{AAAA-MM} {GGVxx}/
                                 (orçamento, PFM, comprovante, NF-e, foto de entrega)
 ```
 
@@ -98,8 +107,9 @@ Telegram ──────► bot.py ──────► Claude API (haiku-4-
   (`teclado_escolha_endereco()`/`_cb_endsel()` único, 2026-07-05 — princípio "Convergência
   antes de paralelismo", `docs/CONSTITUICAO.md`). Ainda sem geração de Pedido de Compra a
   partir da Lista nem vínculo com orçamento — ver ROADMAP.md
-- **`data/laura.db`** — banco SQLite com dez tabelas (ver seção 3); 9 índices estratégicos
-  criados em 2026-07-03, mas só no banco vivo — não persistidos em nenhum `CREATE INDEX` versionado
+- **`data/laura.db`** — banco SQLite com 11 tabelas + o índice FTS5 de `insumos_sinapi` (ver
+  seção 3); índices estratégicos criados em 2026-07-03, mas só no banco vivo — não persistidos
+  em nenhum `CREATE INDEX` versionado (8 no banco do servidor em 2026-10-09)
 - **`data/uploads/`** — todo arquivo recebido pelo Telegram cai aqui primeiro (pasta única,
   achatada); é a partir daqui que os documentos são copiados para a pasta certa da obra
 - **Claude API** — extração de dados dos documentos; modelo `claude-haiku-4-5-20251001`
@@ -108,7 +118,7 @@ Telegram ──────► bot.py ──────► Claude API (haiku-4-
   (`_gerar_html_recibo`, A5 paisagem) e pela Lista de Compras (`_gerar_html_lista`, 2 variantes,
   2026-07-05) — mesma função, formato/orientação por parâmetro
 - **BrasilAPI** — consulta pública e gratuita de CNPJ na Receita Federal; usada por
-  `_criar_fornecedor_auto()` e pelo job periódico `_sincronizar_receita_pendentes()`; falha
+  `_criar_fornecedor_auto()` e pelo job periódico `_sincronizar_receita_fornecedores()`; falha
   silenciosamente (timeout 4s) sem travar o fluxo do bot
 - **OneDrive** — destino final de todos os documentos de uma obra; ver seção 2.1
 - **`prints/pc_alternativa_a.html`** — protótipo aprovado do PC 2.0; referência de design
@@ -125,10 +135,11 @@ convenção — não há necessidade de configurar cada subpasta manualmente:
 |---|---|---|
 | Orçamento original | `04 Compras/00 Orçamentos/` | `{pfm_codigo} - {Fornecedor} - {Resumo}.{ext}` |
 | PFM gerado (.pdf) | `04 Compras/` | `{pfm_codigo} - {Fornecedor} - {Resumo}.pdf` |
-| Comprovante de pagamento | `01 Controle financeiro/` | `{AAAA-MM-DD} {pfm_codigo} {Fornecedor} - comprovante.{ext}` |
+| Comprovante de pagamento | `01 Controle financeiro/` | `{AAAA-MM-DD} {pfm_codigo} {Fornecedor} - comprovante-parcela{N}.{ext}` (N = id da parcela) |
+| Fatura (taxa, imposto, serviço público) | `01 Controle financeiro/` | `{AAAA-MM-DD} {pfm_codigo} {Fornecedor} - fatura.{ext}` (arquivada ao confirmar o pagamento) |
 | NF-e | `01 Controle financeiro/` | `{AAAA-MM-DD} {pfm_codigo} {Fornecedor} - NFe {numero}.{ext}` |
 | Foto de entrega | `05 Entrega/` | `{AAAA-MM-DD} {pfm_codigo} {Fornecedor} - foto{NN}.{ext}` |
-| Recibo (Fiada 6b, ainda não implementado) | `05 Entrega/` | `{AAAA-MM-DD} {pfm_codigo} {Fornecedor} - recibo.{ext}` |
+| Recibo (por parcela) | `05 Entrega/` | `{pfm_codigo} - {Fornecedor} - recibo-parcela{N}.pdf` (substituído pela versão assinada ao anexar) |
 
 A data usada é sempre a **data real do documento** (data de pagamento, data de emissão da NF-e),
 não a data em que o arquivo foi processado — `_data_para_arquivo()` entende `DD/MM/AAAA` e
@@ -139,16 +150,28 @@ que resume o item principal do orçamento, ex: "Espelho", "aço".
 caminho original (em `data/uploads/`) e uma função que resolve a pasta de destino. Falha
 silenciosamente (não bloqueia nenhum fluxo do Telegram) se o arquivo original não existir mais.
 
-**Escopo por obra:**
-- **GGV03** — raiz configurada, convenção nova completa
-- **GGV00** — raiz configurada (pasta vazia; estrutura é criada quando o primeiro documento chegar)
+**Escopo por obra** (banco de produção em 2026-10-09):
+- **GGV03** — `00 Obras/2026-06 GGV03`, convenção nova completa
+- **GGV00** — `00 Obras/2024-01 GGV00`, convenção nova
 - **GGV01** — `pasta_onedrive` vazia de propósito. Regra explícita: nunca escrever na estrutura
-  antiga dela
-- **GGV02** — `pasta_onedrive` vazia. Em conclusão; estrutura real da pasta é diferente (sem
-  "00 Orçamentos", com "51 Obra - Materiais e serviços") — decisão de onde arquivar pendente
+  antiga dela — desde 2026-08-07 é trava técnica em `atualizar_obra()`, não só combinado
+- **GGV02** — `pasta_onedrive` vazia hoje, mas a obra já tem 5 pedidos da Laura: 001–004
+  (04/08, quando a pasta estava preenchida) em `00 Obras/2025-05 GGV02/04 Compras`, ao lado dos
+  pedidos manuais GGV02-001 a 021 de mesmo código; 005 (27/08) só em `data/pfms/` no servidor.
+  Decisão de onde arquivar pendente
+- **GGV99** — obra de teste (`GGV_TESTE_ONEDRIVE`, banco de teste): única que grava no OneDrive
+  real mesmo em `LAURA_ENV=test`, com prefixo `TESTE-` no nome; a IA nunca a sugere
+- **Obra nova** — `/nova_obra` define `00 Obras/AAAA-MM {codigo}` e cria na hora as subpastas
+  `04 Compras`, `04 Compras/00 Orçamentos`, `01 Controle financeiro` e `05 Entrega`
+  (`_provisionar_pasta_obra()`, 2026-08-07); a pasta não é mais digitada à mão
 
-Se `pasta_onedrive` estiver vazia para uma obra, os documentos caem em `data/pfms/` (local, não
-sincronizado) em vez de falhar — evita gravar no lugar errado por engano.
+Se `pasta_onedrive` estiver vazia para uma obra, os documentos caem em `data/pfms/` em vez de
+falhar — evita gravar no lugar errado por engano. **No servidor, `data/pfms/` é disco local do
+container: não sincroniza com o OneDrive** (caso real: GGV02-005).
+
+**Pasta `Old`** — arquivo que sai de circulação (ex: órfão de pedido excluído) é movido para
+uma subpasta `Old` dentro da própria pasta onde estava, nunca apagado. Mesmo padrão já usado à
+mão nas obras antigas; primeiro uso registrado: os 4 arquivos órfãos do GGV03-029 (2026-10-09).
 
 **Resolução de caminhos (2026-07-10, preparação pro deploy Linux/Proxmox)** — `_raiz_obra()`
 aceita `pasta_onedrive` em duas formas: **relativa** (ex: `00 Obras/2026-06 GGV03`), resolvida
@@ -163,6 +186,25 @@ LXC (systemd, rclone, checklist de corte): `docs/DEPLOY.md` + `deploy/`.
 
 ---
 
+## 2.2 Produção — servidor no Proxmox (desde agosto/2026)
+
+| Item | Valor (conferido em 2026-10-09) |
+|---|---|
+| Máquina | Container LXC 109 "laura" no node `grow1` do Proxmox do Eric — host `192.168.1.72` (alias SSH `laura`); `192.168.1.71` é outra máquina |
+| Sistema | Debian 13 (trixie), Python 3.13 em `/opt/laura-bot/.venv` |
+| Código | `/opt/laura-bot` (clone do GitHub privado `dverschoor78/laura-bot`) |
+| Bot | `laura-bot.service` — `ExecStart=/opt/laura-bot/.venv/bin/python bot.py`, `Restart=always` |
+| OneDrive | `rclone-onedrive.service` monta o remote `onedrive:` em `/mnt/onedrive` (`--vfs-cache-mode writes`), `Restart=always` |
+| Configuração | `.env` fora do git; `ONEDRIVE_PATH=/mnt/onedrive`; `LAURA_ENV` não definido = produção |
+| Dados | `data/laura.db` (produção) e `data/laura_test.db` (teste), fora do git |
+
+Atualizar o código: `cd /opt/laura-bot && git pull && systemctl restart laura-bot`. Log:
+`journalctl -u laura-bot -f`. **Instância única**: o bot do Windows fica desligado — duas Lauras
+com o mesmo token brigam pelo polling. O papel do Eric é o nível Proxmox (container, features
+FUSE/Nesting, hardware); o dia a dia (deploy, restart, logs) é feito direto por SSH.
+
+---
+
 ## 3. Banco de Dados
 
 **`documentos`** — registro de cada arquivo recebido e seu ciclo de vida
@@ -171,7 +213,7 @@ LXC (systemd, rclone, checklist de corte): `docs/DEPLOY.md` + `deploy/`.
 |---|---|
 | `id` | Chave primária |
 | `hash` | SHA256 do arquivo — detecta duplicatas |
-| `tipo` | Classificação: orcamento · comprovante_pix · extrato_mp |
+| `tipo` | Classificação (dict `TIPOS`): orcamento · comprovante_pix · nota_fiscal · foto_entrega · extrato_mp · lista_materiais · nao_relacionado — mais `recibo`, gerado pela própria Laura |
 | `ggv` | GGV identificado: GGV00–GGV03 ou nao_identificado |
 | `dados_claude` | Texto bruto retornado pelo Claude; campos extraídos via `_campo()` na leitura |
 | `condicao_pgto`, `data_entrega`, `endereco_entrega`, `desconto_rs` | Dados coletados durante o fluxo de confirmação |
@@ -223,8 +265,8 @@ Campo `ramo` é salvo automaticamente quando extraído do orçamento e o fornece
 
 Quando um orçamento traz um CNPJ que não bate com nenhum cadastro (`buscar_fornecedor()` retorna
 `None`), `_criar_fornecedor_auto()` cadastra um novo fornecedor automaticamente e tenta enriquecer
-com dado oficial da Receita (BrasilAPI). Se a consulta falhar, `receita_pendente=1` e o job
-`_sincronizar_receita_pendentes()` tenta de novo a cada 6h.
+com dado oficial da Receita (BrasilAPI). Se a consulta falhar, `receita_pendente=1`; o job
+`_sincronizar_receita_fornecedores()` resincroniza todos os fornecedores com CNPJ a cada 6h.
 Sem relação de FK com as demais tabelas.
 
 ---
@@ -277,6 +319,26 @@ populou os pedidos já existentes antes desta tabela existir. Consultada por
 `lancamentos.status` só vira `pago` quando `SUM(parcelas_pagamento.valor) >= lancamentos.valor`.
 Escrita ainda 100% em `bot.py` (`_registrar_parcela()`) — dono do domínio não decidido, gatilho
 pendente da ADR-004 (ver Dívida Técnica em ROADMAP.md). `financeiro/consultas.py` só lê.
+
+---
+
+**`notas_fiscais_pedido`** — NF-e vinculadas a um pedido, N por pedido (2026-08-28)
+
+| Campo | Propósito |
+|---|---|
+| `id` | Chave primária |
+| `pfm_codigo` | Pedido ao qual a nota pertence — sem FK explícita com `lancamentos` |
+| `doc_id` | Documento da NF-e (`documentos.id`) — `UNIQUE(pfm_codigo, doc_id)`, reenvio do mesmo arquivo é idempotente |
+| `valor`, `numero` | Valor e número da nota |
+| `criado_em` | Timestamp de inserção |
+
+Fonte de verdade de quantas e quais NF-e um pedido tem — mesmo modelo de `parcelas_pagamento`
+(convergência, não mecanismo novo). `lancamentos.doc_id_nfe` continua existindo como "primeira
+NF-e", só por compatibilidade com código que lê o campo isolado; ao remover a primeira, a
+próxima é promovida. Criada e populada (backfill idempotente) por `init_db_notas_fiscais()`
+(`financeiro/lancamento.py`). Fechamento fiscal: com 1 NF-e, fecha como sempre; com 2 ou mais,
+a soma precisa cobrir `lancamentos.valor`. `_excluir_pedido()` ainda não limpa esta tabela —
+ver seção 6.
 
 ---
 
@@ -507,7 +569,7 @@ entre si — ver Dívida Técnica e "Motor de Interpretação e Classificação 
 
 ## 5. Estrutura do bot.py
 
-Referências para navegação no arquivo (4.994 linhas):
+Referências para navegação no arquivo (6.546 linhas em 2026-10-09):
 
 | Bloco | Referência | O que faz |
 |---|---|---|
@@ -521,12 +583,25 @@ Referências para navegação no arquivo (4.994 linhas):
 | Domínio — Lista de Compras | `lista_cmd()`, `_interpretar_lista_texto/arquivo()`, `_adicionar_correspondencia_sinapi()`, `_adicionar_referencia_laura()`, `_adicionar_sugestao_descricao()`, `_texto_lista_conferencia()`, `_texto_tela_item()`, `_gerar_html_lista()`, `_slug_arquivo()`, `_cb_lc_*()`, `_cb_obra_listas()` | Comando `/lista` + fluxo de foto (`lista_materiais`); Camadas 1-3 de interpretação, enriquecimento de descrição, Tela do Item (view + correção campo a campo), cabeçalho editável (Obra/Endereço/Observações/Resumo), gravação (substitui, não duplica, encerra a lista) via `compras.*`, PDF em 2 variantes com nome padronizado; picker "📝 Listas de Compras" no Cockpit da Obra (buscar por nome, reabrir lista antiga) |
 | Teclados | `parse_resposta()`, `teclado_confirmacao()` | Parse da resposta Claude e botões inline |
 | Handlers Telegram | `receber_arquivo()`, `receber_texto()` | Handlers de mensagens |
-| Dispatch de callback | `responder_botao()`, `_CB_DISPATCH`, `_cb_*()` | Um único `CallbackQueryHandler`; roteia por dict `acao → função` (ADR-004, 2026-07-02) em vez de if/elif — 59 funções `_cb_*`, cada uma cobrindo os ramos que antes viviam soltos dentro de uma função de 929 linhas |
+| Dispatch de callback | `responder_botao()`, `_CB_DISPATCH`, `_cb_*()` | Um único `CallbackQueryHandler`; roteia por dict `acao → função` (ADR-004, 2026-07-02) em vez de if/elif — 59 funções `_cb_*` na criação, 93 entradas em 2026-10-09, cada uma cobrindo os ramos que antes viviam soltos dentro de uma função de 929 linhas |
 | Inicialização | `if __name__ == "__main__": ... app.run_polling()` | Registro dos handlers e loop principal — protegido por guard desde 2026-07-02 (importar `bot.py` não inicia mais o bot) |
 
 ---
 
 ## 6. Limitações Conhecidas
+
+- **Código de pedido reaproveitado depois de excluir o pedido mais recente** (achado
+  2026-10-09, correção em planejamento) — `proximo_pfm_numero()` calcula
+  `MAX(pfm_numero)+1` sobre os documentos que ainda existem. Excluir o pedido mais recente
+  libera o número; o pedido seguinte herda o código, enquanto os arquivos do excluído continuam
+  no OneDrive com o mesmo código (no pior caso — mesmo fornecedor e resumo — o PDF novo
+  sobrescreve o antigo). Casos reais: GGV03-029 e GGV00-005.
+
+- **"Excluir pedido" deixa rastros** (achado 2026-10-09) — `_excluir_pedido()` apaga
+  lançamento, parcelas, fotos de entrega e documentos, mas não `itens_pedido` nem
+  `notas_fiscais_pedido`, e só descarta a primeira NF-e (via `lancamentos.doc_id_nfe`). Itens
+  soltos são inofensivos (`procurar_item()` faz JOIN com `lancamentos`); NF-e solta seria
+  herdada por um pedido que reaproveitasse o código.
 
 - **Tela do Item esconde a razão de uma referência não calculada** — quando o SINAPI acha um
   código com confiança alta mas não converte a unidade (ex: Cal Hidratada: KG→SC sem
@@ -551,19 +626,21 @@ Referências para navegação no arquivo (4.994 linhas):
 
 - **Confirmação de documento diverge por ponto de entrada** — `_cb_sel_tipo_inicial()` (fluxo
   automático), `_cb_set_tipo()` (correção manual — bug real: chama `_resumo_gerar()` sempre,
-  não importa o tipo) e `_cb_ok()` (confirmação genérica — trata `comprovante_pix` incompleto,
-  `nota_fiscal` nem trata) implementam o mesmo objetivo de três formas diferentes. Achado
-  2026-07-03; fiada de investigação própria antes de mexer — ver "Motor de Interpretação e
-  Classificação de Documentos" em `docs/ROADMAP.md`.
+  não importa o tipo) e `_cb_ok()` (confirmação genérica) implementam o mesmo objetivo de três
+  formas diferentes. Desde 2026-08-27 `_cb_ok()` mostra a tela completa de comprovante
+  (`_tela_comprovante()`, a mesma dos outros caminhos), mas `nota_fiscal` continua caindo no
+  genérico "Confirmado: Nota Fiscal", sem buscar candidato. Achado 2026-07-03; fiada de
+  investigação própria antes de mexer — ver "Motor de Interpretação e Classificação de
+  Documentos" em `docs/ROADMAP.md`.
 
-- **Monólito parcial** — `bot.py` com 4.994 linhas, acima do teto da ADR-001 (2.500–3.000).
+- **Monólito parcial** — `bot.py` com 6.546 linhas (2026-10-09), acima do teto da ADR-001 (2.500–3.000).
   ADR-004 (2026-07-02) extraiu dispatch table + módulo `nfe/`; `fornecedor/`/`obra/`/`comprovante/`
   avaliados e adiados com gatilho próprio; `entrega/` continua adiada (ADR-003, motivo não mudou).
   Crescimento recente concentrado no pipeline de Compras (Camadas 1-3 + tela de 3 níveis,
   2026-07-04) — candidato natural a módulo próprio quando o teto for revisitado.
 
 - **`responder_botao()` é um único handler** — agora roteia por dispatch table (`_CB_DISPATCH`,
-  66 funções `_cb_*`) em vez de if/elif, mas continua sendo um único `CallbackQueryHandler` com um
+  93 entradas em 2026-10-09) em vez de if/elif, mas continua sendo um único `CallbackQueryHandler` com um
   único `try/except` — um erro em qualquer ramo ainda aparece como "Erro inesperado" genérico,
   sem isolamento por domínio. `sel_tipo_inicial` continua misturando 4 domínios (entrega, pix,
   nfe, pfm) internamente, não coberto pela divisão em `_cb_*`. Ver ADR-004.

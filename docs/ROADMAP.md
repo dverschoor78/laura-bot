@@ -1,6 +1,13 @@
 # Roadmap do Projeto Laura
 
-> Atualizado em: 2026-07-11 (**marcador 🔵 no Sistema de Status** — 🟢 reservado ao ciclo
+> Atualizado em: 2026-10-09 — **alinhamento com a produção**: Laura no servidor Proxmox desde
+> agosto (a fiada "Executar a migração" saiu da lista); mais de uma NF-e por pedido validado em
+> 28/08 (Caso 2 da Fase 6); GGV03-029 diagnosticado (sem duplicidade no banco, numeração
+> mantida, arquivos órfãos movidos para `Old`); 3 itens novos no topo das Próximas Fiadas —
+> reuso de código de pedido, rastros de "Excluir pedido", órfãos do GGV00-005 — e a GGV02
+> atualizada (já tem pedido fora do OneDrive).
+>
+> Histórico anterior — 2026-07-11 (**marcador 🔵 no Sistema de Status** — 🟢 reservado ao ciclo
 > fechado (pago + NF-e/fatura/recibos assinados), pago sem fechamento vira 🔵;
 > `_fechamento_fiscal()`/`_emoji_pedido()` fonte única, 3 dicts duplicados removidos;
 > IDENTIDADE e GLOSSARIO revisados; mesma sessão, **2 bugs de produção corrigidos**: botões
@@ -962,44 +969,61 @@ que `bot.py` parecia "bagunçado".
 > gatilho arquitetural que ainda não ocorreu) não são fiadas — ficam registradas em Dívida Técnica
 > ou no ADR correspondente, sem duplicar aqui como se fossem tarefa da próxima sessão.
 
-1. **Validar a Consultoria de Recompra ao vivo em produção** — implementada 2026-07-06,
+1. **Corrigir o reuso de código de pedido** *(novo, 2026-10-09 — plano em aprovação)* —
+   `proximo_pfm_numero()` calcula `MAX+1` sobre os pedidos existentes: excluir o pedido mais
+   recente devolve o número, e o próximo pedido herda o código (os arquivos do pedido excluído
+   continuam no OneDrive com o mesmo código; no pior caso o PDF novo sobrescreve o antigo).
+   Aconteceu com GGV03-029 e GGV00-005. A numeração existente não muda — GGV03-029 fica vago
+2. **Excluir pedido deixa rastros** *(novo, 2026-10-09)* — `_excluir_pedido()` não limpa
+   `itens_pedido` nem `notas_fiscais_pedido`, e só descarta a primeira NF-e (a tabela de N
+   NF-e nasceu depois da função). Itens soltos hoje: GGV00-005, GGV01-001, GGV03-029 —
+   inofensivos (`procurar_item()` só enxerga item com pedido); NF-e solta seria herdada por
+   um pedido que reaproveitasse o código
+3. **GGV00-005: 4 arquivos órfãos no OneDrive** *(novo, 2026-10-09)* — dois pedidos diferentes
+   (FUNREJUS e Junta Comercial) receberam esse código e os dois foram excluídos; decidir se vão
+   para `Old`, como os do GGV03-029
+4. **Decidir o arquivamento da GGV02** *(atualizado 2026-10-09)* — deixou de ser só decisão
+   futura: a obra já tem 5 pedidos da Laura (desde 04/08). 001–004 estão em
+   `00 Obras/2025-05 GGV02/04 Compras`, ao lado dos pedidos manuais GGV02-001 a 021 de antes
+   da Laura, com os mesmos códigos; o 005 (e revisões R01–R03) ficou só no disco do servidor
+   (`data/pfms/`), porque `obras.pasta_onedrive` da GGV02 está vazio hoje
+5. **Validar a Consultoria de Recompra ao vivo em produção** — implementada 2026-07-06,
    testada com objetos simulados/dados reais fora do Telegram; falta o teste ponta a ponta
    clicando nos botões de verdade, com `LAURA_ENV=prod` já ativo
-2. **Comparar fornecedores diferentes na Consultoria de Recompra** — adiado por decisão
+6. **Comparar fornecedores diferentes na Consultoria de Recompra** — adiado por decisão
    explícita do Dennis, junto com filtros e mais opções
-3. **3 correções de exibição diagnosticadas, não implementadas** (Cal Hidratada/Brita/Tijolo
+7. **3 correções de exibição diagnosticadas, não implementadas** (Cal Hidratada/Brita/Tijolo
    — ver Última Fiada Implementada pro diagnóstico completo):
    - Mostrar `observacoes` do item na Tela do Item (hoje só na Análise Técnica)
    - Separar "achou correspondência" de "calculou preço" em `_referencia_e_correspondencia`
      — hoje esconde os dois juntos quando o preço não é computável
    - Reforçar `PROMPT_INTERPRETAR_LISTA` pra traduzir termo coloquial → vocabulário técnico
      SINAPI no `termo_busca_sinapi` (ex: "brita" → "pedra britada")
-5. **Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento** — a Lista já
+8. **Gerar Pedido de Compra a partir da Lista de Compras + vínculo com orçamento** — a Lista já
    interpreta, corrige, tem cabeçalho completo, gera PDF e grava de verdade no banco (validada
    ao vivo), mas ainda é uma ilha
-6. **Testar ao vivo no Telegram**: nome de arquivo padronizado, campo Resumo, picker "📝
+9. **Testar ao vivo no Telegram**: nome de arquivo padronizado, campo Resumo, picker "📝
    Listas de Compras" (buscar por nome, reabrir lista antiga pra editar) e o novo ciclo de
    vida (encerrar ao gerar) — implementados 2026-07-06, só testados estruturalmente contra um
    banco temporário nesta sessão
-7. **Decidir onde a GGV02 arquiva documentos novos** — estrutura de pasta diferente da GGV03
-8. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração encontrado
-9. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
-   — perguntar sobre a `- Copy.jpeg` antes, é backup pessoal do Dennis
-10. **Executar a migração pro container Proxmox** — repositório 100% preparado em 2026-07-10
-    (código portátil, `deploy/`, `docs/DEPLOY.md`, script de migração de caminhos); container
-    109 "laura" já criado no node grow1 (Debian LXC, 2 vCPU/2 GB). Falta executar: features
-    FUSE+Nesting no CT (Eric), clone, `setup.sh`, rclone, transferir `.env`+`data/`, corte de
-    produção (parar o bot do Windows!). Roteiro completo e checklist em `docs/DEPLOY.md`.
-    Tailscale no container cobre o acesso remoto via Claude Code do celular (SSH + tmux)
-11. Persistir os 9 índices de `data/laura.db` em código — hoje só existem no banco vivo (nenhum
-    `CREATE INDEX` em `bot.py`/scripts); um `init_db()` contra um banco novo não os recria
-12. Integrar `financeiro/relatorios.py` a `bot.py` — hoje as funções só rodam chamadas manualmente,
+10. Alimentar `docs/LICOES_EXTRACAO.md` a cada novo bug de parsing/extração encontrado
+11. Limpeza opcional de 2 arquivos órfãos no OneDrive (pedido Base Forte/GGV03-006 antigo, excluído)
+    — perguntar sobre a `- Copy.jpeg` antes, é backup pessoal do Dennis
+12. Persistir os índices de `data/laura.db` em código — hoje só existem no banco vivo (nenhum
+    `CREATE INDEX` em `bot.py`/scripts); um `init_db()` contra um banco novo não os recria.
+    Banco do servidor tem 8 em 2026-10-09 (`idx_documentos_tipo`, `idx_fornecedores_cnpj`,
+    `idx_itens_pfm`, `idx_lancamentos_data_pag`, `idx_lancamentos_ggv_status`,
+    `idx_lancamentos_pfm`, `idx_parcelas_data`, `idx_parcelas_pfm`)
+13. Integrar `financeiro/relatorios.py` a `bot.py` — hoje as funções só rodam chamadas manualmente,
     sem botão ou comando no Telegram
-13. Popular `itens_pedido.insumo_sinapi_codigo` — coluna já existe no schema, mas nada grava nela
+14. Popular `itens_pedido.insumo_sinapi_codigo` — coluna já existe no schema, mas nada grava nela
     ainda; é o vínculo real entre item comprado e `insumos_sinapi` que falta pra fase "lista de compras"
-14. Aplicar "← Voltar" nos ~25 prompts de texto do resto do bot (Obra, entrega, recibo,
+15. Aplicar "← Voltar" nos ~25 prompts de texto do resto do bot (Obra, entrega, recibo,
     `/nova_obra`...) — feito só na Lista de Compras, a pedido explícito do Dennis de tratar o
     resto como fiada própria
+
+> **Concluída fora desta lista**: a migração pro container Proxmox (antigo item 10) foi
+> executada em agosto/2026 — ver `docs/DEPLOY.md` e a seção 2.2 de `docs/ARQUITETURA.md`.
 
 > **Explicitamente rejeitado, não vira fiada**: glossário determinístico de sinônimos SINAPI
 > (ex: "brita" → "pedra britada" hardcoded). Dennis: "não é problema meu hoje... já existe
@@ -1023,6 +1047,16 @@ gatilho original (consultar preço de item já comprado sem ler o texto inteiro 
 
 ## Dívida Técnica
 
+- **Alta — código de pedido reaproveitado depois de excluir o pedido mais recente** *(em
+  correção, 2026-10-09)*
+  `proximo_pfm_numero()` = `MAX(pfm_numero)+1` sobre os documentos que ainda existem. Casos
+  reais: GGV03-029 e GGV00-005. Ver Próximas Fiadas, item 1.
+
+- **Média — "Excluir pedido" deixa rastros em `itens_pedido` e `notas_fiscais_pedido`**
+  `_excluir_pedido()` apaga lançamento, parcelas, fotos e documentos, mas não os itens nem as
+  NF-e da tabela nova (só descarta a primeira NF-e, via `doc_id_nfe`). Ver Próximas Fiadas,
+  item 2.
+
 - **Baixa — 9 índices de `data/laura.db` não persistidos em código**
   Criados diretamente no banco vivo durante a sessão "Otimização de BD" (2026-07-03) — não existe
   nenhum `CREATE INDEX` em `bot.py` ou em script versionado. Se o banco for recriado do zero
@@ -1040,10 +1074,12 @@ gatilho original (consultar preço de item já comprado sem ler o texto inteiro 
   Grava no banco, cria lançamento e arquiva em disco (a geração do documento em si — Word — foi
   removida em 2026-07-02). Justificativa: dificulta testes e futuras extensões.
 
-- **Baixa — GGV02 sem `pasta_onedrive` configurada**
-  Estrutura real da pasta (sem "00 Orçamentos", com "51 Obra - Materiais e serviços") não
-  mapeia direto na convenção nova da GGV03. Justificativa: obra em conclusão, decisão de onde
-  arquivar documentos novos ainda pendente — ver `ESTADO.md`.
+- **Média — GGV02 sem `pasta_onedrive` configurada, já com pedido fora do OneDrive**
+  *(revisto 2026-10-09)*: a obra tem 5 pedidos da Laura desde 04/08; o GGV02-005 ficou só em
+  `data/pfms/` no servidor. Ver Próximas Fiadas, item 4. Registro original: estrutura real da
+  pasta (sem "00 Orçamentos", com "51 Obra - Materiais e serviços") não mapeia direto na
+  convenção nova da GGV03; obra em conclusão, decisão de onde arquivar documentos novos
+  pendente.
 
 - **Média — `mime_type` não gravado no banco**
   Inferido pela extensão do arquivo ao reprocessar.
@@ -1053,7 +1089,7 @@ gatilho original (consultar preço de item já comprado sem ler o texto inteiro 
   Se o Claude não extrair `ID da transação`, a proteção por identificador não atua.
   Justificativa: afeta apenas comprovantes sem número de transação visível; raro no MP.
 
-- **Média — `bot.py` com 4.068 linhas, parcialmente modularizado**
+- **Média — `bot.py` com 6.546 linhas (2026-10-09), parcialmente modularizado**
   ADR-004 (2026-07-02) extraiu dispatch table + módulo `nfe/`. `fornecedor/`/`obra/`/`comprovante/`
   avaliados e adiados com gatilho próprio (schema de `parcelas_pagamento` não decidido,
   `_total_pago()` usa banco global, atomicidade de `_gerar_recibo()`). Extração de `entrega/`
