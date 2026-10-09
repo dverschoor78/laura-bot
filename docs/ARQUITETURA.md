@@ -292,12 +292,17 @@ sobre por que esse acoplamento entre tabelas de domínios diferentes ainda exist
 Campos relevantes: `nome`, `razao_social`, `cnpj`, `cpf`, `chave_pix`, `email`,
 `whatsapp`, `logradouro`, `bairro`, `cidade`, `uf`, `ramo`, `receita_pendente`.
 
-Uso: `buscar_fornecedor()` tenta primeiro por CNPJ, depois pelo primeiro token do nome.
+Uso: `buscar_fornecedor()` (regras de 2026-10-09, Lição #17): CNPJ/CPF válido de um cadastro;
+senão o nome inteiro (sem acento, pontuação nem caixa) ou o começo exato, com 2 palavras ou mais,
+de um só cadastro com documento válido; senão `None` — fornecedor novo. Nunca a primeira palavra
+do nome. O CNPJ lido do documento sai de `_cnpj_do_documento()`: o campo CNPJ/CPF ou, sem ele, a
+chave PIX quando é um CNPJ.
 Quando encontrado, os dados do cadastro prevalecem sobre os dados extraídos pelo Claude.
 Campo `ramo` é salvo automaticamente quando extraído do orçamento e o fornecedor ainda não o tem.
 
 Quando um orçamento traz um CNPJ que não bate com nenhum cadastro (`buscar_fornecedor()` retorna
-`None`), `_criar_fornecedor_auto()` cadastra um novo fornecedor automaticamente e tenta enriquecer
+`None`), `_criar_fornecedor_auto()` — só com CNPJ de dígito verificador válido — cadastra um novo
+fornecedor automaticamente (e o pedido já sai com os dados dele) e tenta enriquecer
 com dado oficial da Receita (BrasilAPI). Se a consulta falhar, `receita_pendente=1`; o job
 `_sincronizar_receita_fornecedores()` resincroniza todos os fornecedores com CNPJ a cada 6h.
 Sem relação de FK com as demais tabelas.

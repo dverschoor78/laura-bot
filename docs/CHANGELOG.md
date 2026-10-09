@@ -15,11 +15,11 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > sozinhas com o uso do dia a dia não entram aqui (ex: fechar um pedido parcelado esperando
 > pagamento). Ver Dívida Técnica em `docs/ROADMAP.md`.
 
-0. **GGV03-032 e GGV03-024 com o fornecedor errado + `buscar_fornecedor()` pela primeira palavra**
-   *(novo, 2026-10-09 — Lição #17)* — decidir com o Dennis como corrigir o pedido (pago ao
-   Tabelionato de Notas, gravado como Tabelionato de Protesto) e consertar a busca: CNPJ válido
-   fora do cadastro = fornecedor novo, não o primeiro nome parecido; conferir o dígito
-   verificador ao cadastrar (o ONR id 34 tem CNPJ inválido)
+0. **Fornecedor certo no pedido** *(Lição #17)* — Entrega 1 feita em 0.19.0; falta o Dennis
+   rodar Revisar → ✅ Gerar no **GGV03-032** e no **GGV03-024** (e eu conferir). **Entrega 2**
+   (aprovada): consertar a leitura do recebedor no comprovante PIX — 19 de 52 leram a VII —,
+   testar nos 19 antes de subir, e conferir fornecedor × recebedor no "Confirmar pagamento?" e
+   × emitente na chegada da NF-e, com a tela de divergência aprovada
 1. **Validar o contador de pedidos ao vivo** *(0.17.1, em produção desde 2026-10-09)* — o
    próximo pedido real da GGV03 tem que sair GGV03-040
 2. **GGV01-001 — código usado duas vezes e PDF na pasta da GGV03** *(novo, 2026-10-09)* —
@@ -60,6 +60,62 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > (Proxmox do Eric), obra de teste GGV99, pasta automática para obra nova, trocar NF-e
 > vinculada errada, reenvio de arquivo já recebido, `Restart=always`, correção manual do
 > comprovante PIX e da parcela, mais de uma NF-e por pedido — ver entradas abaixo.
+
+---
+
+## [0.19.0] — Fornecedor certo no pedido (Entrega 1) — 2026-10-09
+
+### Motivação
+
+GGV03-032 e GGV03-024 estavam gravados com o fornecedor errado (Lição #17): `buscar_fornecedor()`
+casava pela primeira palavra do nome quando o CNPJ do documento não estava no cadastro. Plano em
+duas entregas, aprovado pelo Dennis: esta corrige na origem e pelo Revisar; a próxima confere o
+recebedor do PIX e o emitente da NF-e contra o fornecedor do pedido.
+
+### Mudado
+
+- **`buscar_fornecedor()`**: (1) CNPJ/CPF válido (dígito verificador; nunca o da VII ou da DeltaD)
+  → o cadastro com esse documento, nas colunas `cnpj` e `cpf`; (2) nome igual por inteiro — sem
+  acento, pontuação nem caixa — a cadastros com um só documento válido, ou o começo exato (2
+  palavras ou mais) de um só ("Operador Nacional" → ONR); CNPJ de outra filial da mesma empresa
+  vira cadastro próprio; (3) senão, fornecedor novo. Nunca mais "o nome mais parecido".
+- **Chave PIX que é um CNPJ** vale como CNPJ do fornecedor quando o campo CNPJ não traz um válido
+  (caso do 024) — nos quatro lugares que leem o fornecedor de um documento (resumo, PDF do
+  pedido, recibo e geração do pedido).
+- **Cadastro automático só com CNPJ de dígito verificador válido** (o ONR id 34 e o "Graif
+  revestimento" tinham entrado com CNPJ lido errado); pedido de fornecedor novo já sai com a
+  razão social e o endereço da Receita.
+- Resumo do Revisar: nome e CNPJ sempre do mesmo fornecedor (o 032 mostrava o nome do Tabelionato
+  de Protesto com o CNPJ do de Notas).
+- **Revisar → Gerar com troca de fornecedor** (troca decidida pelo CNPJ, não pelo nome — "Base
+  Forte" e "ESPACO AZUL…" são o mesmo): o PDF anterior vai para `Old`; os arquivos do pedido
+  (orçamento, comprovantes, NF-e, fatura, recibos, fotos) ganham o nome do fornecedor novo —
+  movendo, nunca apagando —, com o caminho corrigido no banco quando ele guarda; **as NF-e do
+  pedido são conferidas de novo** contra o fornecedor novo (pedido do Dennis): "emitente confere
+  ✓", "mesma empresa, outra filial" ou "⚠️ é de outro emitente — se não for deste pedido, troque a
+  NF-e"; a mensagem mostra antes/agora e se o fornecedor foi cadastrado agora. Revisão sem troca:
+  mensagem de sempre, mais "PDF anterior em Old" quando o nome do PDF mudou (antes ficavam os
+  dois na pasta).
+- `documento_formatado()` (`financeiro/relatorios.py`) virou pública: a mesma validação de
+  CNPJ/CPF na prestação de contas e no bot.
+
+### Testado
+
+Cópia nova do banco de produção. Regra nova contra os 47 pedidos, comparando pelo CNPJ: só mudam
+o 024 e o 032 (os dois errados) e o GGV02-005 e o GGV03-004, que saem de cadastros com CNPJ
+inválido ("Graif revestimento", ONR id 34) para o mesmo fornecedor com CNPJ válido; os outros 43
+ficam com o mesmo fornecedor. Casos de borda (028 "Operador Nacional", 025 com o CPF do Dennis,
+ONR com acento, Carlessi matriz × filial, filial nova, CNPJ da VII, uma palavra só, CPF na coluna
+`cpf`). Revisar → Gerar no 032 e no 024 pelo handler real: pedido e cadastro novos com os dados
+da Receita (simulada), PDF anterior em `Old`, arquivos renomeados — os do 027 e do 020, dos
+fornecedores antigos, intactos —, caminho do recibo corrigido no banco, NF-e do 024 "emitente
+confere ✓"; revisão sem troca (Base Forte); Receita fora do ar. Regressão: conciliação, NF-e,
+bloqueio, exclusão e numeração passando.
+
+### Falta
+
+O Dennis corrigir o **GGV03-032** e o **GGV03-024** pelo Telegram: abrir o pedido → Revisar →
+✅ Gerar. A correção é pela frente, não por fora do banco.
 
 ---
 

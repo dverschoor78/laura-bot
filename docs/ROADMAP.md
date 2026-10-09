@@ -984,14 +984,14 @@ que `bot.py` parecia "bagunçado".
    particular). Próximo passo natural, se fizer falta: guardar na Laura o que hoje é preenchido no
    Excel (obra das saídas sem pedido, categoria das entradas) e registrar a conta de origem de
    cada pagamento
-   - **GGV03-032 e GGV03-024 com o fornecedor errado + `buscar_fornecedor()` pela primeira palavra**
-     *(achado ao montar a coluna CNPJ/CPF — Lição #17 em `LICOES_EXTRACAO.md`)* — o pagamento foi
-     ao Tabelionato de Notas (45.134.842/0001-74, fora do cadastro) e o pedido ficou com o
-     Tabelionato de Protesto, o único "TABELIONATO%" cadastrado; o 024 é da Blum & Chinato
-     Madeiras (31.317.200/0001-04) e ficou com a B&C ("BLUM%"). Decidir com o Dennis: como
-     corrigir o pedido (não há troca de fornecedor em pedido gerado; excluir e refazer muda o
-     código) e o conserto da busca (CNPJ válido fora do cadastro = fornecedor novo; dígito
-     verificador ao cadastrar — o ONR id 34 tem CNPJ inválido)
+   - **Fornecedor certo no pedido** *(Lição #17 em `LICOES_EXTRACAO.md`)* — **Entrega 1 feita**
+     (0.19.0): busca sem "primeira palavra", chave PIX como CNPJ, cadastro só com CNPJ válido e
+     Revisar trocando o fornecedor de ponta a ponta. Falta o Dennis rodar Revisar → ✅ Gerar no
+     **GGV03-032** (Tabelionato de Notas, 45.134.842/0001-74) e no **GGV03-024** (Blum & Chinato
+     Madeiras, 31.317.200/0001-04). **Entrega 2** (aprovada, com a tela de divergência): consertar
+     a leitura do recebedor no comprovante PIX (19 de 52 leram a VII) e testar nos 19 antes de
+     subir; conferir fornecedor × recebedor no "Confirmar pagamento?" e × emitente na chegada da
+     NF-e
 1. **Validar o contador de pedidos por obra ao vivo** *(em produção desde 2026-10-09)* —
    `proximo_pfm_numero()` era `MAX+1` sobre os pedidos existentes: excluir o
    pedido mais recente devolvia o número, e o próximo pedido herdava o código (GGV03-029 e
@@ -1076,6 +1076,13 @@ gatilho original (consultar preço de item já comprado sem ler o texto inteiro 
 ---
 
 ## Dívida Técnica
+
+- **Baixa — CNPJ do fornecedor resolvido em dois lugares** *(2026-10-09)*
+  A prestação de contas (`financeiro/relatorios.py`) resolve o CNPJ do fornecedor do pedido com
+  regra própria (CNPJ do orçamento se cadastrado, senão nome inteiro), parecida com a de
+  `buscar_fornecedor()` (`bot.py`), sem o começo de nome, a filial e a chave PIX. Hoje dão o mesmo
+  resultado nos pedidos existentes. Unificar quando o domínio de fornecedor sair do `bot.py`
+  (ADR-004 adiou `fornecedor/`).
 
 - **Alta — código de pedido reaproveitado depois de excluir o pedido mais recente** *(corrigido,
   em produção desde 2026-10-09)*

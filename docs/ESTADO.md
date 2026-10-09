@@ -67,13 +67,15 @@
 >   errada** pelo cockpit (08/08); `Restart=always` nos dois serviços (12/08); **menu ao
 >   reenviar arquivo já recebido** — descartar e liberar reenvio, ou manter (12/08). Detalhes
 >   no CHANGELOG.
-> - **6 entregas na mesma sessão** (planos aprovados pelo Dennis antes do código; detalhe em
+> - **7 entregas na mesma sessão** (planos aprovados pelo Dennis antes do código; detalhe em
 >   Última Fiada Implementada): **0.17.1** código de pedido nunca reaproveitado (contador por
 >   obra); **0.17.2** "Excluir pedido" sem rastros, arquivos para `Old`; **0.17.3** pedido gerado
 >   não muda de obra nem de tipo; **0.17.4** correção da leitura da NF-e (pedido do Dennis);
 >   **0.18.0** conciliação do extrato do Mercado Pago + planilha de prestação de contas no modelo
 >   da contabilidade (Diniz), para o RET da GGV03; **0.18.1** Fornecedor, CNPJ/CPF e Descrição em
->   colunas próprias na planilha (pedido do Dennis). A validar no uso real: próximo pedido da GGV03
+>   colunas próprias na planilha (pedido do Dennis); **0.19.0** fornecedor certo no pedido — busca
+>   sem "primeira palavra" e Revisar trocando fornecedor (GGV03-032 e 024 a corrigir pelo Dennis).
+>   A validar no uso real: próximo pedido da GGV03
 >   = **GGV03-040**; próxima NF-e com "✏️ Corrigir dados"; extrato de setembro enviado pelo Dennis.
 > - **Contexto do RET (2026-10-09)**: a contabilidade Diniz mandou um modelo de prestação de
 >   contas (PAGAMENTOS e RECEBIMENTOS, 8 colunas). A conta Mercado Pago da VII paga **várias
@@ -319,6 +321,11 @@ container (SSH + tmux + Claude Code), sem nada a abrir no firewall do Eric.
 
 ## Versão Atual
 
+**v0.19.0** — Fornecedor certo no pedido: `buscar_fornecedor()` sem "primeira palavra" (CNPJ
+válido, nome inteiro ou começo exato de um só cadastro, senão fornecedor novo), chave PIX como
+CNPJ, cadastro automático só com CNPJ válido, e Revisar trocando o fornecedor de ponta a ponta
+(PDF anterior em Old, arquivos renomeados, NF-e conferida de novo)
+
 **v0.18.1** — Prestação de contas com Fornecedor, CNPJ/CPF (do cadastro, dígito verificador
 conferido) e Descrição em colunas próprias, nas duas abas
 
@@ -457,6 +464,39 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 ---
 
 ## Última Fiada Implementada
+
+**Fornecedor certo no pedido — Entrega 1** *(2026-10-09, v0.19.0)*
+
+Gatilho: montando a coluna CNPJ/CPF da prestação de contas apareceu o GGV03-032 com o fornecedor
+errado; comparando fornecedor × recebedor do PIX × emitente da NF-e em todo o banco (ideia do
+Dennis: a Laura confrontar o fornecedor ao lançar o pagamento) apareceu o GGV03-024. Causa comum:
+`buscar_fornecedor()` casava pela primeira palavra quando o CNPJ do documento não estava no
+cadastro (Lição #17). A mesma análise mostrou que a checagem no PIX, sozinha, não pegaria o 032:
+19 de 52 comprovantes têm a VII lida como recebedor — por isso duas entregas, aprovadas pelo
+Dennis: esta (origem + Revisar) e a próxima (leitura do recebedor + checagem no PIX e na NF-e).
+Ajuste aprovado no meio: em vez de um botão "Trocar fornecedor", completar o **Revisar**, que já
+trocava fornecedor mas deixava o PDF antigo na pasta, os arquivos com o nome velho e caía no mesmo
+erro da primeira palavra ("convergência antes de paralelismo").
+
+**Implementado** (`bot.py`): `buscar_fornecedor()` com as três regras (documento válido; nome
+inteiro ou começo exato de um só cadastro com documento válido; senão `None`), `_doc_chave()`,
+`_nome_normalizado()`, `_cnpj_do_documento()` (chave PIX que é CNPJ) usado nos quatro leitores do
+fornecedor; `_criar_fornecedor_auto()` só com CNPJ válido, devolvendo se cadastrou, chamado antes
+de decidir o fornecedor em `gerar_pfm()` — o pedido de fornecedor novo já sai com a razão social
+da Receita; `_executar_revisao_pfm()` decide a troca pelo CNPJ (`_doc_do_fornecedor()`,
+`_doc_fornecedor_do_documento()`), move o PDF anterior para `Old`, renomeia os arquivos do pedido
+(`_renomear_arquivos_do_pedido()`, corrigindo `documentos.caminho`), confere as NF-e de novo
+(`_conferir_nfe_com_fornecedor()`, pedido do Dennis no meio da implementação) e monta a mensagem
+de antes/agora. `documento_formatado()` de `financeiro/relatorios.py` virou pública.
+
+**Testado** (nada tocou produção): regra nova contra os 47 pedidos — só mudam 024, 032 e os dois
+presos a cadastro com CNPJ inválido (GGV02-005, GGV03-004), todos para o fornecedor certo; casos
+de borda da busca; Revisar no 032 e no 024 de ponta a ponta; revisão sem troca; Receita fora do
+ar. Regressão das cinco suítes anteriores passando.
+
+**Falta**: o Dennis rodar Revisar → ✅ Gerar no 032 e no 024 em produção; eu confiro.
+
+---
 
 **Conciliação do extrato Mercado Pago + prestação de contas (RET da GGV03)** *(2026-10-09)*
 
@@ -2275,10 +2315,14 @@ da lista abaixo):
 - **Prestação de contas de setembro** — Dennis manda o extrato pelo Telegram, preenche no Excel
   o que a Laura não sabe (obra das saídas sem lançamento, categoria das entradas) e leva à Diniz
   com as perguntas: conta compartilhada entre obras, aportes, reembolso do GGV03-036
-- **GGV03-032 e GGV03-024 com o fornecedor errado** (Lição #17) — 032 pago ao Tabelionato de
-  Notas, gravado como Tabelionato de Protesto; 024 da Blum & Chinato Madeiras, gravado como B&C;
-  decidir como corrigir o pedido e o `buscar_fornecedor()` (CNPJ fora do
-  cadastro = fornecedor novo; dígito verificador ao cadastrar — ONR id 34 com CNPJ inválido)
+- **GGV03-032 e GGV03-024 com o fornecedor errado** (Lição #17) — o Dennis roda Revisar → ✅ Gerar
+  em cada um (0.19.0); conferir depois: fornecedor novo, PDF anterior em Old, arquivos renomeados,
+  NF-e do 024 "emitente confere ✓"
+- **Fornecedor certo no pedido — Entrega 2** (aprovada): consertar a leitura do recebedor no
+  comprovante PIX (19 de 52 leram a VII), testar nos 19 antes de subir, e conferir fornecedor ×
+  recebedor no "Confirmar pagamento?" e × emitente na chegada da NF-e
+- **GGV03-004** — o "NF-e" vinculado à taxa do ONR é o documento da compra do terreno (R$ 888 mil,
+  Agropecuária Florentia): perguntado ao Dennis se foi de propósito, sem resposta ainda
 - Arquivos arquivados com a data do processamento por causa da Lição #16 (ex: FUNREJUS de 10/09
   como `2026-09-11 …`) — renomear só se o Dennis quiser
 - **GGV02** — decidir o arquivamento (item 4 do ROADMAP): já há pedido fora do OneDrive

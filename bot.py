@@ -25,7 +25,7 @@ from financeiro.lancamento import (init_db_financeiro, init_db_notas_fiscais, su
 from financeiro.consultas import procurar_item
 from financeiro.conciliacao import (processar_extrato_mp, identificar_correspondencias,
                                     apelido_conta, ExtratoInvalido)
-from financeiro.relatorios import gerar_planilha_prestacao_contas
+from financeiro.relatorios import gerar_planilha_prestacao_contas, documento_formatado
 from nfe import parse_nfe, mostrar_nfe, teclado_candidatos_nfe, mostrar_troca_nfe, teclado_confirmar_troca_nfe
 from compras import (init_db_compras, criar_ou_buscar_lista_aberta, buscar_lista,
                       atualizar_lista, encerrar_lista, listar_listas_obra,
@@ -992,12 +992,14 @@ def _resumo_gerar(doc_id):
         return None if (not val or val == "A PREENCHER") else val
 
     nome_claude = _v(_campo(dados, "Fornecedor"))
-    cnpj        = _v(_campo(dados, "CNPJ/CPF"))
+    cnpj        = _v(_cnpj_do_documento(dados))
     pix         = _v(_campo(dados, "Chave PIX"))
     forn_db     = buscar_fornecedor(nome_claude, cnpj)
     if forn_db:
         fornecedor = forn_db.get("razao_social") or forn_db.get("nome") or nome_claude or "Fornecedor não identificado"
-        cnpj = cnpj or forn_db.get("cnpj") or forn_db.get("cpf")
+        # Documento do cadastro primeiro, como no PDF: nome e CNPJ sempre do mesmo fornecedor
+        # (antes, o GGV03-032 mostrava o nome do Tabelionato de Protesto com o CNPJ do de Notas)
+        cnpj = forn_db.get("cnpj") or forn_db.get("cpf") or cnpj
         pix  = pix or forn_db.get("chave_pix")
     else:
         fornecedor = nome_claude or "Fornecedor não identificado"
@@ -1117,18 +1119,19 @@ def _consultar_receita(cnpj_digits: str, timeout: float = 4.0) -> Optional[dict]
     except Exception:
         return None
 
-def _criar_fornecedor_auto(nome_claude, cnpj_claude, ramo_claude, doc_id, chave_pix_claude=None):
+def _criar_fornecedor_auto(nome_claude, cnpj_claude, ramo_claude, doc_id, chave_pix_claude=None) -> bool:
     """Cadastra um fornecedor novo a partir de um orçamento com CNPJ ainda não conhecido.
-    Tenta enriquecer com dado oficial da Receita; se a consulta falhar, marca para sincronizar depois."""
-    if not cnpj_claude or cnpj_claude == "A PREENCHER":
-        return
-    cnpj_digits = re.sub(r"\D", "", cnpj_claude)
+    Tenta enriquecer com dado oficial da Receita; se a consulta falhar, marca para sincronizar depois.
+    Só com dígito verificador válido — o cadastro já tinha um ONR com CNPJ inválido (Lição #17).
+    Devolve True se cadastrou."""
+    cnpj = documento_formatado(cnpj_claude) if cnpj_claude and cnpj_claude != "A PREENCHER" else None
+    cnpj_digits = _doc_chave(cnpj)
     # Só bloqueia a VII (dona do empreendimento, nunca é fornecedora). A DeltaD PODE ser cadastrada
     # aqui de verdade — ela é uma empresa técnica que fatura a VII por serviços (ex: GGV03-002),
     # diferente do guard de buscar_fornecedor() que ignora ambas por segurança contra Pagador
     # confundido com Fornecedor em boleto.
     if len(cnpj_digits) != 14 or cnpj_digits == DELTAD_CNPJ_DIGITS:
-        return
+        return False
     receita = _consultar_receita(cnpj_digits)
     # Ramo: prefere o que o Claude leu no documento (mais específico ao contexto da compra);
     # cai pro CNAE oficial da Receita só se o documento não tiver essa informação
@@ -1136,11 +1139,11 @@ def _criar_fornecedor_auto(nome_claude, cnpj_claude, ramo_claude, doc_id, chave_
     ramo = ramo_doc or (receita.get("ramo") if receita else None)
     pix  = chave_pix_claude if chave_pix_claude and chave_pix_claude != "A PREENCHER" else None
     with sqlite3.connect(DB_PATH) as con:
-        con.execute(
+        cur = con.execute(
             "INSERT OR IGNORE INTO fornecedores "
             "(nome, cnpj, razao_social, cidade, uf, ramo, cnae, email, whatsapp, chave_pix, origem, receita_pendente) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (nome_claude, cnpj_claude,
+            (nome_claude, cnpj,
              receita["razao_social"] if receita else None,
              receita["cidade"] if receita else None,
              receita["uf"] if receita else None,
@@ -1151,35 +1154,73 @@ def _criar_fornecedor_auto(nome_claude, cnpj_claude, ramo_claude, doc_id, chave_
              pix, f"Cadastro automático — doc {doc_id}",
              0 if receita else 1)
         )
+    return cur.rowcount == 1
+
+def _doc_chave(texto) -> str:
+    """CNPJ/CPF só com dígitos e letras (o CNPJ alfanumérico tem letras), pra comparar formatos."""
+    return re.sub(r"[^0-9A-Z]", "", (texto or "").upper())
+
+def _nome_normalizado(nome) -> str:
+    """Nome sem acento, pontuação nem caixa: "ELETRÔNICO ... (ONR)" e "ELETRONICO ... ( ONR )"
+    viram a mesma chave."""
+    sem_acento = unicodedata.normalize("NFKD", nome or "").encode("ascii", "ignore").decode()
+    return " ".join(re.sub(r"[^A-Za-z0-9]", " ", sem_acento).upper().split())
+
+def _cnpj_do_documento(dados) -> str:
+    """CNPJ/CPF do fornecedor no documento: o campo "CNPJ/CPF"; se ele não traz um documento
+    válido, a chave PIX quando ela é um CNPJ (GGV03-024: orçamento sem CNPJ, chave PIX = CNPJ da
+    Blum & Chinato Madeiras). Senão, o campo como veio (ex: "A PREENCHER")."""
+    campo = _campo(dados, "CNPJ/CPF")
+    if documento_formatado(campo):
+        return campo
+    pix = documento_formatado(_campo(dados, "Chave PIX"))
+    return pix if pix and len(_doc_chave(pix)) == 14 else campo
 
 def buscar_fornecedor(nome_claude, cnpj_claude=None):
-    """Busca no BD: 1º por CNPJ exato, 2º por prefixo do nome."""
+    """Fornecedor do cadastro que corresponde ao nome/CNPJ lido no documento, ou None — fornecedor
+    novo (gerar_pfm() cadastra pela Receita). Nunca "o nome mais parecido": casar pela primeira
+    palavra trocou o Tabelionato de Notas pelo de Protesto (GGV03-032) e a Blum & Chinato Madeiras
+    pela B&C (GGV03-024) — Lição #17.
+      1. CNPJ/CPF válido (dígito verificador) e que não seja nosso (Lição #2) → o cadastro com
+         esse documento.
+      2. Nome igual por inteiro (sem acento, pontuação nem caixa) ao nome ou à razão social de
+         cadastros com um só documento válido — ou, sem nenhum igual, o começo exato (2 palavras
+         ou mais) de um só ("Operador Nacional" → ONR, GGV03-028; nunca o contrário: "Blum &
+         Chinato" é o começo de "Blum & Chinato Madeiras", e é outra empresa) → esse cadastro, a
+         não ser que o CNPJ lido seja de outra filial da mesma empresa (mesma raiz) → fornecedor
+         novo. Cobre o documento que traz o CPF de quem pediu no lugar do fornecedor (GGV03-025:
+         CPF do Dennis num pedido do ONR).
+      3. Senão → None."""
+    doc = documento_formatado(cnpj_claude) if cnpj_claude and cnpj_claude != "A PREENCHER" else None
+    if _doc_chave(doc) in CNPJS_PROPRIOS_DIGITS:
+        doc = None
     with sqlite3.connect(DB_PATH) as con:
-        sel = f"SELECT {', '.join(_FORN_COLS)} FROM fornecedores"
-
-        # 1. CNPJ — mais confiável; ignora os nossos próprios CNPJs (dado de fatura extraído errado,
-        # ex: Pagador de um boleto confundido com Fornecedor)
-        if cnpj_claude and cnpj_claude != "A PREENCHER":
-            cnpj_digits = re.sub(r"\D", "", cnpj_claude)
-            if cnpj_digits not in CNPJS_PROPRIOS_DIGITS:
-                row = con.execute(
-                    f"{sel} WHERE REPLACE(REPLACE(REPLACE(cnpj,'.','' ),'/',''),'-','') = ? LIMIT 1",
-                    (cnpj_digits,)
-                ).fetchone()
-                if row:
-                    return dict(zip(_FORN_COLS, row))
-
-        # 2. Prefixo do primeiro token do nome (evita falsos positivos de substring)
-        if nome_claude and nome_claude != "A PREENCHER":
-            primeiro = nome_claude.strip().upper().split()[0]
-            row = con.execute(
-                f"{sel} WHERE UPPER(nome) LIKE ? OR UPPER(razao_social) LIKE ? LIMIT 1",
-                (f"{primeiro}%", f"{primeiro}%")
-            ).fetchone()
-            if row:
-                return dict(zip(_FORN_COLS, row))
-
-    return None
+        cadastro = [dict(zip(_FORN_COLS, r)) for r in
+                    con.execute(f"SELECT {', '.join(_FORN_COLS)} FROM fornecedores ORDER BY id")]
+    if doc:
+        for forn in cadastro:
+            if _doc_chave(doc) in (_doc_chave(forn["cnpj"]), _doc_chave(forn["cpf"])):
+                return forn
+    nome = _nome_normalizado(nome_claude if nome_claude != "A PREENCHER" else "")
+    if not nome:
+        return None
+    iguais, comecam = {}, {}
+    for forn in cadastro:
+        doc_forn = documento_formatado(forn["cnpj"]) or documento_formatado(forn["cpf"])
+        nomes = {_nome_normalizado(forn["nome"]), _nome_normalizado(forn["razao_social"])} - {""}
+        if not doc_forn:
+            continue
+        if nome in nomes:
+            iguais.setdefault(doc_forn, forn)
+        elif len(nome.split()) >= 2 and any(n.startswith(nome + " ") for n in nomes):
+            comecam.setdefault(doc_forn, forn)
+    candidatos = iguais or comecam
+    if len(candidatos) != 1:
+        return None
+    doc_forn, forn = next(iter(candidatos.items()))
+    if doc and len(_doc_chave(doc)) == 14 and _doc_chave(doc)[:8] == _doc_chave(doc_forn)[:8]:
+        return None  # outra filial da mesma empresa: cadastro próprio
+    return forn
 
 # ── PFM ───────────────────────────────────────────────────────────────────
 
@@ -1580,7 +1621,7 @@ def _gerar_html_pc(doc_id: int) -> str:
     obra        = buscar_obra(ggv)
 
     nome_claude = _campo(dados, "Fornecedor")
-    cnpj_claude = _campo(dados, "CNPJ/CPF")
+    cnpj_claude = _cnpj_do_documento(dados)
     forn_db     = buscar_fornecedor(nome_claude, cnpj_claude)
     if forn_db:
         fornecedor = forn_db.get("razao_social") or forn_db.get("nome") or nome_claude
@@ -1767,7 +1808,7 @@ def _gerar_html_recibo(parcela_id: int) -> str:
     dados = row[0] if row else ""
 
     nome_claude = _campo(dados, "Fornecedor")
-    cnpj_claude = _campo(dados, "CNPJ/CPF")
+    cnpj_claude = _cnpj_do_documento(dados)
     forn_db = buscar_fornecedor(nome_claude, cnpj_claude)
     if forn_db:
         prestador_nome = forn_db.get("razao_social") or forn_db.get("nome") or nome_claude
@@ -2002,10 +2043,15 @@ def gerar_pfm(doc_id, categoria=None, pfm_codigo_override=None):
     ggv, dados, condicao, data_entrega_db, endereco, desconto_rs, caminho_original = row
 
     nome_claude   = _campo(dados, "Fornecedor")
-    cnpj_claude   = _campo(dados, "CNPJ/CPF")
+    cnpj_claude   = _cnpj_do_documento(dados)
     ramo_claude   = _campo(dados, "Ramo de atividade")
     resumo_claude = _campo(dados, "Resumo da compra")
     forn_db       = buscar_fornecedor(nome_claude, cnpj_claude)
+    if not forn_db and _criar_fornecedor_auto(nome_claude, cnpj_claude, ramo_claude, doc_id,
+                                              _campo(dados, "Chave PIX")):
+        # Fornecedor novo, cadastrado agora: o pedido já sai com a razão social e o endereço da
+        # Receita, como o de um fornecedor antigo
+        forn_db = buscar_fornecedor(nome_claude, cnpj_claude)
 
     if forn_db:
         fornecedor = forn_db.get("razao_social") or forn_db.get("nome") or nome_claude
@@ -2046,7 +2092,6 @@ def gerar_pfm(doc_id, categoria=None, pfm_codigo_override=None):
         pix         = _campo(dados, "Chave PIX")
         ramo        = ramo_claude
         forn_logr = forn_bairro = forn_cidade = forn_email = forn_fone = forn_contato = ""
-        _criar_fornecedor_auto(nome_claude, cnpj_claude, ramo_claude, doc_id, pix)
 
     prazo        = _campo(dados, "Prazo de entrega")
     if prazo == "A PREENCHER":
@@ -3188,14 +3233,93 @@ async def _executar_gerar_pfm(query, ctx, doc_id, ggv, categoria):
     await ctx.bot.send_message(chat_id=DONO_ID, text=lanc_msg)
 
 
+def _doc_do_fornecedor(nome):
+    """CNPJ/CPF do fornecedor gravado num pedido — o pedido guarda só o nome."""
+    forn = buscar_fornecedor(nome, None) if nome else None
+    return (documento_formatado(forn.get("cnpj")) or documento_formatado(forn.get("cpf"))) if forn else None
+
+def _doc_fornecedor_do_documento(dados):
+    """CNPJ/CPF do fornecedor que o documento do pedido aponta hoje (cadastro, senão o lido)."""
+    forn = buscar_fornecedor(_campo(dados, "Fornecedor"), _cnpj_do_documento(dados))
+    if forn:
+        return documento_formatado(forn.get("cnpj")) or documento_formatado(forn.get("cpf"))
+    return documento_formatado(_cnpj_do_documento(dados))
+
+def _renomear_arquivos_do_pedido(pfm_codigo: str, fornecedor_antigo: str, fornecedor_novo: str) -> tuple:
+    """Troca o nome do fornecedor no nome dos arquivos do pedido (orçamento, comprovantes, NF-e,
+    fatura, recibos, fotos da entrega) — movendo, nunca apagando nem sobrescrevendo — e corrige o
+    caminho dos que o banco guarda (recibos). O PDF do pedido fica de fora: o novo já sai com o
+    nome certo e o anterior vai pra Old. Retorna (renomeados, falhas)."""
+    antigo, novo = _nome_arquivo_seguro(fornecedor_antigo), _nome_arquivo_seguro(fornecedor_novo)
+    if not antigo or not novo or antigo == novo:
+        return 0, 0
+    ggv = pfm_codigo.split("-")[0]
+    renomeados = falhas = 0
+    for pasta in (_pasta_orcamentos(ggv), _pasta_controle_financeiro(ggv), _pasta_entrega(ggv)):
+        try:
+            arquivos = _arquivos_do_pedido(pasta, pfm_codigo)
+        except OSError:
+            falhas += 1
+            continue
+        for arquivo in arquivos:
+            if antigo not in arquivo.name:
+                continue
+            alvo = arquivo.with_name(arquivo.name.replace(antigo, novo, 1))
+            destino, n = alvo, 2
+            while destino.exists():
+                destino, n = alvo.with_name(f"{alvo.stem} ({n}){alvo.suffix}"), n + 1
+            try:
+                arquivo.rename(destino)
+            except OSError:
+                falhas += 1
+                continue
+            with sqlite3.connect(DB_PATH) as con:
+                con.execute("UPDATE documentos SET caminho=? WHERE caminho=?", (str(destino), str(arquivo)))
+            renomeados += 1
+    return renomeados, falhas
+
+def _v_ou_none(valor):
+    return None if not valor or valor == "A PREENCHER" else valor
+
+def _conferir_nfe_com_fornecedor(pfm_codigo: str, doc_fornecedor) -> list:
+    """Uma linha por NF-e do pedido, conferindo o emitente com o fornecedor — trocou o
+    fornecedor, a NF-e tem que ser conferida de novo (Dennis, 2026-10-09)."""
+    with sqlite3.connect(DB_PATH) as con:
+        notas = con.execute(
+            "SELECT n.numero, COALESCE(d.dados_claude, '') FROM notas_fiscais_pedido n "
+            "LEFT JOIN documentos d ON d.id = n.doc_id WHERE n.pfm_codigo=? ORDER BY n.id", (pfm_codigo,)
+        ).fetchall()
+    linhas = []
+    for numero, dados in notas:
+        numero = numero or _v_ou_none(_campo(dados, "Número da NF"))
+        rotulo = f"NF-e {numero}" if numero else "NF-e"
+        emitente = documento_formatado(_campo(dados, "CNPJ/CPF do emitente"))
+        nome = _v_ou_none(_campo(dados, "Nome do emitente")) or "emitente sem nome"
+        if not emitente or _doc_chave(emitente) in CNPJS_PROPRIOS_DIGITS:
+            linhas.append(f"🧾 {rotulo} — não consegui ler o emitente; confira")
+        elif doc_fornecedor and _doc_chave(emitente) == _doc_chave(doc_fornecedor):
+            linhas.append(f"🧾 {rotulo} — emitente confere ✓")
+        elif (doc_fornecedor and len(_doc_chave(emitente)) == 14
+              and _doc_chave(emitente)[:8] == _doc_chave(doc_fornecedor)[:8]):
+            linhas.append(f"🧾 {rotulo} — mesma empresa, outra filial ({emitente})")
+        else:
+            linhas.append(f"⚠️ {rotulo} é de outro emitente: {nome} — {emitente}. "
+                          "Se não for deste pedido, troque a NF-e")
+    return linhas
+
 async def _executar_revisao_pfm(query, ctx, doc_id, pfm_codigo_base):
     with sqlite3.connect(DB_PATH) as con:
-        row = con.execute("SELECT rev_numero FROM documentos WHERE id=?", (doc_id,)).fetchone()
+        row = con.execute("SELECT rev_numero, caminho_pfm FROM documentos WHERE id=?", (doc_id,)).fetchone()
         rev_num = (row[0] or 0) + 1
         con.execute("UPDATE documentos SET rev_numero=? WHERE id=?", (rev_num, doc_id))
+        forn_antes = (con.execute("SELECT fornecedor FROM lancamentos WHERE pfm_codigo=?",
+                                  (pfm_codigo_base,)).fetchone() or [None])[0]
+        ultimo_forn = con.execute("SELECT COALESCE(MAX(id), 0) FROM fornecedores").fetchone()[0]
+    pfm_antes = Path(row[1]) if row[1] else None
+    doc_antes = _doc_do_fornecedor(forn_antes)
     rev_codigo = f"{pfm_codigo_base}-R{rev_num:02d}"
     await query.edit_message_text(f"Gerando revisão {rev_codigo}...")
-    caminho_rev, *_ = gerar_pfm(doc_id, pfm_codigo_override=rev_codigo)
+    caminho_rev, _, forn_depois, *_ = gerar_pfm(doc_id, pfm_codigo_override=rev_codigo)
     nome_principal    = caminho_rev.name.replace(rev_codigo, pfm_codigo_base, 1)
     caminho_principal = caminho_rev.parent / nome_principal
     atualizar(doc_id, caminho_pfm=str(caminho_principal))
@@ -3211,9 +3335,58 @@ async def _executar_revisao_pfm(query, ctx, doc_id, pfm_codigo_base):
     )
     ctx.user_data.pop("modo_revisao", None)
     ctx.user_data.pop("modo_revisao_doc", None)
+
+    # PDF anterior com outro nome (mudou o fornecedor ou o resumo) sai de circulação — antes ficava
+    # na pasta ao lado do novo
+    pdf_em_old = falhas = 0
+    if pfm_antes and pfm_antes != caminho_principal.with_suffix(".pdf") and pfm_antes.exists():
+        if _mover_para_old(pfm_antes):
+            pdf_em_old = 1
+        else:
+            falhas += 1
+    # Troca de fornecedor é pelo CNPJ, não pelo nome: "Base Forte" → "ESPACO AZUL..." é o mesmo
+    doc_depois = _doc_fornecedor_do_documento(_dados_doc(doc_id))
+    if doc_antes and doc_depois:
+        trocou = _doc_chave(doc_antes) != _doc_chave(doc_depois)
+    else:
+        trocou = _nome_normalizado(forn_antes) != _nome_normalizado(forn_depois)
+
+    if trocou:
+        renomeados, falhas_ren = _renomear_arquivos_do_pedido(pfm_codigo_base, forn_antes, forn_depois)
+        falhas += falhas_ren
+        with sqlite3.connect(DB_PATH) as con:
+            novos = con.execute("SELECT cnpj, receita_pendente FROM fornecedores WHERE id > ?",
+                                (ultimo_forn,)).fetchall()
+        cadastro = next(("cadastrado agora, dados da Receita" if not pendente else
+                         "cadastrado agora; a Receita não respondeu, completa depois"
+                         for cnpj, pendente in novos if _doc_chave(cnpj) == _doc_chave(doc_depois)), None)
+        linhas = [f"✅ {rev_codigo} gerado.", "", "Fornecedor trocado",
+                  f"  antes  {forn_antes or '—'}",
+                  f"  agora  {forn_depois}" + (f" — {doc_depois}" if doc_depois else "")]
+        if cadastro:
+            linhas.append(f"         ({cadastro})")
+        nfe = _conferir_nfe_com_fornecedor(pfm_codigo_base, doc_depois)
+        if nfe:
+            linhas += [""] + nfe
+        arquivos = []
+        if renomeados:
+            arquivos.append(f"{renomeados} arquivo{'s' if renomeados > 1 else ''} "
+                            f"renomeado{'s' if renomeados > 1 else ''}")
+        if pdf_em_old:
+            arquivos.append("PDF anterior em Old")
+        if arquivos:
+            linhas += ["", "📁 " + " · ".join(arquivos)]
+        texto = "\n".join(linhas)
+    else:
+        texto = f"✅ {rev_codigo} gerado. Lançamento financeiro mantido."
+        if pdf_em_old:
+            texto += " PDF anterior em Old."
+    if falhas:
+        texto += (f"\n\n⚠️ O OneDrive não deixou mexer em {falhas} "
+                  f"arquivo{'s' if falhas > 1 else ''} — confira a pasta.")
     await ctx.bot.send_message(
         chat_id=DONO_ID,
-        text=f"✅ {rev_codigo} gerado. Lançamento financeiro mantido.",
+        text=texto,
         reply_markup=teclado_pedido(doc_id, pfm_codigo_base)
     )
 

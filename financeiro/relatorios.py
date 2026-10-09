@@ -619,7 +619,7 @@ def _documentos_dos_pedidos(db_path, pagamentos: list) -> tuple:
                 resumo = "; ".join(itens[pfm][:3]) + (f" (+{resto} itens)" if resto > 0 else "")
             resumos[pfm] = resumo
             m = re.search(r"^[\s*-]*CNPJ/CPF:\**\s*(.+)$", dados or "", re.M | re.I)
-            cnpjs_orcamento[pfm] = _documento_formatado(m.group(1)) if m else None
+            cnpjs_orcamento[pfm] = documento_formatado(m.group(1)) if m else None
         ids = [p["parcela_id"] for p in pagamentos]
         for pid, gerado, assinado in con.execute(
                 f"SELECT id, doc_id_recibo IS NOT NULL, doc_id_recibo_assinado IS NOT NULL "
@@ -628,7 +628,7 @@ def _documentos_dos_pedidos(db_path, pagamentos: list) -> tuple:
     return nfes, resumos, cnpjs_orcamento, recibos
 
 
-def _documento_formatado(texto):
+def documento_formatado(texto):
     """Primeiro CNPJ (numérico ou alfanumérico, como a Receita emite desde 2026) ou CPF do texto,
     no formato usual, só se os dígitos verificadores conferem; senão None — na prestação de contas,
     melhor em branco do que errado (o cadastro tem um CNPJ inválido do ONR, 2026-10-09)."""
@@ -649,7 +649,7 @@ def _cadastro_cnpj_cpf(db_path) -> tuple:
     todos, por_nome = set(), {}
     with sqlite3.connect(db_path) as con:
         for nome, razao, cnpj, cpf in con.execute("SELECT nome, razao_social, cnpj, cpf FROM fornecedores"):
-            doc = _documento_formatado(cnpj) or _documento_formatado(cpf)
+            doc = documento_formatado(cnpj) or documento_formatado(cpf)
             if doc:
                 todos.add(doc)
                 for n in {(nome or "").strip().casefold(), (razao or "").strip().casefold()} - {""}:

@@ -410,9 +410,13 @@ erro. Os demais pedidos do passo 2 (SANEPAR, ONR) conferem com NF-e/PIX.
 (id 34) tem o CNPJ 45.997.665/0001-86, que a Receita recusa (dígito verificador) — o ONR de
 verdade é o id 31, 37.318.313/0001-00. Ninguém conferia o dígito ao cadastrar.
 
-**Correção:** pendente, decisão do Dennis (corrigir o GGV03-032 e o GGV03-024, e a busca). A planilha de
-prestação de contas já se protege: CNPJ do orçamento só vale se está no cadastro, nome só casa
-completo, e CNPJ/CPF inválido fica em branco (`validate-docbr`).
+**Correção (0.19.0):** `buscar_fornecedor()` só aceita o CNPJ/CPF válido de um cadastro, o nome
+inteiro ou o começo exato (2 palavras ou mais) de um só cadastro com documento válido — senão,
+fornecedor novo, cadastrado pela Receita; chave PIX que é CNPJ vale como CNPJ; cadastro automático
+só com dígito verificador válido. O 032 e o 024 se corrigem pela frente, no Revisar, que agora
+troca o fornecedor de ponta a ponta. A planilha de prestação de contas já se protegia: CNPJ do
+orçamento só vale se está no cadastro, nome só casa completo, e CNPJ/CPF inválido fica em branco
+(`validate-docbr`).
 
 **Lição geral:** CNPJ válido no documento e fora do cadastro quer dizer **fornecedor novo** —
 nunca "o mais parecido pelo nome". Casar por nome só com o nome inteiro, e na dúvida perguntar.
