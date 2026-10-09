@@ -613,7 +613,7 @@ Referências para navegação no arquivo (6.546 linhas em 2026-10-09):
 ## 6. Limitações Conhecidas
 
 - **Código de pedido reaproveitado depois de excluir o pedido mais recente** (achado
-  2026-10-09; **corrigido no código no mesmo dia — aguardando deploy**) — `proximo_pfm_numero()`
+  2026-10-09; **corrigido e em produção no mesmo dia**) — `proximo_pfm_numero()`
   calculava `MAX(pfm_numero)+1` sobre os documentos que ainda existem. Excluir o pedido mais
   recente liberava o número; o pedido seguinte herdava o código, enquanto os arquivos do
   excluído continuavam no OneDrive com o mesmo código (no pior caso — mesmo fornecedor e

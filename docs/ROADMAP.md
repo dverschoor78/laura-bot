@@ -969,8 +969,8 @@ que `bot.py` parecia "bagunçado".
 > gatilho arquitetural que ainda não ocorreu) não são fiadas — ficam registradas em Dívida Técnica
 > ou no ADR correspondente, sem duplicar aqui como se fossem tarefa da próxima sessão.
 
-1. **Deploy do contador de pedidos por obra** *(implementado e testado 2026-10-09 — falta push
-   e deploy)* — `proximo_pfm_numero()` era `MAX+1` sobre os pedidos existentes: excluir o
+1. **Validar o contador de pedidos por obra ao vivo** *(em produção desde 2026-10-09)* —
+   `proximo_pfm_numero()` era `MAX+1` sobre os pedidos existentes: excluir o
    pedido mais recente devolvia o número, e o próximo pedido herdava o código (GGV03-029 e
    GGV00-005). Agora o contador `numeracao_pedidos` só sobe. A numeração existente não muda —
    GGV03-029 fica vago; GGV02 continua do 022. Validar ao vivo: próximo pedido da GGV03 =
@@ -1055,8 +1055,8 @@ gatilho original (consultar preço de item já comprado sem ler o texto inteiro 
 
 ## Dívida Técnica
 
-- **Alta — código de pedido reaproveitado depois de excluir o pedido mais recente** *(corrigido
-  no código em 2026-10-09 — aguardando deploy)*
+- **Alta — código de pedido reaproveitado depois de excluir o pedido mais recente** *(corrigido,
+  em produção desde 2026-10-09)*
   Era `MAX(pfm_numero)+1` sobre os documentos que ainda existem; agora é o contador
   `numeracao_pedidos`, que só sobe. Casos reais: GGV03-029 e GGV00-005. Ver Próximas Fiadas,
   item 1.

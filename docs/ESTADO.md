@@ -26,8 +26,8 @@
 >   Segundo caso achado: **GGV00-005** foi dado a dois pedidos (FUNREJUS e Junta Comercial), os
 >   dois excluídos — os 4 arquivos órfãos foram movidos para `Old` por decisão do Dennis (os 2
 >   PDFs em `04 Compras/Old/`; os 2 orçamentos em `04 Compras/00 Orçamentos/Old/`, porque têm
->   o mesmo nome dos PDFs). **Corrigido no código na mesma sessão** — ver Última Fiada
->   Implementada; falta push e deploy.
+>   o mesmo nome dos PDFs). **Corrigido e em produção na mesma sessão** (deploy 13:02) — ver
+>   Última Fiada Implementada.
 > - **"Excluir pedido" deixa rastros**: `_excluir_pedido()` não limpa `itens_pedido` nem
 >   `notas_fiscais_pedido`, e só descarta a primeira NF-e. Itens soltos hoje: GGV00-005,
 >   GGV01-001 e GGV03-029 — inofensivos, porque `procurar_item()` só enxerga item com pedido.
@@ -280,7 +280,7 @@ container (SSH + tmux + Claude Code), sem nada a abrir no firewall do Eric.
 
 **v0.17.1** — Código de pedido nunca mais é reaproveitado: contador por obra
 (`numeracao_pedidos`) que só sobe; numeração existente intacta (GGV03-029 vago); GGV02 continua
-do 022, depois dos pedidos manuais — implementado e testado, aguardando deploy
+do 022, depois dos pedidos manuais — em produção desde 2026-10-09 13:02
 
 **v0.17.0** — N NF-e por pedido (Caso 2 do ROADMAP Fase 6): tabela `notas_fiscais_pedido`,
 `lancamentos.doc_id_nfe` preservado como "primeira NF-e" por compatibilidade; fechamento
@@ -418,9 +418,11 @@ existente intacta, 029 vago; e o fluxo real do `gerar_pfm()` + `_excluir_pedido(
 excluído, GGV03-041, revisão GGV03-041-R01 sem gastar número, GGV03-042, GGV00-006, GGV01-002,
 GGV02-022. SQLite do servidor (3.46) suporta o `ON CONFLICT ... DO UPDATE` usado.
 
-**Pendente**: push (a credencial do GitHub no Windows foi recusada — Dennis precisa logar de
-novo) e deploy (`git pull` + `systemctl restart laura-bot`, com OK do Dennis). Validação ao
-vivo: o próximo pedido real da GGV03 tem que sair **GGV03-040**.
+**Deploy** em 2026-10-09 13:02, depois de Dennis renovar o login do GitHub no Windows (o
+token salvo tinha expirado; o push em segundo plano abriu a janela de login): `git pull` +
+`systemctl restart laura-bot`. Bot ativo, sem erro na subida, conectado ao Telegram; contadores
+em produção GGV00=5, GGV01=1, GGV02=21, GGV03=39; numeração existente intacta. **Falta só a
+validação ao vivo**: o próximo pedido real da GGV03 tem que sair **GGV03-040**.
 
 ---
 
@@ -1859,8 +1861,8 @@ em script à parte), incluindo múltiplas fotos, revisão de PFM e datas em form
 
 ## Em Andamento
 
-**Correção do reuso de código de pedido** *(implementada e testada 2026-10-09 — aguardando
-push e deploy)*
+**Correção do reuso de código de pedido** *(em produção desde 2026-10-09 — aguardando o
+primeiro pedido real, que tem que sair GGV03-040)*
 
 Ver Última Fiada Implementada. Restrição do Dennis respeitada: a numeração existente não muda
 — GGV03-029 fica vago, 001–039 intocados.
@@ -1891,7 +1893,7 @@ Ver Última Fiada Implementada. Restrição do Dennis respeitada: a numeração 
   banco vivo, sem `CREATE INDEX` em `bot.py` ou script versionado — um banco recriado do zero não
   os recria, performance de consulta regride silenciosamente até rodar o comando manual de novo.
 - **Código de pedido reaproveitado depois de excluir o pedido mais recente** (2026-10-09 —
-  corrigido no código com o contador `numeracao_pedidos`, aguardando deploy): era
+  corrigido e em produção, contador `numeracao_pedidos`): era
   `MAX(pfm_numero)+1` sobre os documentos que existem. Casos reais: GGV03-029 e GGV00-005.
 - **"Excluir pedido" deixa rastros** (2026-10-09): `_excluir_pedido()` não limpa
   `itens_pedido` nem `notas_fiscais_pedido`, e só descarta a primeira NF-e.
@@ -2023,9 +2025,8 @@ Ver Última Fiada Implementada. Restrição do Dennis respeitada: a numeração 
 **Novos em 2026-10-09** (achados na conferência com a produção — prioridade sugerida, antes
 da lista abaixo):
 
-- **Deploy do contador de pedidos por obra** — implementado e testado 2026-10-09; falta o
-  push (credencial do GitHub no Windows) e o deploy; validar que o próximo pedido real da
-  GGV03 sai GGV03-040
+- **Validar o contador de pedidos ao vivo** — em produção desde 2026-10-09; o próximo pedido
+  real da GGV03 tem que sair GGV03-040
 - **"Excluir pedido" deixa rastros** — limpar `itens_pedido` e `notas_fiscais_pedido` e
   descartar todas as NF-e do pedido, não só a primeira (plano a apresentar ao Dennis)
 - **Corrigir dados da NF-e antes de vincular** (pedido do Dennis) — hoje a tela da NF-e só

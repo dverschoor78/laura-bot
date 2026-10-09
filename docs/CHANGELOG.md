@@ -15,8 +15,8 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > sozinhas com o uso do dia a dia não entram aqui (ex: fechar um pedido parcelado esperando
 > pagamento). Ver Dívida Técnica em `docs/ROADMAP.md`.
 
-1. **Deploy do contador de pedidos por obra** *(0.17.1, implementado e testado 2026-10-09 —
-   falta push e deploy)*; validar ao vivo que o próximo pedido da GGV03 sai GGV03-040
+1. **Validar o contador de pedidos ao vivo** *(0.17.1, em produção desde 2026-10-09)* — o
+   próximo pedido real da GGV03 tem que sair GGV03-040
 2. **Excluir pedido deixa rastros** *(novo, 2026-10-09)* — `_excluir_pedido()` não limpa
    `itens_pedido` nem `notas_fiscais_pedido`, e só descarta a primeira NF-e. Itens soltos são
    inofensivos (a busca de histórico ignora item sem pedido); NF-e solta seria herdada por um
@@ -85,6 +85,11 @@ código, enquanto os arquivos do excluído continuavam no OneDrive com o mesmo c
 
 - Arquivos órfãos de pedidos excluídos movidos para `Old` (nada apagado): os 4 do GGV03-029 e
   os 4 do GGV00-005.
+
+### Em produção
+
+Deploy em 2026-10-09 13:02; contadores conferidos no banco de produção (GGV00=5, GGV01=1,
+GGV02=21, GGV03=39) e numeração existente intacta.
 
 ---
 
