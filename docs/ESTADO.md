@@ -67,6 +67,12 @@
 >   errada** pelo cockpit (08/08); `Restart=always` nos dois serviços (12/08); **menu ao
 >   reenviar arquivo já recebido** — descartar e liberar reenvio, ou manter (12/08). Detalhes
 >   no CHANGELOG.
+> - **4 entregas na mesma sessão, todas em produção** (planos aprovados pelo Dennis antes do
+>   código; detalhe em Última Fiada Implementada): **0.17.1** código de pedido nunca
+>   reaproveitado (contador por obra); **0.17.2** "Excluir pedido" sem rastros, arquivos para
+>   `Old`; **0.17.3** pedido gerado não muda de obra nem de tipo; **0.17.4** correção da
+>   leitura da NF-e (pedido do Dennis). A validar no uso real: próximo pedido da GGV03 =
+>   **GGV03-040**; próxima NF-e recebida com "✏️ Corrigir dados".
 
 > Atualizado em: 2026-08-28 — **N NF-e por pedido — implementado, testado, deployado e
 > validado em produção no mesmo dia** (ver entrada de 2026-10-09). Gatilho: Dennis reportou o **GGV03-025** (Operador Nacional do
@@ -302,7 +308,8 @@ container (SSH + tmux + Claude Code), sem nada a abrir no firewall do Eric.
 
 **v0.17.4** — Correção da leitura da NF-e: "✏️ Corrigir dados" (valor, número, emitente,
 CNPJ/CPF, data) na chegada e na prévia da troca; NF-e sem pedido correspondente fica para
-corrigir ou descartar; troca grava valor e número; leitura do valor com a regra da Lição #4
+corrigir ou descartar; troca grava valor e número; leitura do valor com a regra da Lição #4 —
+em produção desde 2026-10-09 13:51
 
 **v0.17.3** — Documento que já virou pedido não muda de obra nem de tipo: "🏗 GGV" e "📋 Tipo
 doc." mostram o caminho (excluir e reenviar); botões antigos do Telegram não releem nem trocam
@@ -451,6 +458,9 @@ pedindo de novo; "← Voltar" cancelando; vínculo gravando valor/número corrig
 número corrigido; NF-e sem pedido não descartada; troca com correção na prévia gravando valor e
 número. Na **cópia do banco de produção**: as 25 NF-e reais já vinculadas dão o mesmo valor com
 a leitura nova. Regressão: bloqueio, exclusão e numeração passando.
+
+**Deploy** em 2026-10-09 13:51: bot ativo, sem erro no log, conectado ao Telegram. Validação ao
+vivo na próxima NF-e recebida.
 
 ---
 

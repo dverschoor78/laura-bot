@@ -83,6 +83,10 @@ puxa dados errados" e não havia como corrigir.
 - Leitura do valor da NF-e com a mesma regra do resto da Laura (Lição #4): "R$ 83.39" virava
   R$ 8.339. Conferido contra as 25 NF-e reais já vinculadas — mesmo valor em todas.
 
+### Em produção
+
+Deploy em 2026-10-09 13:51.
+
 ---
 
 ## [0.17.3] — Pedido gerado não muda de obra nem de tipo — 2026-10-09
