@@ -28,7 +28,8 @@
 >   PDFs em `04 Compras/Old/`; os 2 orçamentos em `04 Compras/00 Orçamentos/Old/`, porque têm
 >   o mesmo nome dos PDFs). **Corrigido e em produção na mesma sessão** (deploy 13:02) — ver
 >   Última Fiada Implementada.
-> - **"Excluir pedido" deixava rastros** — **corrigido na mesma sessão (0.17.2)**: além de
+> - **"Excluir pedido" deixava rastros** — **corrigido na mesma sessão (0.17.2, em produção
+>   13:18)**: além de
 >   limpar `itens_pedido` e `notas_fiscais_pedido` e descartar todas as NF-e, excluir agora
 >   move os arquivos do pedido para `Old`; "Trocar NF-e" também (antes apagava o arquivo
 >   errado). Itens soltos antigos (GGV00-005, GGV01-001, GGV03-029) ficam — inofensivos,
@@ -287,7 +288,7 @@ container (SSH + tmux + Claude Code), sem nada a abrir no firewall do Eric.
 
 **v0.17.2** — "Excluir pedido" sem rastros: apaga também itens e todas as NF-e, e move os
 arquivos do pedido no OneDrive para `Old` (nada apagado); "Trocar NF-e" manda a NF-e errada
-para `Old` em vez de apagar
+para `Old` em vez de apagar — em produção desde 2026-10-09 13:18
 
 **v0.17.1** — Código de pedido nunca mais é reaproveitado: contador por obra
 (`numeracao_pedidos`) que só sobe; numeração existente intacta (GGV03-029 vago); GGV02 continua
@@ -430,6 +431,10 @@ caminhos de falha (OneDrive recusa um arquivo, pasta ilegível) viram aviso ⚠�
 depois do banco já limpo; regressão do contador de pedidos (22 testes) passando; **OneDrive real**: no servidor, com o
 código novo numa pasta temporária, arquivos fictícios na obra de teste GGV99 foram para os
 `Old` reais nas 4 pastas sem falha (limpos depois).
+
+**Deploy** em 2026-10-09 13:18 (`git pull` + `systemctl restart laura-bot`): bot ativo, sem erro
+no log, conectado ao Telegram; contadores de pedido inalterados. Validação ao vivo acontece na
+próxima exclusão ou troca de NF-e real.
 
 ---
 

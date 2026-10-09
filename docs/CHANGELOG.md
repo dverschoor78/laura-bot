@@ -82,6 +82,11 @@ soltos com um código que não existe mais — Dennis tinha que limpar à mão (
 - `_mover_para_old()` + `_mover_arquivos_do_pedido_para_old()` — um mecanismo só, usado pelo
   "Excluir" e pelo "Trocar NF-e"; `_remover_arquivo_financeiro_antigo()` removida.
 
+### Em produção
+
+Deploy em 2026-10-09 13:18; mover para `Old` validado antes no OneDrive real (obra de teste
+GGV99).
+
 ---
 
 ## [0.17.1] — Código de pedido nunca mais é reaproveitado — 2026-10-09
