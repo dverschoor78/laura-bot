@@ -34,11 +34,22 @@
 >   move os arquivos do pedido para `Old`; "Trocar NF-e" também (antes apagava o arquivo
 >   errado). Itens soltos antigos (GGV00-005, GGV01-001, GGV03-029) ficam — inofensivos,
 >   porque `procurar_item()` só enxerga item com pedido.
-> - **GGV01-001 — 2 arquivos órfãos na pasta da GGV03**: conta da Sanepar lançada na GGV01 em
->   12/09, excluída e refeita como GGV03-035; os 2 PDFs (original e R01) ficaram em
->   `2026-06 GGV03/04 Compras`. Varredura de GGV00 e GGV03 contra o banco: são as únicas sobras.
->   Decisão do Dennis pendente (mover para `Old`?). Como um PDF da GGV01 (obra sem pasta) foi
->   parar na pasta da GGV03 não está claro — investigar se acontecer de novo.
+> - **GGV01-001 — código usado duas vezes, 6 arquivos órfãos** (verificado pelo conteúdo, depois
+>   de Dennis questionar uma conclusão apressada minha — "conta de água é mensal"): (1) 12/09, a
+>   conta da Sanepar (matrícula 4145.7392, referência 08/2026, R$ 60,05) entrou como GGV01-001,
+>   foi excluída e refeita como **GGV03-035** — as duas contas originais têm o mesmo CTRL
+>   (4145.7392.0826.5154) e o mesmo código de barras, e há um só pagamento de R$ 60,05; (2) 21/09,
+>   o orçamento de areia da IS Ferreira (7 m³, R$ 890,00) recebeu **de novo** o código GGV01-001
+>   (3º caso do reuso de código), foi excluído e refeito como **GGV03-037** — orçamento original
+>   idêntico byte a byte. Sobras: 2 PDFs no OneDrive (`2026-06 GGV03/04 Compras`) e 4 arquivos
+>   no disco do servidor (`data/pfms`). Decisão do Dennis pendente (mover para `Old`?).
+> - **Por que havia PDF da GGV01 na pasta da GGV03 — bug de programa**: trocar a obra de um
+>   documento (`_cb_set_ggv()`) não verifica se ele já virou pedido — o documento passa a dizer
+>   GGV03 e o pedido continua GGV01-001. A revisão (`_executar_revisao_pfm()`) escolhe a pasta
+>   pela obra do documento e grava ali o R01 **e** uma cópia com o nome principal: os dois PDFs
+>   idênticos das 07:38 na pasta da GGV03, logo depois do original das 07:37 na pasta da GGV01.
+>   Correção ainda não planejada. Observação, não verificada: nos dois casos a sugestão inicial
+>   foi GGV01, e GGV01, GGV02 e GGV03 têm o mesmo endereço de entrega no cadastro.
 > - **GGV02 já está em uso sem decisão de arquivamento**: 5 pedidos da Laura desde 04/08.
 >   001–004 foram para `00 Obras/2025-05 GGV02/04 Compras`, ao lado dos pedidos manuais
 >   GGV02-001 a 021 de antes da Laura, com os mesmos códigos. O 005 (e as revisões R01–R03, de
@@ -442,7 +453,7 @@ próxima exclusão ou troca de NF-e real.
 
 Gatilho: diagnóstico do GGV03-029 (ver topo deste documento). `proximo_pfm_numero()` era
 `MAX(pfm_numero)+1` sobre os documentos que existem — excluir o pedido mais recente devolvia o
-número, e o pedido seguinte herdava o código (GGV03-029 e GGV00-005). Plano e critério de
+número, e o pedido seguinte herdava o código (GGV03-029, GGV00-005 e, achado depois, GGV01-001). Plano e critério de
 aceite aprovados pelo Dennis antes do código, com duas decisões dele: a numeração existente
 não muda (GGV03-029 fica vago para sempre) e a GGV02 continua do **022**, depois dos pedidos
 manuais GGV02-001 a 021 que já existem no OneDrive.
@@ -1949,7 +1960,7 @@ Ver Última Fiada Implementada. Restrição do Dennis respeitada: a numeração 
   os recria, performance de consulta regride silenciosamente até rodar o comando manual de novo.
 - **Código de pedido reaproveitado depois de excluir o pedido mais recente** (2026-10-09 —
   corrigido e em produção, contador `numeracao_pedidos`): era
-  `MAX(pfm_numero)+1` sobre os documentos que existem. Casos reais: GGV03-029 e GGV00-005.
+  `MAX(pfm_numero)+1` sobre os documentos que existem. Casos reais: GGV03-029, GGV00-005 e GGV01-001.
 - ~~**"Excluir pedido" deixa rastros**~~ — corrigido em 0.17.2 (2026-10-09).
 - `bot.py` com 6.546 linhas (2026-10-09) — parcialmente modularizado (ADR-004, 2026-07-02): dispatch table +
   módulo `nfe/` extraído. `fornecedor/`, `obra/`, `comprovante/` avaliados e adiados com gatilho
@@ -2081,7 +2092,8 @@ da lista abaixo):
 
 - **Validar o contador de pedidos ao vivo** — em produção desde 2026-10-09; o próximo pedido
   real da GGV03 tem que sair GGV03-040
-- **GGV01-001** — decidir se os 2 PDFs órfãos que ficaram na pasta da GGV03 vão para `Old`
+- **GGV01-001** — decidir se os 6 arquivos órfãos (2 no OneDrive, 4 no servidor) vão para
+  `Old`; e planejar a correção de "trocar a obra de um pedido já gerado" (ver topo)
 - **Corrigir dados da NF-e antes de vincular** (pedido do Dennis) — hoje a tela da NF-e só
   deixa escolher o pedido ou descartar, e às vezes a leitura erra; ver ROADMAP, Próximas
   Fiadas, item 3

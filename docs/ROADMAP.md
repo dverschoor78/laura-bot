@@ -975,11 +975,15 @@ que `bot.py` parecia "bagunçado".
    GGV00-005). Agora o contador `numeracao_pedidos` só sobe. A numeração existente não muda —
    GGV03-029 fica vago; GGV02 continua do 022. Validar ao vivo: próximo pedido da GGV03 =
    GGV03-040
-2. **GGV01-001: 2 arquivos órfãos na pasta da GGV03** *(novo, 2026-10-09)* — conta da Sanepar
-   lançada na GGV01 em 12/09, excluída e refeita como GGV03-035; os 2 PDFs (original e R01)
-   ficaram em `2026-06 GGV03/04 Compras`. Decidir se vão para `Old`. Como um PDF da GGV01
-   (obra sem pasta) foi parar na pasta da GGV03 não está claro — investigar se acontecer de
-   novo. ("Excluir pedido deixa rastros", o item que estava aqui, foi resolvido em 0.17.2)
+2. **GGV01-001 — código usado duas vezes e PDF na pasta da GGV03** *(novo, 2026-10-09)*:
+   - **Decisão**: 6 arquivos órfãos (Sanepar 12/09, refeita como GGV03-035; areia 21/09,
+     refeita como GGV03-037 — ambos verificados pelo conteúdo) — 2 no OneDrive
+     (`2026-06 GGV03/04 Compras`), 4 no disco do servidor (`data/pfms`). Vão para `Old`?
+   - **Bug de programa**: trocar a obra de um documento que já virou pedido (`_cb_set_ggv()`)
+     não é bloqueado — o documento muda de obra e o pedido não; a revisão seguinte grava o PDF
+     (R01 + cópia principal) na pasta da obra nova com o código antigo. Planejar a correção
+     (ex: bloquear a troca com mensagem clara, ou mudar o pedido de obra de verdade)
+   - ("Excluir pedido deixa rastros", o item que estava aqui, foi resolvido em 0.17.2)
 3. **Corrigir dados da NF-e antes de vincular** *(pedido do Dennis, 2026-10-09)* — ao receber
    uma NF-e, a Laura lê os campos e só deixa escolher o pedido ou descartar o arquivo; não há
    como corrigir um campo lido errado, e às vezes a leitura erra. Convergir com o "✏️ Corrigir
@@ -1059,7 +1063,7 @@ gatilho original (consultar preço de item já comprado sem ler o texto inteiro 
 - **Alta — código de pedido reaproveitado depois de excluir o pedido mais recente** *(corrigido,
   em produção desde 2026-10-09)*
   Era `MAX(pfm_numero)+1` sobre os documentos que ainda existem; agora é o contador
-  `numeracao_pedidos`, que só sobe. Casos reais: GGV03-029 e GGV00-005. Ver Próximas Fiadas,
+  `numeracao_pedidos`, que só sobe. Casos reais: GGV03-029, GGV00-005 e GGV01-001. Ver Próximas Fiadas,
   item 1.
 
 - ~~**Média — "Excluir pedido" deixa rastros em `itens_pedido` e `notas_fiscais_pedido`**~~
