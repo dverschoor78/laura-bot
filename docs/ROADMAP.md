@@ -980,9 +980,16 @@ que `bot.py` parecia "bagunçado".
    NF-e nasceu depois da função). Itens soltos hoje: GGV00-005, GGV01-001, GGV03-029 —
    inofensivos (`procurar_item()` só enxerga item com pedido); NF-e solta seria herdada por
    um pedido que reaproveitasse o código
-3. ✓ **GGV00-005: 4 arquivos órfãos no OneDrive** *(resolvido 2026-10-09)* — dois pedidos
-   diferentes (FUNREJUS e Junta Comercial) receberam esse código e os dois foram excluídos;
-   arquivos movidos para `04 Compras/Old/` e `04 Compras/00 Orçamentos/Old/`
+3. **Corrigir dados da NF-e antes de vincular** *(pedido do Dennis, 2026-10-09)* — ao receber
+   uma NF-e, a Laura lê os campos e só deixa escolher o pedido ou descartar o arquivo; não há
+   como corrigir um campo lido errado, e às vezes a leitura erra. Convergir com o "✏️ Corrigir
+   dados" do comprovante PIX (2026-08-27: `_substituir_campo()` + lista de campos editáveis,
+   disponível mesmo sem candidato, busca de candidatos refeita depois da correção). Campos:
+   número, emitente, CNPJ/CPF, valor e data de emissão. Mesma lacuna na prévia do "Trocar
+   NF-e" (só Confirmar/Cancelar). Suspeito conhecido para valor errado: `parse_nfe()`
+   (`nfe/nfe.py`) limpa o valor na mão em vez de usar `_parse_brl()` (Lição #4 de
+   `LICOES_EXTRACAO.md`). A definir no plano: corrigir também NF-e já vinculada (valor e
+   número em `notas_fiscais_pedido`, que entram na soma do fechamento fiscal)
 4. **Decidir o arquivamento da GGV02** *(atualizado 2026-10-09)* — deixou de ser só decisão
    futura: a obra já tem 5 pedidos da Laura (desde 04/08). 001–004 estão em
    `00 Obras/2025-05 GGV02/04 Compras`, ao lado dos pedidos manuais GGV02-001 a 021 de antes

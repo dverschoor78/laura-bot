@@ -2028,6 +2028,9 @@ da lista abaixo):
   GGV03 sai GGV03-040
 - **"Excluir pedido" deixa rastros** — limpar `itens_pedido` e `notas_fiscais_pedido` e
   descartar todas as NF-e do pedido, não só a primeira (plano a apresentar ao Dennis)
+- **Corrigir dados da NF-e antes de vincular** (pedido do Dennis) — hoje a tela da NF-e só
+  deixa escolher o pedido ou descartar, e às vezes a leitura erra; ver ROADMAP, Próximas
+  Fiadas, item 3
 - **GGV02** — decidir o arquivamento (item 6): já há pedido fora do OneDrive
 
 1. **Validar a Consultoria de Recompra ao vivo em produção** — implementada e testada com

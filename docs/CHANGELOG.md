@@ -21,8 +21,9 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
    `itens_pedido` nem `notas_fiscais_pedido`, e só descarta a primeira NF-e. Itens soltos são
    inofensivos (a busca de histórico ignora item sem pedido); NF-e solta seria herdada por um
    pedido que reaproveitasse o código
-3. ✓ **GGV00-005: 4 arquivos órfãos no OneDrive** *(resolvido 2026-10-09)* — movidos para
-   `Old`, como os do GGV03-029
+3. **Corrigir dados da NF-e antes de vincular** *(pedido do Dennis, 2026-10-09)* — hoje a tela
+   da NF-e só deixa escolher o pedido ou descartar; às vezes a leitura erra. Convergir com o
+   "✏️ Corrigir dados" do comprovante PIX (ver ROADMAP, Próximas Fiadas, item 3)
 4. **Decidir o arquivamento da GGV02** *(atualizado 2026-10-09)* — a obra já tem 5 pedidos da
    Laura: 001–004 no OneDrive, ao lado dos pedidos manuais GGV02-001 a 021 de mesmo código; o
    005 ficou só no disco do servidor, porque a pasta da obra está vazia
