@@ -24,8 +24,10 @@
 >   número e o pedido seguinte herda o código. Os arquivos do excluído continuam no OneDrive com
 >   o mesmo código (no pior caso — mesmo fornecedor e resumo — o PDF novo sobrescreve o antigo).
 >   Segundo caso achado: **GGV00-005** foi dado a dois pedidos (FUNREJUS e Junta Comercial), os
->   dois excluídos — 4 arquivos órfãos em `2024-01 GGV00/04 Compras`, não movidos, aguardam
->   decisão. Correção = próxima fiada (plano em aprovação).
+>   dois excluídos — os 4 arquivos órfãos foram movidos para `Old` por decisão do Dennis (os 2
+>   PDFs em `04 Compras/Old/`; os 2 orçamentos em `04 Compras/00 Orçamentos/Old/`, porque têm
+>   o mesmo nome dos PDFs). **Corrigido no código na mesma sessão** — ver Última Fiada
+>   Implementada; falta push e deploy.
 > - **"Excluir pedido" deixa rastros**: `_excluir_pedido()` não limpa `itens_pedido` nem
 >   `notas_fiscais_pedido`, e só descarta a primeira NF-e. Itens soltos hoje: GGV00-005,
 >   GGV01-001 e GGV03-029 — inofensivos, porque `procurar_item()` só enxerga item com pedido.
@@ -276,6 +278,10 @@ container (SSH + tmux + Claude Code), sem nada a abrir no firewall do Eric.
 
 ## Versão Atual
 
+**v0.17.1** — Código de pedido nunca mais é reaproveitado: contador por obra
+(`numeracao_pedidos`) que só sobe; numeração existente intacta (GGV03-029 vago); GGV02 continua
+do 022, depois dos pedidos manuais — implementado e testado, aguardando deploy
+
 **v0.17.0** — N NF-e por pedido (Caso 2 do ROADMAP Fase 6): tabela `notas_fiscais_pedido`,
 `lancamentos.doc_id_nfe` preservado como "primeira NF-e" por compatibilidade; fechamento
 fiscal exige soma completa com 2+ NF-e (1 NF-e mantém o comportamento histórico); cockpit
@@ -376,6 +382,47 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 ---
 
 ## Última Fiada Implementada
+
+**Código de pedido nunca mais é reaproveitado — contador por obra** *(2026-10-09)*
+
+Gatilho: diagnóstico do GGV03-029 (ver topo deste documento). `proximo_pfm_numero()` era
+`MAX(pfm_numero)+1` sobre os documentos que existem — excluir o pedido mais recente devolvia o
+número, e o pedido seguinte herdava o código (GGV03-029 e GGV00-005). Plano e critério de
+aceite aprovados pelo Dennis antes do código, com duas decisões dele: a numeração existente
+não muda (GGV03-029 fica vago para sempre) e a GGV02 continua do **022**, depois dos pedidos
+manuais GGV02-001 a 021 que já existem no OneDrive.
+
+**Implementado** (`bot.py`): tabela `numeracao_pedidos` (`ggv`, `ultimo_numero`) — o último
+número usado em cada obra, que só sobe; "Excluir pedido" não mexe nela.
+`_init_numeracao_pedidos()` (chamada pelo `init_db()`, idempotente, nunca diminui um contador)
+parte do maior número que já apareceu em qualquer registro — `documentos.pfm_numero` e o
+`pfm_codigo` de `lancamentos`, `itens_pedido`, `parcelas_pagamento`, `notas_fiscais_pedido` e
+`entrega_fotos`, inclusive rastros de pedido excluído — ou do piso de numeração manual
+(`_NUMERACAO_PEDIDO_MINIMA = {"GGV02": 21}`). `proximo_pfm_numero()` reserva o número no
+contador; o `MAX` dos documentos ficou só como rede de segurança. Revisão (R01, R02) não muda:
+continua usando o código existente, sem gastar número.
+
+**Próximo número de cada obra em produção**: GGV00-006, GGV01-002, GGV02-022, GGV03-040.
+
+**Alternativas descartadas**: procurar o maior número nos rastros a cada pedido (só funciona
+porque "Excluir pedido" esquece os itens — deixaria de funcionar quando isso for corrigido); e
+fazer o "Excluir" só marcar o pedido em vez de apagar (mexeria em todas as telas que listam
+pedidos).
+
+**Testado** (nada tocou produção): `py_compile` limpo; 22 testes num script isolado, fora do
+repositório, com todas as pastas desviadas para um diretório temporário (sem OneDrive, sem
+rede). Banco novo: obra nova começa em 1, contadores a partir dos rastros, idempotência,
+excluir o 040 faz o próximo ser 041, rede de segurança, init nunca diminui. **Cópia do banco de
+produção** (backup online do SQLite, só leitura): contadores iniciais 5/1/21/39, numeração
+existente intacta, 029 vago; e o fluxo real do `gerar_pfm()` + `_excluir_pedido()` — GGV03-040,
+excluído, GGV03-041, revisão GGV03-041-R01 sem gastar número, GGV03-042, GGV00-006, GGV01-002,
+GGV02-022. SQLite do servidor (3.46) suporta o `ON CONFLICT ... DO UPDATE` usado.
+
+**Pendente**: push (a credencial do GitHub no Windows foi recusada — Dennis precisa logar de
+novo) e deploy (`git pull` + `systemctl restart laura-bot`, com OK do Dennis). Validação ao
+vivo: o próximo pedido real da GGV03 tem que sair **GGV03-040**.
+
+---
 
 **N NF-e por pedido — Caso 2 do ROADMAP Fase 6** *(2026-08-28)*
 
@@ -1812,10 +1859,11 @@ em script à parte), incluindo múltiplas fotos, revisão de PFM e datas em form
 
 ## Em Andamento
 
-**Correção do reuso de código de pedido** *(planejamento, 2026-10-09)*
+**Correção do reuso de código de pedido** *(implementada e testada 2026-10-09 — aguardando
+push e deploy)*
 
-Plano e critério de aceite aguardam aprovação do Dennis antes do código. Restrição dele: a
-numeração existente não muda — GGV03-029 fica vago, 001–039 intocados.
+Ver Última Fiada Implementada. Restrição do Dennis respeitada: a numeração existente não muda
+— GGV03-029 fica vago, 001–039 intocados.
 
 > Removido daqui em 2026-10-09 (já concluídos há meses): Fase 4b — Pedido de Compra 2.0
 > (validada, DOCX removido em 2026-07-02) e Fiada 6b — recibo automático (concluída em
@@ -1842,9 +1890,9 @@ numeração existente não muda — GGV03-029 fica vago, 001–039 intocados.
 - **9 índices de `data/laura.db` não persistidos em código** (2026-07-03): criados diretamente no
   banco vivo, sem `CREATE INDEX` em `bot.py` ou script versionado — um banco recriado do zero não
   os recria, performance de consulta regride silenciosamente até rodar o comando manual de novo.
-- **Código de pedido reaproveitado depois de excluir o pedido mais recente** (2026-10-09, em
-  correção): `proximo_pfm_numero()` = `MAX(pfm_numero)+1` sobre os documentos que existem.
-  Casos reais: GGV03-029 e GGV00-005.
+- **Código de pedido reaproveitado depois de excluir o pedido mais recente** (2026-10-09 —
+  corrigido no código com o contador `numeracao_pedidos`, aguardando deploy): era
+  `MAX(pfm_numero)+1` sobre os documentos que existem. Casos reais: GGV03-029 e GGV00-005.
 - **"Excluir pedido" deixa rastros** (2026-10-09): `_excluir_pedido()` não limpa
   `itens_pedido` nem `notas_fiscais_pedido`, e só descarta a primeira NF-e.
 - `bot.py` com 6.546 linhas (2026-10-09) — parcialmente modularizado (ADR-004, 2026-07-02): dispatch table +
@@ -1975,11 +2023,11 @@ numeração existente não muda — GGV03-029 fica vago, 001–039 intocados.
 **Novos em 2026-10-09** (achados na conferência com a produção — prioridade sugerida, antes
 da lista abaixo):
 
-- **Corrigir o reuso de código de pedido** — plano em aprovação nesta sessão; a numeração
-  existente não muda (GGV03-029 fica vago)
+- **Deploy do contador de pedidos por obra** — implementado e testado 2026-10-09; falta o
+  push (credencial do GitHub no Windows) e o deploy; validar que o próximo pedido real da
+  GGV03 sai GGV03-040
 - **"Excluir pedido" deixa rastros** — limpar `itens_pedido` e `notas_fiscais_pedido` e
-  descartar todas as NF-e do pedido, não só a primeira
-- **GGV00-005** — decidir se os 4 arquivos órfãos vão para `Old`, como os do GGV03-029
+  descartar todas as NF-e do pedido, não só a primeira (plano a apresentar ao Dennis)
 - **GGV02** — decidir o arquivamento (item 6): já há pedido fora do OneDrive
 
 1. **Validar a Consultoria de Recompra ao vivo em produção** — implementada e testada com

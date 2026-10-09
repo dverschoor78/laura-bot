@@ -969,19 +969,20 @@ que `bot.py` parecia "bagunçado".
 > gatilho arquitetural que ainda não ocorreu) não são fiadas — ficam registradas em Dívida Técnica
 > ou no ADR correspondente, sem duplicar aqui como se fossem tarefa da próxima sessão.
 
-1. **Corrigir o reuso de código de pedido** *(novo, 2026-10-09 — plano em aprovação)* —
-   `proximo_pfm_numero()` calcula `MAX+1` sobre os pedidos existentes: excluir o pedido mais
-   recente devolve o número, e o próximo pedido herda o código (os arquivos do pedido excluído
-   continuam no OneDrive com o mesmo código; no pior caso o PDF novo sobrescreve o antigo).
-   Aconteceu com GGV03-029 e GGV00-005. A numeração existente não muda — GGV03-029 fica vago
+1. **Deploy do contador de pedidos por obra** *(implementado e testado 2026-10-09 — falta push
+   e deploy)* — `proximo_pfm_numero()` era `MAX+1` sobre os pedidos existentes: excluir o
+   pedido mais recente devolvia o número, e o próximo pedido herdava o código (GGV03-029 e
+   GGV00-005). Agora o contador `numeracao_pedidos` só sobe. A numeração existente não muda —
+   GGV03-029 fica vago; GGV02 continua do 022. Validar ao vivo: próximo pedido da GGV03 =
+   GGV03-040
 2. **Excluir pedido deixa rastros** *(novo, 2026-10-09)* — `_excluir_pedido()` não limpa
    `itens_pedido` nem `notas_fiscais_pedido`, e só descarta a primeira NF-e (a tabela de N
    NF-e nasceu depois da função). Itens soltos hoje: GGV00-005, GGV01-001, GGV03-029 —
    inofensivos (`procurar_item()` só enxerga item com pedido); NF-e solta seria herdada por
    um pedido que reaproveitasse o código
-3. **GGV00-005: 4 arquivos órfãos no OneDrive** *(novo, 2026-10-09)* — dois pedidos diferentes
-   (FUNREJUS e Junta Comercial) receberam esse código e os dois foram excluídos; decidir se vão
-   para `Old`, como os do GGV03-029
+3. ✓ **GGV00-005: 4 arquivos órfãos no OneDrive** *(resolvido 2026-10-09)* — dois pedidos
+   diferentes (FUNREJUS e Junta Comercial) receberam esse código e os dois foram excluídos;
+   arquivos movidos para `04 Compras/Old/` e `04 Compras/00 Orçamentos/Old/`
 4. **Decidir o arquivamento da GGV02** *(atualizado 2026-10-09)* — deixou de ser só decisão
    futura: a obra já tem 5 pedidos da Laura (desde 04/08). 001–004 estão em
    `00 Obras/2025-05 GGV02/04 Compras`, ao lado dos pedidos manuais GGV02-001 a 021 de antes
@@ -1047,10 +1048,11 @@ gatilho original (consultar preço de item já comprado sem ler o texto inteiro 
 
 ## Dívida Técnica
 
-- **Alta — código de pedido reaproveitado depois de excluir o pedido mais recente** *(em
-  correção, 2026-10-09)*
-  `proximo_pfm_numero()` = `MAX(pfm_numero)+1` sobre os documentos que ainda existem. Casos
-  reais: GGV03-029 e GGV00-005. Ver Próximas Fiadas, item 1.
+- **Alta — código de pedido reaproveitado depois de excluir o pedido mais recente** *(corrigido
+  no código em 2026-10-09 — aguardando deploy)*
+  Era `MAX(pfm_numero)+1` sobre os documentos que ainda existem; agora é o contador
+  `numeracao_pedidos`, que só sobe. Casos reais: GGV03-029 e GGV00-005. Ver Próximas Fiadas,
+  item 1.
 
 - **Média — "Excluir pedido" deixa rastros em `itens_pedido` e `notas_fiscais_pedido`**
   `_excluir_pedido()` apaga lançamento, parcelas, fotos e documentos, mas não os itens nem as

@@ -3,8 +3,9 @@
 > Versão: 2026-10-09 — produção no servidor Proxmox (seção 2.2, nova); tabela
 > `notas_fiscais_pedido` (mais de uma NF-e por pedido, 2026-08-28); pasta da obra nova criada
 > pelo `/nova_obra` e obra de teste GGV99 (2026-08-07); nomes de arquivo por parcela
-> (comprovante/recibo) e fatura na seção 2.1; limitações novas na seção 6 — código de pedido
-> reaproveitado após exclusão e rastros de "Excluir pedido".
+> (comprovante/recibo) e fatura na seção 2.1; tabela `numeracao_pedidos` — contador de
+> pedidos por obra que só sobe (corrige o código reaproveitado após exclusão); limitação nova
+> na seção 6 — rastros de "Excluir pedido".
 >
 > Versão anterior: 2026-07-06 — reflete o estado real do sistema (pós ADR-004: dispatch table + módulo
 > `nfe/`; DOCX removido; segurança de `responder_botao()`/`atualizar()`/`atualizar_obra()`
@@ -107,7 +108,7 @@ Telegram ──────► bot.py ──────► Claude API (haiku-4-
   (`teclado_escolha_endereco()`/`_cb_endsel()` único, 2026-07-05 — princípio "Convergência
   antes de paralelismo", `docs/CONSTITUICAO.md`). Ainda sem geração de Pedido de Compra a
   partir da Lista nem vínculo com orçamento — ver ROADMAP.md
-- **`data/laura.db`** — banco SQLite com 11 tabelas + o índice FTS5 de `insumos_sinapi` (ver
+- **`data/laura.db`** — banco SQLite com 12 tabelas + o índice FTS5 de `insumos_sinapi` (ver
   seção 3); índices estratégicos criados em 2026-07-03, mas só no banco vivo — não persistidos
   em nenhum `CREATE INDEX` versionado (8 no banco do servidor em 2026-10-09)
 - **`data/uploads/`** — todo arquivo recebido pelo Telegram cai aqui primeiro (pasta única,
@@ -170,8 +171,10 @@ falhar — evita gravar no lugar errado por engano. **No servidor, `data/pfms/` 
 container: não sincroniza com o OneDrive** (caso real: GGV02-005).
 
 **Pasta `Old`** — arquivo que sai de circulação (ex: órfão de pedido excluído) é movido para
-uma subpasta `Old` dentro da própria pasta onde estava, nunca apagado. Mesmo padrão já usado à
-mão nas obras antigas; primeiro uso registrado: os 4 arquivos órfãos do GGV03-029 (2026-10-09).
+uma subpasta `Old`, nunca apagado nem renomeado — mesmo padrão já usado à mão nas obras
+antigas. Usos registrados (2026-10-09): GGV03-029 — orçamento e PDF em `04 Compras/Old/`,
+fatura e comprovante em `01 Controle financeiro/Old/`; GGV00-005 — PDFs em `04 Compras/Old/`
+e orçamentos em `04 Compras/00 Orçamentos/Old/` (têm o mesmo nome dos PDFs).
 
 **Resolução de caminhos (2026-07-10, preparação pro deploy Linux/Proxmox)** — `_raiz_obra()`
 aceita `pasta_onedrive` em duas formas: **relativa** (ex: `00 Obras/2026-06 GGV03`), resolvida
@@ -339,6 +342,25 @@ próxima é promovida. Criada e populada (backfill idempotente) por `init_db_not
 (`financeiro/lancamento.py`). Fechamento fiscal: com 1 NF-e, fecha como sempre; com 2 ou mais,
 a soma precisa cobrir `lancamentos.valor`. `_excluir_pedido()` ainda não limpa esta tabela —
 ver seção 6.
+
+---
+
+**`numeracao_pedidos`** — último número de pedido usado em cada obra (2026-10-09)
+
+| Campo | Propósito |
+|---|---|
+| `ggv` | Código da obra — chave primária |
+| `ultimo_numero` | Último número de pedido já entregue para a obra — só sobe |
+
+`proximo_pfm_numero()` reserva o próximo número aqui (o `MAX(documentos.pfm_numero)` ficou só
+como rede de segurança); "Excluir pedido" não mexe nesta tabela, então código de pedido nunca é
+reaproveitado. `_init_numeracao_pedidos()`, chamada pelo `init_db()`, cria a tabela e garante
+que cada contador seja pelo menos o maior número que já apareceu em qualquer registro
+(`documentos.pfm_numero` e o `pfm_codigo` de `lancamentos`, `itens_pedido`,
+`parcelas_pagamento`, `notas_fiscais_pedido`, `entrega_fotos`) ou o piso de numeração manual
+(`_NUMERACAO_PEDIDO_MINIMA`: GGV02 = 21, pelos pedidos manuais GGV02-001 a 021) — idempotente,
+nunca diminui um contador. Lacunas na sequência são esperadas e aceitas (ex: GGV03-029, vago
+por decisão do Dennis).
 
 ---
 
@@ -591,11 +613,12 @@ Referências para navegação no arquivo (6.546 linhas em 2026-10-09):
 ## 6. Limitações Conhecidas
 
 - **Código de pedido reaproveitado depois de excluir o pedido mais recente** (achado
-  2026-10-09, correção em planejamento) — `proximo_pfm_numero()` calcula
-  `MAX(pfm_numero)+1` sobre os documentos que ainda existem. Excluir o pedido mais recente
-  libera o número; o pedido seguinte herda o código, enquanto os arquivos do excluído continuam
-  no OneDrive com o mesmo código (no pior caso — mesmo fornecedor e resumo — o PDF novo
-  sobrescreve o antigo). Casos reais: GGV03-029 e GGV00-005.
+  2026-10-09; **corrigido no código no mesmo dia — aguardando deploy**) — `proximo_pfm_numero()`
+  calculava `MAX(pfm_numero)+1` sobre os documentos que ainda existem. Excluir o pedido mais
+  recente liberava o número; o pedido seguinte herdava o código, enquanto os arquivos do
+  excluído continuavam no OneDrive com o mesmo código (no pior caso — mesmo fornecedor e
+  resumo — o PDF novo sobrescreveria o antigo). Casos reais: GGV03-029 e GGV00-005. Correção:
+  contador `numeracao_pedidos` (seção 3).
 
 - **"Excluir pedido" deixa rastros** (achado 2026-10-09) — `_excluir_pedido()` apaga
   lançamento, parcelas, fotos de entrega e documentos, mas não `itens_pedido` nem

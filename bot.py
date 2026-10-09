@@ -684,6 +684,7 @@ def init_db():
     init_db_financeiro(DB_PATH)
     init_db_notas_fiscais(DB_PATH)
     init_db_compras(DB_PATH)
+    _init_numeracao_pedidos()  # depois de notas_fiscais_pedido: lê os códigos de todas as tabelas
 
 def buscar_obra(codigo):
     """Retorna dict com dados da obra ou {} se não encontrada."""
@@ -1367,13 +1368,60 @@ def _totais_divergem(dados, subtotal_v) -> Optional[float]:
         return valor_total_v
     return None
 
+# Obras com pedidos numerados à mão antes da Laura: a sequência dela continua depois do último
+# código manual, pra nunca repetir o código de um pedido real que já existe no OneDrive.
+_NUMERACAO_PEDIDO_MINIMA = {"GGV02": 21}  # GGV02-001 a 021 manuais, em 04 Compras
+
+_TABELAS_COM_PFM_CODIGO = ("lancamentos", "itens_pedido", "parcelas_pagamento",
+                           "notas_fiscais_pedido", "entrega_fotos")
+
+def _init_numeracao_pedidos():
+    """Contador de pedidos por obra (2026-10-09). Parte do maior número que já apareceu em
+    qualquer registro — inclusive rastros de pedido excluído — ou do piso de numeração manual.
+    Idempotente: rodar de novo nunca diminui um contador."""
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS numeracao_pedidos (
+                ggv            TEXT PRIMARY KEY,
+                ultimo_numero  INTEGER NOT NULL
+            )
+        """)
+        maior = dict(_NUMERACAO_PEDIDO_MINIMA)
+        for ggv, numero in con.execute(
+            "SELECT ggv, MAX(pfm_numero) FROM documentos WHERE pfm_numero IS NOT NULL GROUP BY ggv"
+        ):
+            maior[ggv] = max(maior.get(ggv, 0), numero)
+        for tabela in _TABELAS_COM_PFM_CODIGO:
+            for (codigo,) in con.execute(f"SELECT DISTINCT pfm_codigo FROM {tabela}"):
+                ggv, _, numero = re.sub(r"-R\d+$", "", codigo or "").rpartition("-")
+                if ggv and numero.isdigit():
+                    maior[ggv] = max(maior.get(ggv, 0), int(numero))
+        for ggv, numero in maior.items():
+            con.execute(
+                "INSERT INTO numeracao_pedidos (ggv, ultimo_numero) VALUES (?, ?) "
+                "ON CONFLICT(ggv) DO UPDATE SET ultimo_numero = MAX(ultimo_numero, excluded.ultimo_numero)",
+                (ggv, numero)
+            )
+
 def proximo_pfm_numero(ggv):
+    """Reserva o próximo número de pedido da obra. O contador só sobe: excluir um pedido nunca
+    devolve o número dele (antes era MAX+1 sobre os documentos, e excluir o pedido mais recente
+    fazia o seguinte herdar o código — casos GGV03-029 e GGV00-005)."""
     with sqlite3.connect(DB_PATH) as con:
         row = con.execute(
+            "SELECT ultimo_numero FROM numeracao_pedidos WHERE ggv=?", (ggv,)
+        ).fetchone()
+        maior_doc = con.execute(
             "SELECT MAX(pfm_numero) FROM documentos WHERE ggv=? AND pfm_numero IS NOT NULL",
             (ggv,)
-        ).fetchone()
-    return (row[0] or 0) + 1
+        ).fetchone()[0]
+        numero = max(row[0] if row else 0, maior_doc or 0) + 1
+        con.execute(
+            "INSERT INTO numeracao_pedidos (ggv, ultimo_numero) VALUES (?, ?) "
+            "ON CONFLICT(ggv) DO UPDATE SET ultimo_numero = excluded.ultimo_numero",
+            (ggv, numero)
+        )
+    return numero
 
 _PC_CSS = """
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }

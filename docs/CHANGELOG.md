@@ -15,16 +15,13 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > sozinhas com o uso do dia a dia não entram aqui (ex: fechar um pedido parcelado esperando
 > pagamento). Ver Dívida Técnica em `docs/ROADMAP.md`.
 
-1. **Corrigir o reuso de código de pedido** *(novo, 2026-10-09 — plano em aprovação)* —
-   `proximo_pfm_numero()` calcula `MAX+1` sobre os pedidos existentes: excluir o pedido mais
-   recente devolve o número, e o próximo pedido herda o código. Aconteceu com GGV03-029 e
-   GGV00-005. A numeração existente não muda (GGV03-029 fica vago)
+1. **Deploy do contador de pedidos por obra** *(0.17.1, implementado e testado 2026-10-09 —
+   falta push e deploy)*; validar ao vivo que o próximo pedido da GGV03 sai GGV03-040
 2. **Excluir pedido deixa rastros** *(novo, 2026-10-09)* — `_excluir_pedido()` não limpa
    `itens_pedido` nem `notas_fiscais_pedido`, e só descarta a primeira NF-e. Itens soltos são
    inofensivos (a busca de histórico ignora item sem pedido); NF-e solta seria herdada por um
    pedido que reaproveitasse o código
-3. **GGV00-005: 4 arquivos órfãos no OneDrive** *(novo, 2026-10-09)* — dois pedidos diferentes
-   (FUNREJUS e Junta Comercial) receberam esse código e foram excluídos; decidir se vão para
+3. ✓ **GGV00-005: 4 arquivos órfãos no OneDrive** *(resolvido 2026-10-09)* — movidos para
    `Old`, como os do GGV03-029
 4. **Decidir o arquivamento da GGV02** *(atualizado 2026-10-09)* — a obra já tem 5 pedidos da
    Laura: 001–004 no OneDrive, ao lado dos pedidos manuais GGV02-001 a 021 de mesmo código; o
@@ -60,6 +57,33 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > (Proxmox do Eric), obra de teste GGV99, pasta automática para obra nova, trocar NF-e
 > vinculada errada, reenvio de arquivo já recebido, `Restart=always`, correção manual do
 > comprovante PIX e da parcela, mais de uma NF-e por pedido — ver entradas abaixo.
+
+---
+
+## [0.17.1] — Código de pedido nunca mais é reaproveitado — 2026-10-09
+
+### Motivação
+
+Dois códigos de pedido apareceram em dois pedidos diferentes: GGV03-029 (Tabelionato e
+FUNREJUS) e GGV00-005 (FUNREJUS e Junta Comercial). O número do pedido era o maior número
+existente + 1 — excluir o pedido mais recente devolvia o número, e o pedido seguinte herdava o
+código, enquanto os arquivos do excluído continuavam no OneDrive com o mesmo código.
+
+### Corrigido
+
+- Contador de pedidos por obra (`numeracao_pedidos`) que só sobe: excluir um pedido nunca
+  devolve o número dele. Nasce do maior número que já apareceu em qualquer registro, inclusive
+  rastros de pedido excluído.
+- Numeração existente intacta, por decisão do Dennis: GGV03-029 fica vago para sempre.
+- GGV02 continua do **022**, depois dos pedidos manuais GGV02-001 a 021 que já existem no
+  OneDrive.
+- Próximo pedido de cada obra: GGV00-006, GGV01-002, GGV02-022, GGV03-040. Revisão (R01, R02)
+  continua igual e não gasta número.
+
+### Dados (OneDrive)
+
+- Arquivos órfãos de pedidos excluídos movidos para `Old` (nada apagado): os 4 do GGV03-029 e
+  os 4 do GGV00-005.
 
 ---
 
