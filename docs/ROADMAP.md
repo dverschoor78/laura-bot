@@ -1077,6 +1077,11 @@ gatilho original (consultar preço de item já comprado sem ler o texto inteiro 
 
 ## Dívida Técnica
 
+- **Baixa — pedido com uma NF-e só não tem "Remover" no Telegram** *(2026-10-10)*
+  O submenu da NF-e única oferece "Ver arquivo" e "Trocar arquivo"; "🗑 Remover NF" só aparece na
+  tela "Ver notas fiscais", com 2+ notas. O GGV03-004 (certidão vinculada como NF-e) foi desvinculado
+  por script, com a mesma `remover_nota_fiscal()`. Criar o botão se aparecer um segundo caso.
+
 - **Baixa — CNPJ do fornecedor resolvido em dois lugares** *(2026-10-09)*
   A prestação de contas (`financeiro/relatorios.py`) resolve o CNPJ do fornecedor do pedido com
   regra própria (CNPJ do orçamento se cadastrado, senão nome inteiro), parecida com a de

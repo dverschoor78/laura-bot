@@ -2321,11 +2321,19 @@ da lista abaixo):
 - **Fornecedor certo no pedido — Entrega 2** (aprovada): consertar a leitura do recebedor no
   comprovante PIX (19 de 52 leram a VII), testar nos 19 antes de subir, e conferir fornecedor ×
   recebedor no "Confirmar pagamento?" e × emitente na chegada da NF-e
-- **GGV03-004** — o "NF-e 163.814" vinculado à taxa do ONR (R$ 83,39) é a **certidão da matrícula
-  39.394** (lote 29, quadra 06), o que a taxa comprou. A IA leu como NF-e: "163.814" é o número do
-  protocolo, a "emitente" Agropecuária Florentia é a antiga dona do lote, e "R$ 888.000" é leitura
-  errada de R$ 88.000 (preço do lote). Decidir com o Dennis: deixar ou tirar do lugar de nota
-  fiscal (na prestação de contas aparece como "NF-e 163.814")
+- ✓ **GGV03-004** — a certidão da matrícula 39.394 (o que a taxa do ONR comprou; a IA tinha lido
+  como "NF-e 163.814", R$ 888.000) saiu do lugar de nota fiscal em 2026-10-10, a pedido do Dennis:
+  `remover_nota_fiscal()` — a mesma função do botão "🗑 Remover NF" — rodada no servidor, e o
+  arquivo renomeado na mesma pasta para "… - certidão matrícula 39394.jpg" (sem " - NFe", a
+  prestação de contas não o copia como nota). Backup antes:
+  `data/laura.db.backup-2026-10-10-antes-tirar-nfe-ggv03-004`
+- **Data do pagamento "de/06" no histórico do cockpit** *(achado 2026-10-10, proposto ao Dennis)*
+  — 16 pedidos com a data gravada como "8 de 06 de 2026" (Lição #16): `_fmt_data_flexivel()` tem
+  regra própria e não usa `_parse_data_qualquer()`, que já aceita esse formato
+- **Cockpit sem arquivos nos pedidos criados no Windows** *(achado 2026-10-10, proposto ao
+  Dennis)* — 60 documentos com caminho do Windows no banco (`C:\Users\...`, `data\uploads\...`);
+  dos 40 caminhos de orçamento/PDF de 20 pedidos, 29 existem no servidor depois de converter.
+  `scripts/migrar_caminhos_obras.py` migrou só as obras
 - Arquivos arquivados com a data do processamento por causa da Lição #16 (ex: FUNREJUS de 10/09
   como `2026-09-11 …`) — renomear só se o Dennis quiser
 - **GGV02** — decidir o arquivamento (item 4 do ROADMAP): já há pedido fora do OneDrive
