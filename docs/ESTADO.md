@@ -2323,10 +2323,13 @@ da lista abaixo):
   recebedor no "Confirmar pagamento?" e × emitente na chegada da NF-e
 - ✓ **GGV03-004** — a certidão da matrícula 39.394 (o que a taxa do ONR comprou; a IA tinha lido
   como "NF-e 163.814", R$ 888.000) saiu do lugar de nota fiscal em 2026-10-10, a pedido do Dennis:
-  `remover_nota_fiscal()` — a mesma função do botão "🗑 Remover NF" — rodada no servidor, e o
-  arquivo renomeado na mesma pasta para "… - certidão matrícula 39394.jpg" (sem " - NFe", a
-  prestação de contas não o copia como nota). Backup antes:
-  `data/laura.db.backup-2026-10-10-antes-tirar-nfe-ggv03-004`
+  `remover_nota_fiscal()` — a mesma função do botão "🗑 Remover NF" — rodada no servidor. Depois,
+  pelo Dennis ("seria um anexo da entrega"), virou o **anexo da entrega**: entrega completa em
+  01/07/2026 (quando a certidão chegou à Laura), `entrega_fotos` com a legenda "Certidão da
+  matrícula 39.394", documento com `tipo='foto_entrega'` e caminho do servidor no lugar do de
+  Windows, cópia em `05 Entrega` ("2026-07-01 GGV03-004 … - foto01.jpg") e a de `01 Controle
+  financeiro` em `Old`. Backups: `data/laura.db.backup-2026-10-10-antes-tirar-nfe-ggv03-004` e
+  `…-antes-entrega-ggv03-004`
 - **Data do pagamento "de/06" no histórico do cockpit** *(achado 2026-10-10, proposto ao Dennis)*
   — 16 pedidos com a data gravada como "8 de 06 de 2026" (Lição #16): `_fmt_data_flexivel()` tem
   regra própria e não usa `_parse_data_qualquer()`, que já aceita esse formato
