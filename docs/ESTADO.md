@@ -2335,12 +2335,14 @@ da lista abaixo):
   `…-antes-entrega-ggv03-004`
 - ✓ **Data do pagamento "de/06" no histórico do cockpit** — corrigido em 0.19.1: `_fmt_data_flexivel()`
   passou a usar `_parse_data_qualquer()` (16 pedidos com "8 de 06 de 2026")
-- **Cockpit sem arquivos nos pedidos criados no Windows** *(achado 2026-10-10, proposto ao
+- ✓ **Cockpit sem arquivos nos pedidos criados no Windows** *(achado 2026-10-10, proposto ao
   Dennis)* — 60 documentos com caminho do Windows no banco (`C:\Users\...`, `data\uploads\...`);
   dos 40 caminhos de orçamento/PDF de 20 pedidos, 29 existem no servidor depois de converter.
   `scripts/migrar_caminhos_obras.py` migrou só as obras. Script pronto (0.19.1,
-  `scripts/migrar_caminhos_documentos.py`); dry-run no servidor: 74 caminhos a migrar, 5 sem
-  arquivo lá (PDFs antigos do 002, 007, 012 e 013). Falta o OK do Dennis para `--aplicar`
+  `scripts/migrar_caminhos_documentos.py`) e **aplicado em 2026-10-10** com o OK do Dennis: 74
+  caminhos migrados, os pedidos de julho voltaram a mostrar orçamento, PDF do pedido e NF-e no
+  cockpit; 5 sem arquivo no servidor ficaram como estavam (PDFs antigos do 002, 007, 012 e 013).
+  Backup antes: `data/laura.db.backup-2026-10-10-antes-migrar-caminhos-documentos`
 - Arquivos arquivados com a data do processamento por causa da Lição #16 (ex: FUNREJUS de 10/09
   como `2026-09-11 …`) — renomear só se o Dennis quiser
 - **GGV02** — decidir o arquivamento (item 4 do ROADMAP): já há pedido fora do OneDrive
