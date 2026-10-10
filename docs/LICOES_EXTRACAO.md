@@ -381,7 +381,9 @@ plausível e errado.
 
 **Recorrência (2026-10-10), no cockpit:** o histórico do pedido mostra "de/06 Pago" em 16 pedidos
 — `_fmt_data_flexivel()` tem regra própria de data e não passa por `_parse_data_qualquer()`. Dois
-leitores de data, um corrigido e outro não: o mesmo problema de convergência.
+leitores de data, um corrigido e outro não: o mesmo problema de convergência. Corrigido em 0.19.1:
+`_fmt_data_flexivel()` usa `_parse_data_qualquer()`, e a data da NF-e no histórico, que era
+cortada por posição (`[:5]`), também.
 
 **Caso vizinho, mesmo dia:** no comprovante do GGV03-034 a IA leu "11" como "17" (pagamento em
 11/09). O extrato do banco é a referência: a conciliação mostra "Data diferente" quando a data

@@ -2592,21 +2592,12 @@ def _fmt_data_curta(dt_str):
     except Exception:
         return dt_str[:10] if dt_str else "—"
 
-_DATA_BR_RE = re.compile(r"^(\d{1,2})/(\d{1,2})/\d{2,4}")
-
 def _fmt_data_flexivel(dt_str):
-    """Aceita 'D/M/AAAA...' (dia/mês sem zero à esquerda, ex: comprovante extraído pelo Claude)
-    ou ISO 'AAAA-MM-DD...'. Sempre retorna 'DD/MM' com zero à esquerda, ou '—' se não reconhecer."""
-    if not dt_str:
-        return "—"
-    m = _DATA_BR_RE.match(dt_str)
-    if m:
-        d, mth = m.groups()
-        try:
-            return f"{int(d):02d}/{int(mth):02d}"
-        except ValueError:
-            pass
-    return _fmt_data_curta(dt_str)
+    """'DD/MM' de qualquer formato que _parse_data_qualquer() reconhece — D/M/AAAA do comprovante,
+    ISO, "8 de 06 de 2026, às 10:59:51" —, ou '—' se não reconhecer. Antes tinha regra própria e,
+    sem reconhecer, cortava a string por posição: "de/06" no histórico de 16 pedidos (Lição #16)."""
+    dt = _parse_data_qualquer(dt_str)
+    return dt.strftime("%d/%m") if dt else "—"
 
 def buscar_pedido(pfm_codigo: str) -> Optional[Pedido]:
     """Consulta o banco e retorna um Pedido com dados brutos e cálculos financeiros, ou None."""
@@ -2706,7 +2697,7 @@ def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
             numero = _campo(row[0], "Número da NF")
             pedido.nfe_numero = numero if numero != "A PREENCHER" else None
             data_raw = _campo(row[0], "Data de emissão")
-            pedido.nfe_data = data_raw[:5] if data_raw != "A PREENCHER" else None
+            pedido.nfe_data = _fmt_data_flexivel(data_raw) if data_raw != "A PREENCHER" else None
 
     # Detalhe de cada NF-e (Caso 2 do ROADMAP — pedido pode ter mais de uma), usado pela
     # tela "Ver notas fiscais" e pelo histórico quando qtd_nfe >= 2.
@@ -2720,7 +2711,7 @@ def preparar_visualizacao_pedido(pedido: Pedido) -> Pedido:
                     numero_campo = _campo(row[0], "Número da NF")
                     numero_nfe = numero_campo if numero_campo != "A PREENCHER" else None
                 data_raw = _campo(row[0], "Data de emissão")
-                data_nfe = data_raw[:5] if data_raw != "A PREENCHER" else None
+                data_nfe = _fmt_data_flexivel(data_raw) if data_raw != "A PREENCHER" else None
             pedido.notas_fiscais.append({
                 "id": nfe_id, "doc_id": doc_id_nfe, "valor": valor_nfe,
                 "numero": numero_nfe, "data": data_nfe,

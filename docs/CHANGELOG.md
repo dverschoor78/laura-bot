@@ -63,6 +63,33 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.19.1] — Datas do histórico do pedido + caminhos do Windows — 2026-10-10
+
+### Corrigido
+
+- **"de/06 Pago" no histórico do pedido** (16 pedidos com a data gravada como "8 de 06 de 2026"):
+  `_fmt_data_flexivel()` tinha regra própria e, sem reconhecer, cortava a string por posição;
+  agora usa `_parse_data_qualquer()`, a mesma corrigida na Lição #16. A data da NF-e no histórico,
+  que também era cortada por posição (`[:5]`), passa pela mesma função. Data que ninguém
+  reconhece aparece como "—", nunca como pedaço de texto.
+
+### Adicionado
+
+- `scripts/migrar_caminhos_documentos.py` — converte os caminhos do Windows guardados em
+  `documentos` (`caminho`, `caminho_pfm`) para os do servidor, só quando o arquivo existe lá
+  (o `.docx` do pedido passa para o `.pdf` de mesmo nome). Dry-run por padrão. Sem isso, o cockpit
+  dos pedidos criados no Windows mostra "Nenhum arquivo disponível".
+
+### Testado
+
+Os formatos de data reais e o histórico dos 47 pedidos numa cópia nova do banco de produção:
+nenhuma data quebrada, GGV03-004 "08/06 Pago". Dry-run da migração no servidor: 74 caminhos a
+migrar, 5 sem arquivo no servidor (ficam como estão). Regressão: conciliação, NF-e, bloqueio,
+exclusão, numeração e fornecedor passando — os dois últimos ajustados para a produção já
+corrigida (032 e 024).
+
+---
+
 ## [0.19.0] — Fornecedor certo no pedido (Entrega 1) — 2026-10-09
 
 ### Motivação

@@ -115,6 +115,17 @@ cd /opt/laura-bot
 Proteção no código: se um caminho Windows não migrado chegar num host Linux,
 `_raiz_obra()` cai em `data/pfms/` (local) em vez de gravar em pasta inexistente.
 
+`documentos.caminho` e `documentos.caminho_pfm` também guardavam caminhos do Windows
+(`data\uploads\...`, `C:\Users\denni\OneDrive\...`) — achado em 2026-10-10, quando o cockpit
+dos pedidos de julho mostrava "Nenhum arquivo disponível". Converter para os do servidor (só os
+que existem lá; o resto fica como está e é listado):
+
+```bash
+cd /opt/laura-bot
+.venv/bin/python scripts/migrar_caminhos_documentos.py            # dry-run, confere o que muda
+.venv/bin/python scripts/migrar_caminhos_documentos.py --aplicar  # grava
+```
+
 ## 7. Testar antes de produção
 
 ```bash

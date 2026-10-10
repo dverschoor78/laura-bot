@@ -321,6 +321,9 @@ container (SSH + tmux + Claude Code), sem nada a abrir no firewall do Eric.
 
 ## Versão Atual
 
+**v0.19.1** — Datas do histórico do pedido pela mesma função da Lição #16 ("de/06" em 16 pedidos)
+e script para migrar os caminhos do Windows dos documentos (`scripts/migrar_caminhos_documentos.py`)
+
 **v0.19.0** — Fornecedor certo no pedido: `buscar_fornecedor()` sem "primeira palavra" (CNPJ
 válido, nome inteiro ou começo exato de um só cadastro, senão fornecedor novo), chave PIX como
 CNPJ, cadastro automático só com CNPJ válido, e Revisar trocando o fornecedor de ponta a ponta
@@ -2330,13 +2333,14 @@ da lista abaixo):
   Windows, cópia em `05 Entrega` ("2026-07-01 GGV03-004 … - foto01.jpg") e a de `01 Controle
   financeiro` em `Old`. Backups: `data/laura.db.backup-2026-10-10-antes-tirar-nfe-ggv03-004` e
   `…-antes-entrega-ggv03-004`
-- **Data do pagamento "de/06" no histórico do cockpit** *(achado 2026-10-10, proposto ao Dennis)*
-  — 16 pedidos com a data gravada como "8 de 06 de 2026" (Lição #16): `_fmt_data_flexivel()` tem
-  regra própria e não usa `_parse_data_qualquer()`, que já aceita esse formato
+- ✓ **Data do pagamento "de/06" no histórico do cockpit** — corrigido em 0.19.1: `_fmt_data_flexivel()`
+  passou a usar `_parse_data_qualquer()` (16 pedidos com "8 de 06 de 2026")
 - **Cockpit sem arquivos nos pedidos criados no Windows** *(achado 2026-10-10, proposto ao
   Dennis)* — 60 documentos com caminho do Windows no banco (`C:\Users\...`, `data\uploads\...`);
   dos 40 caminhos de orçamento/PDF de 20 pedidos, 29 existem no servidor depois de converter.
-  `scripts/migrar_caminhos_obras.py` migrou só as obras
+  `scripts/migrar_caminhos_obras.py` migrou só as obras. Script pronto (0.19.1,
+  `scripts/migrar_caminhos_documentos.py`); dry-run no servidor: 74 caminhos a migrar, 5 sem
+  arquivo lá (PDFs antigos do 002, 007, 012 e 013). Falta o OK do Dennis para `--aplicar`
 - Arquivos arquivados com a data do processamento por causa da Lição #16 (ex: FUNREJUS de 10/09
   como `2026-09-11 …`) — renomear só se o Dennis quiser
 - **GGV02** — decidir o arquivamento (item 4 do ROADMAP): já há pedido fora do OneDrive
