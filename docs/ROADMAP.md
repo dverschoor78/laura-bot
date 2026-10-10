@@ -984,14 +984,9 @@ que `bot.py` parecia "bagunçado".
    particular). Próximo passo natural, se fizer falta: guardar na Laura o que hoje é preenchido no
    Excel (obra das saídas sem pedido, categoria das entradas) e registrar a conta de origem de
    cada pagamento
-   - **Fornecedor certo no pedido** *(Lição #17 em `LICOES_EXTRACAO.md`)* — **Entrega 1 feita**
-     (0.19.0): busca sem "primeira palavra", chave PIX como CNPJ, cadastro só com CNPJ válido e
-     Revisar trocando o fornecedor de ponta a ponta. Falta o Dennis rodar Revisar → ✅ Gerar no
-     **GGV03-032** (Tabelionato de Notas, 45.134.842/0001-74) e no **GGV03-024** (Blum & Chinato
-     Madeiras, 31.317.200/0001-04). **Entrega 2** (aprovada, com a tela de divergência): consertar
-     a leitura do recebedor no comprovante PIX (19 de 52 leram a VII) e testar nos 19 antes de
-     subir; conferir fornecedor × recebedor no "Confirmar pagamento?" e × emitente na chegada da
-     NF-e
+   - ✓ **Fornecedor certo no pedido** *(Lição #17 em `LICOES_EXTRACAO.md`)* — Entrega 1 (0.19.0)
+     e Entrega 2 (0.20.0) em produção; 032 e 024 corrigidos pelo Dennis no Revisar. Validar ao
+     vivo a conferência no próximo PIX e na próxima NF-e
 1. **Validar o contador de pedidos por obra ao vivo** *(em produção desde 2026-10-09)* —
    `proximo_pfm_numero()` era `MAX+1` sobre os pedidos existentes: excluir o
    pedido mais recente devolvia o número, e o próximo pedido herdava o código (GGV03-029 e

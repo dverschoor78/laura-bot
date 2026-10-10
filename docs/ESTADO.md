@@ -321,6 +321,10 @@ container (SSH + tmux + Claude Code), sem nada a abrir no firewall do Eric.
 
 ## Versão Atual
 
+**v0.20.0** — Recebedor do PIX e emitente da NF-e conferidos com o fornecedor do pedido, com a
+tela de escolha quando divergem; leitura do recebedor no comprovante do Mercado Pago consertada
+(1 → 17 de 18 nos comprovantes que falhavam)
+
 **v0.19.1** — Datas do histórico do pedido pela mesma função da Lição #16 ("de/06" em 16 pedidos)
 e script para migrar os caminhos do Windows dos documentos (`scripts/migrar_caminhos_documentos.py`)
 
@@ -467,6 +471,21 @@ recibo com texto narrativo e valor por extenso, matching de PIX/NF-e sem corte a
 ---
 
 ## Última Fiada Implementada
+
+**Fornecedor certo no pedido — Entrega 2** *(2026-10-10, v0.20.0)*
+
+A ideia do Dennis — confrontar o fornecedor do pedido com quem recebeu o PIX — esbarrava na
+leitura: em 19 de 52 comprovantes a IA lia a VII (quem pagou) como favorecido. Olhando a imagem
+do 032, o motivo: o comprovante do Mercado Pago não diz "De/Para", só "Origem e destino", com a
+VII em cima. O prompt passou a descrever esse layout; testado com a API de verdade nos
+comprovantes reais (prompt antigo 1 de 18, novo 17 de 18 — o 18º era uma divergência real, o
+033 pago pelo ONR —, e os 6 que já acertavam continuaram certos). Depois, a conferência em
+`_tela_confirmar_pagamento()` e em `_cb_nfe_confirmar()`, com a tela de escolha aprovada; uma
+regra só (`_situacao_documento()`) também para a conferência da NF-e no Revisar; "corrigir o
+pedido" reaproveita a revisão da 0.19.0 (`_trocar_fornecedor_do_pedido()`). Testes de ponta a
+ponta numa cópia do banco de produção e regressão completa passando.
+
+---
 
 **Fornecedor certo no pedido — Entrega 1** *(2026-10-09, v0.19.0)*
 
@@ -2318,12 +2337,11 @@ da lista abaixo):
 - **Prestação de contas de setembro** — Dennis manda o extrato pelo Telegram, preenche no Excel
   o que a Laura não sabe (obra das saídas sem lançamento, categoria das entradas) e leva à Diniz
   com as perguntas: conta compartilhada entre obras, aportes, reembolso do GGV03-036
-- **GGV03-032 e GGV03-024 com o fornecedor errado** (Lição #17) — o Dennis roda Revisar → ✅ Gerar
-  em cada um (0.19.0); conferir depois: fornecedor novo, PDF anterior em Old, arquivos renomeados,
-  NF-e do 024 "emitente confere ✓"
-- **Fornecedor certo no pedido — Entrega 2** (aprovada): consertar a leitura do recebedor no
-  comprovante PIX (19 de 52 leram a VII), testar nos 19 antes de subir, e conferir fornecedor ×
-  recebedor no "Confirmar pagamento?" e × emitente na chegada da NF-e
+- ✓ **GGV03-032 e GGV03-024 com o fornecedor errado** (Lição #17) — corrigidos pelo Dennis no
+  Revisar (2026-10-09) e conferidos em 2026-10-10: fornecedor novo cadastrado pela Receita, PDF
+  anterior em Old, arquivos renomeados, OneDrive sincronizado
+- ✓ **Fornecedor certo no pedido — Entrega 2** — em produção (0.20.0). Validar ao vivo: o próximo
+  PIX e a próxima NF-e mostram a linha do recebedor/emitente
 - ✓ **GGV03-004** — a certidão da matrícula 39.394 (o que a taxa do ONR comprou; a IA tinha lido
   como "NF-e 163.814", R$ 888.000) saiu do lugar de nota fiscal em 2026-10-10, a pedido do Dennis:
   `remover_nota_fiscal()` — a mesma função do botão "🗑 Remover NF" — rodada no servidor. Depois,

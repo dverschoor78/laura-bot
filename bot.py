@@ -88,6 +88,11 @@ DELTAD_CNPJ_DIGITS = re.sub(r"\D", "", DELTAD["cnpj"])  # "58358802000158"
 # (Verschoor Construções Civis Ltda, responsável técnica, paga boletos como CREA/ONR/prefeitura).
 CNPJS_PROPRIOS_DIGITS = {DELTAD_CNPJ_DIGITS, "48494891000106"}
 
+def _cnpjs_proprios_texto() -> str:
+    """'48.494.891/0001-06 nem 58.358.802/0001-58' — pro prompt (comprovante PIX lia a VII como
+    favorecido em 19 de 52 comprovantes, 2026-10-09)."""
+    return " nem ".join(sorted(documento_formatado(c) for c in CNPJS_PROPRIOS_DIGITS))
+
 GGV_ENCARREGADO = {
     "GGV03": "Sabiá",
 }
@@ -251,8 +256,15 @@ Se [orcamento]:
 Se [comprovante_pix]:
 - Data do pagamento:
 - Valor:
-- Favorecido:
-- CNPJ/CPF do favorecido:
+- Favorecido: (quem RECEBEU o dinheiro. No comprovante do Mercado Pago, a seção "Origem e
+  destino" mostra dois nomes: o PRIMEIRO é a origem (quem pagou) e o SEGUNDO, embaixo, é o
+  destino — o favorecido é sempre o segundo. Em outros bancos aparece como "Para", "Destino",
+  "Recebedor" ou "Favorecido". NUNCA quem pagou ("De", "Origem", "Pagador", "Conta de origem"):
+  {DELTAD['nome']} (VII) e Verschoor Construções Civis Ltda (DeltaD) são as nossas empresas e
+  sempre pagam — nunca são o favorecido)
+- CNPJ/CPF do favorecido: (o que aparece junto do favorecido — no Mercado Pago, logo abaixo do
+  segundo nome —, exatamente como está; se vier mascarado, ex: ***.479.069-**, copie com os
+  asteriscos. NUNCA {_cnpjs_proprios_texto()}, que são os nossos)
 - Chave PIX:
 - Instituição financeira:
 - ID da transação: (prefira o ID EndToEnd do Pix — começa com "E", ex: E10573521202506... — se não estiver visível, use o número da transação do Mercado Pago; extraia APENAS o código, sem texto adicional)
@@ -3272,7 +3284,64 @@ def _renomear_arquivos_do_pedido(pfm_codigo: str, fornecedor_antigo: str, fornec
 def _v_ou_none(valor):
     return None if not valor or valor == "A PREENCHER" else valor
 
-def _conferir_nfe_com_fornecedor(pfm_codigo: str, doc_fornecedor) -> list:
+def _mesmo_nome(a, b) -> bool:
+    """Mesmo nome sem acento, pontuação nem caixa, ou um é o começo exato do outro (2+ palavras)."""
+    na, nb = _nome_normalizado(a), _nome_normalizado(b)
+    if not na or not nb:
+        return False
+    curto, longo = sorted((na, nb), key=len)
+    return curto == longo or (len(curto.split()) >= 2 and longo.startswith(curto + " "))
+
+def _situacao_documento(doc_txt, nome_lido, doc_fornecedor, nome_fornecedor) -> str:
+    """Quem aparece num papel do pedido — recebedor do PIX, emitente da NF-e — × o fornecedor do
+    pedido: "confere", "filial", "diverge" ou "nao_lido". Só diverge com prova: CNPJ/CPF válido
+    diferente, ou mascarado (***.479.069-**) com dígitos que não batem. Sem documento legível,
+    nome diferente não alarma — a leitura pode ter falhado. CNPJ nosso ali é leitura errada
+    (Lição #2: 19 de 52 comprovantes tinham a VII como favorecido, 2026-10-09)."""
+    doc = documento_formatado(doc_txt) if doc_txt and doc_txt != "A PREENCHER" else None
+    if _doc_chave(doc) in CNPJS_PROPRIOS_DIGITS:
+        return "nao_lido"
+    alvo = _doc_chave(doc_fornecedor)
+    if doc and alvo:
+        lido = _doc_chave(doc)
+        if lido == alvo:
+            return "confere"
+        if len(lido) == 14 and len(alvo) == 14 and lido[:8] == alvo[:8]:
+            return "filial"
+        return "diverge"
+    trechos = re.findall(r"\d{3,}", re.sub(r"[.\-/\s]", "", doc_txt or ""))
+    visiveis = sum(len(t) for t in trechos)
+    if not doc and alvo and visiveis >= 5 and ("*" in (doc_txt or "") or visiveis < 11):
+        pos = 0
+        for trecho in trechos:  # mascarado: os dígitos que aparecem, na ordem, no documento certo
+            pos = alvo.find(trecho, pos)
+            if pos < 0:
+                return "diverge"
+            pos += len(trecho)
+        return "confere"
+    return "confere" if _mesmo_nome(nome_lido, nome_fornecedor) else "nao_lido"
+
+def _fornecedor_do_pedido(pfm_codigo):
+    """(nome, CNPJ/CPF) do fornecedor do pedido — o documento pelo cadastro; sem ele, o do
+    documento do pedido."""
+    with sqlite3.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT l.fornecedor, COALESCE(d.dados_claude, '') FROM lancamentos l "
+            "LEFT JOIN documentos d ON d.id = l.doc_id WHERE l.pfm_codigo=?", (pfm_codigo,)
+        ).fetchone()
+    if not row:
+        return None, None
+    nome, dados = row
+    return nome, _doc_do_fornecedor(nome) or _doc_fornecedor_do_documento(dados)
+
+def _nome_curto(nome, tamanho: int = 28) -> str:
+    """Nome pra botão: sem LTDA/S.A./ME e cortado numa palavra."""
+    n = re.sub(r"[\s.,–-]+(LTDA|S\.?\s?A\.?|S/A|ME|EPP|EIRELI)\.?\s*$", "", (nome or "").strip(), flags=re.I)
+    if len(n) <= tamanho:
+        return n
+    return n[:tamanho].rsplit(" ", 1)[0].rstrip(" &-–,")
+
+def _conferir_nfe_com_fornecedor(pfm_codigo: str, doc_fornecedor, nome_fornecedor=None) -> list:
     """Uma linha por NF-e do pedido, conferindo o emitente com o fornecedor — trocou o
     fornecedor, a NF-e tem que ser conferida de novo (Dennis, 2026-10-09)."""
     with sqlite3.connect(DB_PATH) as con:
@@ -3284,19 +3353,26 @@ def _conferir_nfe_com_fornecedor(pfm_codigo: str, doc_fornecedor) -> list:
     for numero, dados in notas:
         numero = numero or _v_ou_none(_campo(dados, "Número da NF"))
         rotulo = f"NF-e {numero}" if numero else "NF-e"
-        emitente = documento_formatado(_campo(dados, "CNPJ/CPF do emitente"))
+        emitente_txt = _v_ou_none(_campo(dados, "CNPJ/CPF do emitente"))
+        emitente = documento_formatado(emitente_txt) or emitente_txt
         nome = _v_ou_none(_campo(dados, "Nome do emitente")) or "emitente sem nome"
-        if not emitente or _doc_chave(emitente) in CNPJS_PROPRIOS_DIGITS:
-            linhas.append(f"🧾 {rotulo} — não consegui ler o emitente; confira")
-        elif doc_fornecedor and _doc_chave(emitente) == _doc_chave(doc_fornecedor):
-            linhas.append(f"🧾 {rotulo} — emitente confere ✓")
-        elif (doc_fornecedor and len(_doc_chave(emitente)) == 14
-              and _doc_chave(emitente)[:8] == _doc_chave(doc_fornecedor)[:8]):
-            linhas.append(f"🧾 {rotulo} — mesma empresa, outra filial ({emitente})")
-        else:
-            linhas.append(f"⚠️ {rotulo} é de outro emitente: {nome} — {emitente}. "
-                          "Se não for deste pedido, troque a NF-e")
+        situacao = _situacao_documento(emitente_txt, nome, doc_fornecedor, nome_fornecedor)
+        linhas.append({
+            "confere":  f"🧾 {rotulo} — emitente confere ✓",
+            "filial":   f"🧾 {rotulo} — mesma empresa, outra filial ({emitente})",
+            "diverge":  f"⚠️ {rotulo} é de outro emitente: {nome} — {emitente}. "
+                        "Se não for deste pedido, troque a NF-e",
+            "nao_lido": f"🧾 {rotulo} — não consegui ler o emitente; confira",
+        }[situacao])
     return linhas
+
+async def _trocar_fornecedor_do_pedido(query, ctx, pfm_codigo, doc_id_orc, nome, doc):
+    """Troca o fornecedor do pedido pelo que aparece num papel dele (recebedor do PIX, emitente
+    da NF-e): grava nome e CNPJ/CPF no documento do pedido e roda a revisão do Revisar (0.19.0)
+    — cadastro pela Receita, PDF anterior em Old, arquivos renomeados, NF-e conferida de novo."""
+    dados = _substituir_campo(_substituir_campo(_dados_doc(doc_id_orc), "Fornecedor", nome), "CNPJ/CPF", doc)
+    atualizar(doc_id_orc, dados_claude=dados)
+    await _executar_revisao_pfm(query, ctx, doc_id_orc, pfm_codigo)
 
 async def _executar_revisao_pfm(query, ctx, doc_id, pfm_codigo_base):
     with sqlite3.connect(DB_PATH) as con:
@@ -3356,7 +3432,7 @@ async def _executar_revisao_pfm(query, ctx, doc_id, pfm_codigo_base):
                   f"  agora  {forn_depois}" + (f" — {doc_depois}" if doc_depois else "")]
         if cadastro:
             linhas.append(f"         ({cadastro})")
-        nfe = _conferir_nfe_com_fornecedor(pfm_codigo_base, doc_depois)
+        nfe = _conferir_nfe_com_fornecedor(pfm_codigo_base, doc_depois, forn_depois)
         if nfe:
             linhas += [""] + nfe
         arquivos = []
@@ -5702,36 +5778,105 @@ async def _cb_sel_tipo_inicial(query, ctx, partes):
         )
 
 
-async def _cb_pix_confirmar(query, ctx, partes):
-    _, doc_id_comp, pfm_codigo = partes
+def _tela_confirmar_pagamento(doc_id_comp: int, pfm_codigo: str):
+    """Tela "Confirmar pagamento?", conferindo o recebedor do PIX com o fornecedor do pedido
+    (ideia do Dennis, 2026-10-09): confere ✓, outra filial ou "não consegui ler" numa linha a
+    mais; PIX para outra empresa vira a tela de escolha. (texto, markup), ou (None, None)."""
     with sqlite3.connect(DB_PATH) as con:
-        comp = con.execute(
-            "SELECT dados_claude FROM documentos WHERE id=?", (int(doc_id_comp),)
-        ).fetchone()
+        comp = con.execute("SELECT dados_claude FROM documentos WHERE id=?", (doc_id_comp,)).fetchone()
         lanc = con.execute(
-            "SELECT fornecedor, valor, status FROM lancamentos WHERE pfm_codigo=?",
-            (pfm_codigo,)
+            "SELECT fornecedor, valor, status FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)
         ).fetchone()
     if not comp or not lanc:
-        await query.edit_message_text("Dados não encontrados.")
-        return
-    dados_comp   = parse_comprovante(comp[0])
+        return None, None
+    dados_comp = parse_comprovante(comp[0])
     forn, valor_lanc, status_lanc = lanc
+    _, doc_forn = _fornecedor_do_pedido(pfm_codigo)
+    favorecido, doc_txt = _v_ou_none(dados_comp["favorecido"]), _v_ou_none(dados_comp["cnpj"])
+    doc_lido = documento_formatado(doc_txt) or doc_txt
+    situacao = _situacao_documento(doc_txt, favorecido, doc_forn, forn)
+
+    if situacao == "diverge":
+        data_pix = _parse_data_qualquer(dados_comp["data"])
+        texto = (
+            "⚠️ O PIX foi para outro fornecedor\n\n"
+            f"Comprovante:  R$ {dados_comp['valor_fmt']} · "
+            f"{data_pix.strftime('%d/%m/%Y') if data_pix else dados_comp['data']}\n"
+            f"Recebedor:    {favorecido or 'sem nome'}\n"
+            f"              {doc_lido}\n"
+            f"Pedido:       #{pfm_codigo} — {forn}\n"
+            + (f"              {doc_forn}\n" if doc_forn else "")
+            + "\nQuem é o fornecedor desta compra?"
+        )
+        botoes = []
+        if documento_formatado(doc_txt):  # trocar o fornecedor só com o CNPJ/CPF inteiro
+            botoes.append([InlineKeyboardButton(
+                f"🔁 {_nome_curto(favorecido or doc_lido)} — corrigir o pedido",
+                callback_data=f"pix_forn_corrigir:{doc_id_comp}:{pfm_codigo}")])
+        botoes += [
+            [InlineKeyboardButton(f"📌 {_nome_curto(forn)} — manter (pago a terceiro)",
+                                  callback_data=f"pix_pagar:{doc_id_comp}:{pfm_codigo}")],
+            [InlineKeyboardButton("✏️ Corrigir dados do comprovante", callback_data=f"pix_edit:{doc_id_comp}")],
+            [InlineKeyboardButton("↩️ Voltar", callback_data=f"pix_voltar:{doc_id_comp}")],
+        ]
+        return texto, InlineKeyboardMarkup(botoes)
+
+    recebedor = {
+        "confere":  f"{favorecido or doc_lido} ✓",
+        "filial":   f"{favorecido} — mesma empresa, outra filial ({doc_lido})",
+        "nao_lido": "não consegui ler — confira no comprovante",
+    }[situacao]
     status_label = {"a_pagar": "🟡 Aguardando pagamento", "pago": "🟢 Pago"}.get(status_lanc, status_lanc)
     valor_lanc_fmt = f"R$ {_fmt_brl(valor_lanc)}" if valor_lanc else "—"
     texto = (
         f"Confirmar pagamento?\n\n"
         f"Comprovante:  R$ {dados_comp['valor_fmt']}  {dados_comp['data']}\n"
+        f"Recebedor:    {recebedor}\n"
         f"Pedido:       #{pfm_codigo} — {forn}\n"
         f"Valor:        {valor_lanc_fmt}\n"
         f"Status:       {status_label}"
     )
-    await query.edit_message_text(texto, reply_markup=InlineKeyboardMarkup([
+    return texto, InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Confirmar pagamento",
                              callback_data=f"pix_pagar:{doc_id_comp}:{pfm_codigo}")],
         [InlineKeyboardButton("↩️ Voltar",
                              callback_data="pix_cancelar")],
-    ]))
+    ])
+
+
+async def _cb_pix_confirmar(query, ctx, partes):
+    _, doc_id_comp, pfm_codigo = partes
+    texto, markup = _tela_confirmar_pagamento(int(doc_id_comp), pfm_codigo)
+    await query.edit_message_text(texto or "Dados não encontrados.", reply_markup=markup)
+
+
+async def _cb_pix_forn_corrigir(query, ctx, partes):
+    """"🔁 corrigir o pedido" da tela de divergência do PIX: o recebedor vira o fornecedor do
+    pedido (mesma revisão do Revisar) e a confirmação do pagamento volta, já conferida. Botão
+    antigo nunca age no escuro: comprovante já registrado ou divergência que sumiu → não troca."""
+    _, doc_id_comp, pfm_codigo = partes
+    doc_id_comp = int(doc_id_comp)
+    with sqlite3.connect(DB_PATH) as con:
+        comp = con.execute("SELECT dados_claude FROM documentos WHERE id=?", (doc_id_comp,)).fetchone()
+        lanc = con.execute("SELECT fornecedor, doc_id FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)).fetchone()
+        usado = con.execute("SELECT pfm_codigo FROM parcelas_pagamento WHERE doc_id_comprovante=? LIMIT 1",
+                            (doc_id_comp,)).fetchone()
+    if not comp or not lanc:
+        await query.edit_message_text("Dados não encontrados.")
+        return
+    if usado:
+        await query.edit_message_text(f"Este comprovante já foi registrado no Pedido #{usado[0]} — nada mudou.")
+        return
+    dados_comp = parse_comprovante(comp[0])
+    favorecido, doc = _v_ou_none(dados_comp["favorecido"]), documento_formatado(_v_ou_none(dados_comp["cnpj"]))
+    _, doc_forn = _fornecedor_do_pedido(pfm_codigo)
+    if not doc or _situacao_documento(doc, favorecido, doc_forn, lanc[0]) != "diverge":
+        texto, markup = _tela_confirmar_pagamento(doc_id_comp, pfm_codigo)
+        await query.edit_message_text(texto or "Dados não encontrados.", reply_markup=markup)
+        return
+    await _trocar_fornecedor_do_pedido(query, ctx, pfm_codigo, lanc[1], favorecido or doc, doc)
+    texto, markup = _tela_confirmar_pagamento(doc_id_comp, pfm_codigo)
+    await ctx.bot.send_message(chat_id=DONO_ID, text=texto or "Dados não encontrados.", reply_markup=markup)
 
 
 async def _cb_pix_pagar(query, ctx, partes):
@@ -6527,11 +6672,103 @@ async def _cb_entrega_voltar(query, ctx, partes):
         await query.edit_message_text("Pedido não encontrado.")
 
 
+def _conferir_emitente(doc_id_nfe: int, pfm_codigo: str) -> tuple:
+    """(situacao, dados da NF-e, nome e CNPJ/CPF do fornecedor do pedido) — o emitente da NF-e
+    × o fornecedor do pedido, pela mesma regra do recebedor do PIX."""
+    dados_nfe = parse_nfe(_dados_doc(doc_id_nfe))
+    forn, doc_forn = _fornecedor_do_pedido(pfm_codigo)
+    situacao = _situacao_documento(_v_ou_none(dados_nfe["cnpj"]), _v_ou_none(dados_nfe["emitente"]),
+                                   doc_forn, forn)
+    return situacao, dados_nfe, forn, doc_forn
+
+
+def _tela_divergencia_nfe(doc_id_nfe: int, pfm_codigo: str, dados_nfe: dict, forn, doc_forn):
+    """A mesma escolha do PIX, na chegada da NF-e de outro emitente."""
+    emitente, doc_txt = _v_ou_none(dados_nfe["emitente"]), _v_ou_none(dados_nfe["cnpj"])
+    doc_lido = documento_formatado(doc_txt) or doc_txt
+    nf = " · ".join(filter(None, [_v_ou_none(dados_nfe["numero"]), _v_ou_none(dados_nfe["valor_fmt"]),
+                                  _v_ou_none(dados_nfe["data"])]))
+    texto = (
+        "⚠️ A NF-e é de outro fornecedor\n\n"
+        f"NF-e:      {nf or '—'}\n"
+        f"Emitente:  {emitente or 'sem nome'}\n"
+        f"           {doc_lido}\n"
+        f"Pedido:    #{pfm_codigo} — {forn}\n"
+        + (f"           {doc_forn}\n" if doc_forn else "")
+        + "\nQuem é o fornecedor desta compra?"
+    )
+    botoes = []
+    if documento_formatado(doc_txt):
+        botoes.append([InlineKeyboardButton(f"🔁 {_nome_curto(emitente or doc_lido)} — corrigir o pedido",
+                                            callback_data=f"nfe_forn_corrigir:{doc_id_nfe}:{pfm_codigo}")])
+    botoes += [
+        [InlineKeyboardButton(f"📌 {_nome_curto(forn)} — manter (vincular assim)",
+                              callback_data=f"nfe_vincular:{doc_id_nfe}:{pfm_codigo}")],
+        [InlineKeyboardButton("✏️ Corrigir dados da NF-e", callback_data=f"nfe_edit:{doc_id_nfe}:-")],
+        [InlineKeyboardButton("↩️ Voltar", callback_data=f"nfe_voltar:{doc_id_nfe}:-")],
+    ]
+    return texto, InlineKeyboardMarkup(botoes)
+
+
 async def _cb_nfe_confirmar(query, ctx, partes):
-    """Vincula a NF-e ao pedido escolhido — nunca substitui uma já vinculada, sempre
-    acrescenta (Caso 2 do ROADMAP: pedido pode ter mais de uma NF-e, ex. GGV03-025/ONR)."""
+    """Escolheu o pedido da NF-e: confere o emitente com o fornecedor do pedido antes de
+    vincular (2026-10-10) — outra empresa abre a tela de escolha; senão vincula, com uma linha
+    dizendo como foi a conferência."""
+    _, doc_id_nfe, pfm_codigo = partes
+    situacao, dados_nfe, forn, doc_forn = _conferir_emitente(int(doc_id_nfe), pfm_codigo)
+    if situacao == "diverge":
+        texto, markup = _tela_divergencia_nfe(int(doc_id_nfe), pfm_codigo, dados_nfe, forn, doc_forn)
+        await query.edit_message_text(texto, reply_markup=markup)
+        return
+    emitente = _v_ou_none(dados_nfe["emitente"]) or "emitente sem nome"
+    doc_lido = documento_formatado(_v_ou_none(dados_nfe["cnpj"])) or dados_nfe["cnpj"]
+    linha = {"confere":  f"Emitente: {emitente} ✓",
+             "filial":   f"Emitente: {emitente} — mesma empresa, outra filial ({doc_lido})",
+             "nao_lido": "Emitente: não consegui ler — confira na nota"}[situacao]
+    texto = _vincular_nfe(int(doc_id_nfe), pfm_codigo)
+    await query.edit_message_text(f"{texto}\n{linha}" if texto else
+                                  f"Este arquivo já está vinculado ao Pedido #{pfm_codigo}.")
+
+
+async def _cb_nfe_vincular(query, ctx, partes):
+    """"📌 manter" da tela de divergência: vincula assim mesmo (ex: NF-e do cartório no CPF do
+    oficial, pagamento pelo ONR)."""
+    _, doc_id_nfe, pfm_codigo = partes
+    texto = _vincular_nfe(int(doc_id_nfe), pfm_codigo)
+    await query.edit_message_text(texto or f"Este arquivo já está vinculado ao Pedido #{pfm_codigo}.")
+
+
+async def _cb_nfe_forn_corrigir(query, ctx, partes):
+    """"🔁 corrigir o pedido" da tela de divergência da NF-e: o emitente vira o fornecedor do
+    pedido (mesma revisão do Revisar) e a NF-e é vinculada. Botão antigo: NF-e já vinculada ou
+    divergência que sumiu → não troca."""
     _, doc_id_nfe, pfm_codigo = partes
     doc_id_nfe = int(doc_id_nfe)
+    with sqlite3.connect(DB_PATH) as con:
+        vinculada = con.execute("SELECT pfm_codigo FROM notas_fiscais_pedido WHERE doc_id=? LIMIT 1",
+                                (doc_id_nfe,)).fetchone()
+        lanc = con.execute("SELECT doc_id FROM lancamentos WHERE pfm_codigo=?", (pfm_codigo,)).fetchone()
+    if vinculada:
+        await query.edit_message_text(f"Esta NF-e já está vinculada ao Pedido #{vinculada[0]} — nada mudou.")
+        return
+    situacao, dados_nfe, _, _ = _conferir_emitente(doc_id_nfe, pfm_codigo)
+    doc = documento_formatado(_v_ou_none(dados_nfe["cnpj"]))
+    if not lanc or not doc or situacao != "diverge":
+        await _cb_nfe_confirmar(query, ctx, ["nfe_confirmar", str(doc_id_nfe), pfm_codigo])
+        return
+    await _trocar_fornecedor_do_pedido(query, ctx, pfm_codigo, lanc[0],
+                                       _v_ou_none(dados_nfe["emitente"]) or doc, doc)
+    texto = _vincular_nfe(doc_id_nfe, pfm_codigo)
+    situacao, _, _, _ = _conferir_emitente(doc_id_nfe, pfm_codigo)
+    extra = "\nEmitente confere ✓" if situacao == "confere" else ""
+    await ctx.bot.send_message(chat_id=DONO_ID,
+                               text=(texto + extra) if texto else f"NF-e já vinculada ao Pedido #{pfm_codigo}.")
+
+
+def _vincular_nfe(doc_id_nfe: int, pfm_codigo: str):
+    """Vincula a NF-e ao pedido e devolve o texto do resultado (None se já estava vinculada) —
+    nunca substitui uma já vinculada, sempre acrescenta (Caso 2 do ROADMAP: pedido pode ter mais
+    de uma NF-e, ex. GGV03-025/ONR)."""
     with sqlite3.connect(DB_PATH) as con:
         row_nfe = con.execute(
             "SELECT caminho, dados_claude FROM documentos WHERE id=?", (doc_id_nfe,)
@@ -6544,10 +6781,7 @@ async def _cb_nfe_confirmar(query, ctx, partes):
     valor_nfe = dados_nfe.get("valor_v")
     ok = vincular_nfe(pfm_codigo, doc_id_nfe, DB_PATH, valor=valor_nfe, numero=numero_nfe)
     if not ok:
-        await query.edit_message_text(
-            f"Este arquivo já está vinculado ao Pedido #{pfm_codigo}."
-        )
-        return
+        return None
     if row_nfe:
         caminho_nfe, _ = row_nfe
         sufixo_nfe = f"NFe {numero_nfe}" if numero_nfe else "NFe"
@@ -6576,7 +6810,7 @@ async def _cb_nfe_confirmar(query, ctx, partes):
             f"R$ {_fmt_brl(total_pago)} de R$ {_fmt_brl(valor_lanc or 0)} pago "
             f"(faltam R$ {_fmt_brl(faltam)}). Ciclo fecha quando o pagamento for concluído."
         )
-    await query.edit_message_text(texto)
+    return texto
 
 
 async def _cb_nfe_cancelar(query, ctx, partes):
@@ -6924,6 +7158,7 @@ _CB_DISPATCH = {
     "set_tipo": _cb_set_tipo,
     "sel_tipo_inicial": _cb_sel_tipo_inicial,
     "pix_confirmar": _cb_pix_confirmar,
+    "pix_forn_corrigir": _cb_pix_forn_corrigir,
     "pix_pagar": _cb_pix_pagar,
     "pix_cancelar": _cb_pix_cancelar,
     "pix_edit": _cb_pix_edit,
@@ -6971,6 +7206,8 @@ _CB_DISPATCH = {
     "entrega_apagar": _cb_entrega_apagar,
     "entrega_voltar": _cb_entrega_voltar,
     "nfe_confirmar": _cb_nfe_confirmar,
+    "nfe_vincular": _cb_nfe_vincular,
+    "nfe_forn_corrigir": _cb_nfe_forn_corrigir,
     "nfe_cancelar": _cb_nfe_cancelar,
     "nfe_trocar_confirmar": _cb_nfe_trocar_confirmar,
     "parcelas_ver": _cb_parcelas_ver,

@@ -55,6 +55,18 @@ depende desse campo —, mas o "Favorecido" do comprovante **não** é fonte de 
 prestação de contas (0.18.1) usa o cadastro de fornecedores, e só imprime CNPJ/CPF com dígito
 verificador válido.
 
+**Causa e correção (0.20.0):** no banco todo, 19 de 52 comprovantes tinham a VII como
+favorecido. O comprovante do Mercado Pago não diz "De/Para": tem uma seção "Origem e destino"
+com dois nomes, a VII em cima — e o prompt só dizia "Favorecido:". Dizer "quem recebeu, nunca
+quem pagou" levou de 1 para 10 acertos em 18; descrever o layout ("o favorecido é sempre o
+segundo nome") levou a 17 — o 18º era um pagamento de verdade feito pelo ONR. E, como a IA
+nunca "resolve pra sempre", o programa trava: CNPJ nosso lido como recebedor conta como "não
+li", nunca como divergência.
+
+**Lição geral:** quando a IA erra sempre do mesmo jeito, olhar o documento real antes de mexer
+no prompt — aqui o problema era o layout, não a instrução. E medir com a API de verdade, nos
+documentos reais, antes e depois (o antigo também, pra separar melhora de sorte).
+
 ---
 
 ## 3. Unidade de medida com dígito quebra o regex de item

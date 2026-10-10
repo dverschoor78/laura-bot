@@ -15,11 +15,9 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > sozinhas com o uso do dia a dia não entram aqui (ex: fechar um pedido parcelado esperando
 > pagamento). Ver Dívida Técnica em `docs/ROADMAP.md`.
 
-0. **Fornecedor certo no pedido** *(Lição #17)* — Entrega 1 feita em 0.19.0; falta o Dennis
-   rodar Revisar → ✅ Gerar no **GGV03-032** e no **GGV03-024** (e eu conferir). **Entrega 2**
-   (aprovada): consertar a leitura do recebedor no comprovante PIX — 19 de 52 leram a VII —,
-   testar nos 19 antes de subir, e conferir fornecedor × recebedor no "Confirmar pagamento?" e
-   × emitente na chegada da NF-e, com a tela de divergência aprovada
+0. ✓ **Fornecedor certo no pedido** *(Lição #17)* — Entrega 1 em 0.19.0 (032 e 024 corrigidos
+   pelo Dennis no Revisar, conferidos); Entrega 2 em 0.20.0. Validar ao vivo: o próximo PIX e a
+   próxima NF-e mostram a linha do recebedor/emitente; numa divergência, a tela de escolha
 1. **Validar o contador de pedidos ao vivo** *(0.17.1, em produção desde 2026-10-09)* — o
    próximo pedido real da GGV03 tem que sair GGV03-040
 2. **GGV01-001 — código usado duas vezes e PDF na pasta da GGV03** *(novo, 2026-10-09)* —
@@ -60,6 +58,52 @@ Versionamento baseado em [Semantic Versioning](https://semver.org/).
 > (Proxmox do Eric), obra de teste GGV99, pasta automática para obra nova, trocar NF-e
 > vinculada errada, reenvio de arquivo já recebido, `Restart=always`, correção manual do
 > comprovante PIX e da parcela, mais de uma NF-e por pedido — ver entradas abaixo.
+
+---
+
+## [0.20.0] — Recebedor do PIX e emitente da NF-e conferidos com o fornecedor (Entrega 2) — 2026-10-10
+
+### Motivação
+
+Ideia do Dennis: a Laura confrontar o fornecedor do pedido com quem recebeu o PIX e, se
+divergir, perguntar qual é o certo. Teria pego o GGV03-024 — mas não o 032, porque em 19 de 52
+comprovantes a IA lia a própria VII como favorecido. Por isso, primeiro a leitura.
+
+### Mudado
+
+- **Leitura do recebedor no comprovante PIX** (prompt): o favorecido é quem recebeu; no
+  comprovante do Mercado Pago, a seção "Origem e destino" mostra dois nomes e o favorecido é
+  sempre o segundo; VII e DeltaD sempre pagam, nunca são o favorecido; CPF mascarado é copiado
+  com os asteriscos. Testado com a API de verdade (Haiku 4.5, o de produção), nos comprovantes
+  reais: dos 18 que falhavam (1 sem arquivo), o prompt antigo acertou 1 e o novo 17 — o 18º
+  (GGV03-033) leu certo um pagamento feito pelo ONR para um pedido do Registro de Imóveis, uma
+  divergência de verdade; os 6 que já acertavam continuaram certos.
+
+### Adicionado
+
+- **"Confirmar pagamento?" confere o recebedor** com o fornecedor do pedido: "Recebedor: X ✓",
+  "mesma empresa, outra filial" ou "não consegui ler — confira no comprovante" (não trava). PIX
+  para outra empresa vira a tela de escolha aprovada pelo Dennis: "🔁 X — corrigir o pedido"
+  (o recebedor passa a ser o fornecedor, pela revisão do Revisar, e a confirmação volta já
+  conferida), "📌 Y — manter (pago a terceiro)" (registra o pagamento), "✏️ Corrigir dados do
+  comprovante" e "↩️ Voltar" (à lista de pedidos — o pedido errado é um motivo comum).
+- **A mesma conferência na chegada da NF-e**, antes de vincular: emitente que confere vincula
+  com a linha "Emitente: X ✓"; de outra empresa abre a escolha ("corrigir o pedido" troca o
+  fornecedor e vincula; "manter" vincula assim mesmo — ex: NF-e do cartório no CPF do oficial).
+- Uma regra só para os três lugares (`_situacao_documento()`: recebedor do PIX, emitente da NF-e
+  e a conferência da NF-e no Revisar da 0.19.0): só diverge com prova — CNPJ/CPF válido
+  diferente, ou mascarado com dígitos que não batem; sem documento legível, nome diferente não
+  alarma; CNPJ nosso ali é leitura errada. Botão antigo não age no escuro: comprovante já
+  registrado ou NF-e já vinculada não trocam o fornecedor.
+
+### Testado
+
+Cópia do banco de produção: a regra com os casos reais (Blum × B&C, Costa Ferro filial, VII lida,
+CPF mascarado do Valdir, Diniz mascarado, Junta com CNPJ mal lido, ONR × Registro de Imóveis);
+telas do PIX (confere, não leu, divergência, corrigir → confirmação conferida, manter, botão
+antigo depois do pagamento) e da NF-e (divergência sem vincular, manter, confere, VII lida,
+corrigir → troca + vínculo, botão antigo). Regressão: conciliação, NF-e, bloqueio, exclusão,
+numeração, fornecedor e datas passando.
 
 ---
 
