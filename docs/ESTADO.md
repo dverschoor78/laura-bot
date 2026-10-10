@@ -2321,8 +2321,11 @@ da lista abaixo):
 - **Fornecedor certo no pedido — Entrega 2** (aprovada): consertar a leitura do recebedor no
   comprovante PIX (19 de 52 leram a VII), testar nos 19 antes de subir, e conferir fornecedor ×
   recebedor no "Confirmar pagamento?" e × emitente na chegada da NF-e
-- **GGV03-004** — o "NF-e" vinculado à taxa do ONR é o documento da compra do terreno (R$ 888 mil,
-  Agropecuária Florentia): perguntado ao Dennis se foi de propósito, sem resposta ainda
+- **GGV03-004** — o "NF-e 163.814" vinculado à taxa do ONR (R$ 83,39) é a **certidão da matrícula
+  39.394** (lote 29, quadra 06), o que a taxa comprou. A IA leu como NF-e: "163.814" é o número do
+  protocolo, a "emitente" Agropecuária Florentia é a antiga dona do lote, e "R$ 888.000" é leitura
+  errada de R$ 88.000 (preço do lote). Decidir com o Dennis: deixar ou tirar do lugar de nota
+  fiscal (na prestação de contas aparece como "NF-e 163.814")
 - Arquivos arquivados com a data do processamento por causa da Lição #16 (ex: FUNREJUS de 10/09
   como `2026-09-11 …`) — renomear só se o Dennis quiser
 - **GGV02** — decidir o arquivamento (item 4 do ROADMAP): já há pedido fora do OneDrive
